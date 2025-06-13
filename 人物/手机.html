@@ -8688,20 +8688,28 @@
             // 多种方式确保事件绑定成功
             // 方式1: DOMContentLoaded
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', initGroupChatFeature);
+                document.addEventListener('DOMContentLoaded', function() {
+                    initGroupChatFeature();
+                    loadGroupsFromStorage(); // 加载保存的群聊
+                });
             } else {
                 // 方式2: 如果DOM已经加载完成，直接执行
                 initGroupChatFeature();
+                loadGroupsFromStorage(); // 加载保存的群聊
             }
             
             // 方式3: 延迟执行，确保页面完全加载
             setTimeout(function() {
                 initGroupChatFeature();
+                loadGroupsFromStorage(); // 加载保存的群聊
             }, 1000);
             
             // 方式4: 在页面显示时重新绑定事件
             function reinitGroupChat() {
-                setTimeout(initGroupChatFeature, 500);
+                setTimeout(function() {
+                    initGroupChatFeature();
+                    loadGroupsFromStorage(); // 加载保存的群聊
+                }, 500);
             }
             
             // 添加全局测试函数，便于调试
@@ -9494,16 +9502,25 @@
                 
                 // 创建头像HTML
                 let avatarHTML = '';
-                if (groupData.avatar.type === 'preset') {
+                console.log('联系人列表-群聊头像数据:', groupData.avatar);
+                
+                if (groupData.avatar && groupData.avatar.type === 'preset' && groupData.avatar.gradient) {
                     const gradient = groupData.avatar.gradient;
                     avatarHTML = `
                         <div class="QQ_home_head" style="background: linear-gradient(135deg, ${gradient.start}, ${gradient.end}); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">
-                            ${groupData.avatar.text}
+                            ${groupData.avatar.text || '群'}
                         </div>
                     `;
-                } else if (groupData.avatar.type === 'upload') {
+                } else if (groupData.avatar && groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
                     avatarHTML = `
                         <div class="QQ_home_head" style="background-image: url('${groupData.avatar.imageData}'); background-size: cover; background-position: center;">
+                        </div>
+                    `;
+                } else {
+                    // 使用默认蓝色渐变头像
+                    avatarHTML = `
+                        <div class="QQ_home_head" style="background: linear-gradient(135deg, #199AFF, #0066CC); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">
+                            群
                         </div>
                     `;
                 }
@@ -9515,8 +9532,12 @@
                 groupElement.setAttribute('data-group-id', groupData.id);
                 groupElement.innerHTML = `
                     ${avatarHTML}
-                    <div class="QQ_home_name">${groupData.name}</div>
-                    <div class="group-member-count">${groupData.members.length}人</div>
+                    <div style="width:100%;display:grid;grid-template-columns:1fr auto;grid-template-rows:1fr 1fr;row-gap:4px">
+                        <span class="QQ_home_name"><strong>${groupData.name}</strong></span>
+                        <span class="group-member-count" style="color:#626367;justify-self:end;font-size:12px">${groupData.members.length}人</span>
+                        <span class="QQ_home_lastmsg" style="color:#626367;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">群聊</span>
+                        <div class="QQ_home_usermsg_new" style="display:none"></div>
+                    </div>
                 `;
                 
                 // 添加点击事件
@@ -9532,7 +9553,7 @@
              * 改进的添加群聊到消息列表（支持自定义头像）
              */
             function addGroupToMessageList(groupData) {
-                const messagesContainer = document.getElementById('QQ_home_msgs');
+                const messagesContainer = document.getElementById('QQ_message_list_chars');
                 if (!messagesContainer) return;
                 
                 // 检查是否已存在
@@ -9541,16 +9562,25 @@
                 
                 // 创建头像HTML
                 let avatarHTML = '';
-                if (groupData.avatar.type === 'preset') {
+                console.log('消息列表-群聊头像数据:', groupData.avatar);
+                
+                if (groupData.avatar && groupData.avatar.type === 'preset' && groupData.avatar.gradient) {
                     const gradient = groupData.avatar.gradient;
                     avatarHTML = `
                         <div class="QQ_home_head" style="background: linear-gradient(135deg, ${gradient.start}, ${gradient.end}); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">
-                            ${groupData.avatar.text}
+                            ${groupData.avatar.text || '群'}
                         </div>
                     `;
-                } else if (groupData.avatar.type === 'upload') {
+                } else if (groupData.avatar && groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
                     avatarHTML = `
                         <div class="QQ_home_head" style="background-image: url('${groupData.avatar.imageData}'); background-size: cover; background-position: center;">
+                        </div>
+                    `;
+                } else {
+                    // 使用默认蓝色渐变头像
+                    avatarHTML = `
+                        <div class="QQ_home_head" style="background: linear-gradient(135deg, #199AFF, #0066CC); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">
+                            群
                         </div>
                     `;
                 }
@@ -9562,11 +9592,12 @@
                 messageElement.setAttribute('data-group-id', groupData.id);
                 messageElement.innerHTML = `
                     ${avatarHTML}
-                    <div class="QQ_home_msg">
-                        <div class="QQ_home_name">${groupData.name}</div>
-                        <div class="QQ_home_lastmsg">${groupData.lastMessage}</div>
+                    <div style="width:100%;display:grid;grid-template-columns:1fr auto;grid-template-rows:1fr 1fr;row-gap:4px">
+                        <span class="QQ_home_name"><strong>${groupData.name}</strong></span>
+                        <span class="QQ_home_lasttime" style="color:#626367;justify-self:end">${groupData.timestamp || '刚刚'}</span>
+                        <span class="QQ_home_lastmsg" style="color:#626367;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${groupData.lastMessage || '暂无消息'}</span>
+                        <div class="QQ_home_usermsg_new" style="display:none"></div>
                     </div>
-                    <div class="QQ_home_msgtime">${groupData.timestamp}</div>
                 `;
                 
                 // 添加点击事件
@@ -9582,20 +9613,102 @@
              * 切换到群聊界面
              */
             function switchToGroupChat(groupData) {
+                console.log('切换到群聊:', groupData.name);
+                console.log('群聊成员:', groupData.members);
+                
                 // 设置当前活跃的群聊
                 window.currentGroupChat = groupData;
                 
                 // 切换到聊天界面
                 QQ_Nav('chat');
                 
-                // 更新聊天界面的头部信息
-                updateChatHeader(groupData);
+                // 延迟更新，确保页面已经切换
+                setTimeout(() => {
+                    // 更新聊天界面的头部信息
+                    updateChatHeader(groupData);
+                    
+                    // 加载群聊消息历史
+                    loadGroupChatHistory(groupData.id);
+                    
+                    // 更新聊天区域的标题
+                    const chatUsername = document.getElementById('QQ_chat_username');
+                    if (chatUsername) {
+                        chatUsername.textContent = groupData.name;
+                    }
+                }, 100);
+            }
+            
+            /**
+             * 加载群聊消息历史
+             */
+            function loadGroupChatHistory(groupId) {
+                console.log('加载群聊消息历史:', groupId);
                 
-                // 加载群聊消息历史
-                loadGroupChatHistory(groupData.id);
+                try {
+                    // 从本地存储加载消息历史
+                    const messages = JSON.parse(localStorage.getItem(`group_messages_${groupId}`) || '[]');
+                    console.log('找到历史消息:', messages.length, '条');
+                    
+                    // 清空当前聊天区域
+                    const msgContent = document.querySelector('.msgcontent');
+                    if (msgContent) {
+                        msgContent.innerHTML = '';
+                        
+                        // 如果有历史消息，显示它们
+                        messages.forEach(message => {
+                            displayGroupMessage(message);
+                        });
+                        
+                        // 滚动到底部
+                        msgContent.scrollTop = msgContent.scrollHeight;
+                    }
+                    
+                    if (messages.length === 0) {
+                        // 如果没有历史消息，显示欢迎信息
+                        if (msgContent && window.currentGroupChat) {
+                            const welcomeMsg = document.createElement('div');
+                            welcomeMsg.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px;';
+                            welcomeMsg.innerHTML = `
+                                <p>欢迎来到群聊 "${window.currentGroupChat.name}"</p>
+                                <p>群成员: ${window.currentGroupChat.members.join(', ')}</p>
+                                <p>开始聊天吧！</p>
+                            `;
+                            msgContent.appendChild(welcomeMsg);
+                        }
+                    }
+                } catch (error) {
+                    console.error('加载群聊消息历史失败:', error);
+                }
+            }
+            
+            /**
+             * 显示群聊消息
+             */
+            function displayGroupMessage(message) {
+                const msgContent = document.querySelector('.msgcontent');
+                if (!msgContent) return;
                 
-                console.log('切换到群聊:', groupData.name);
-                console.log('群聊成员:', groupData.members);
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'QQ_chat_msgdiv';
+                messageDiv.setAttribute('data-name', message.sender);
+                messageDiv.style.cssText = 'margin: 10px 0; padding: 8px; background: #f5f5f5; border-radius: 8px;';
+                
+                const senderSpan = document.createElement('span');
+                senderSpan.style.cssText = 'font-weight: bold; color: #333; margin-right: 8px;';
+                senderSpan.textContent = message.sender + ':';
+                
+                const contentSpan = document.createElement('span');
+                contentSpan.textContent = message.content;
+                
+                const timeSpan = document.createElement('span');
+                timeSpan.style.cssText = 'font-size: 12px; color: #999; margin-left: 8px;';
+                timeSpan.textContent = message.timestamp || new Date().toLocaleTimeString();
+                
+                messageDiv.appendChild(senderSpan);
+                messageDiv.appendChild(contentSpan);
+                messageDiv.appendChild(timeSpan);
+                
+                msgContent.appendChild(messageDiv);
             }
             
             /**
@@ -9631,10 +9744,78 @@
              * 更新聊天界面头部信息
              */
             function updateChatHeader(groupData) {
+                console.log('更新聊天界面头部信息:', groupData);
+                
+                // 查找聊天界面的头部元素
+                const chatHeader = document.querySelector('#QQ_chat_username')?.closest('div') || 
+                                  document.querySelector('.QQ_chat_head') || 
+                                  document.querySelector('#QQ_chat_head');
+                console.log('聊天头部元素:', chatHeader);
+                
+                if (!chatHeader) {
+                    console.error('未找到聊天头部元素，尝试创建头部');
+                    // 如果找不到头部，尝试在页面顶部创建一个
+                    const chatPage = document.querySelector('.QQ_chat_page[style*="display:block"], .QQ_chat_page:not([style*="display:none"])');
+                    if (chatPage) {
+                        const headerDiv = document.createElement('div');
+                        headerDiv.className = 'QQ_chat_head group-chat-header';
+                        headerDiv.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #fff; z-index: 1000; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid #eee;';
+                        
+                        // 创建头像
+                        const avatar = document.createElement('div');
+                        avatar.className = 'QQ_home_head';
+                        avatar.style.cssText = 'width: 40px; height: 40px; border-radius: 50%; margin-right: 10px;';
+                        
+                        // 创建名称和信息容器
+                        const infoDiv = document.createElement('div');
+                        infoDiv.style.cssText = 'flex: 1;';
+                        
+                        const nameDiv = document.createElement('div');
+                        nameDiv.className = 'QQ_home_name';
+                        nameDiv.style.cssText = 'font-size: 16px; font-weight: bold; color: #333;';
+                        nameDiv.textContent = groupData.name;
+                        
+                        const msgDiv = document.createElement('div');
+                        msgDiv.className = 'QQ_home_lastmsg';
+                        msgDiv.style.cssText = 'font-size: 12px; color: #666; margin-top: 2px;';
+                        msgDiv.textContent = `群聊 · ${groupData.members.length}人`;
+                        
+                        infoDiv.appendChild(nameDiv);
+                        infoDiv.appendChild(msgDiv);
+                        
+                        headerDiv.appendChild(avatar);
+                        headerDiv.appendChild(infoDiv);
+                        
+                        chatPage.insertBefore(headerDiv, chatPage.firstChild);
+                        
+                        // 更新聊天区域的上边距，避免被固定头部遮挡
+                        const msgContent = chatPage.querySelector('.msgcontent');
+                        if (msgContent) {
+                            msgContent.style.paddingTop = '70px';
+                        }
+                        
+                        // 重新设置chatHeader
+                        const updatedHeader = headerDiv;
+                        updateHeaderContent(updatedHeader, groupData);
+                        return;
+                    } else {
+                        console.error('也未找到聊天页面');
+                        return;
+                    }
+                }
+                
+                updateHeaderContent(chatHeader, groupData);
+            }
+            
+            /**
+             * 更新头部内容的通用函数
+             */
+            function updateHeaderContent(chatHeader, groupData) {
                 // 更新头像
-                const headerAvatar = document.querySelector('#QQ_chat_head .QQ_home_head');
+                const headerAvatar = chatHeader.querySelector('.QQ_home_head');
                 if (headerAvatar && groupData.avatar) {
-                    if (groupData.avatar.type === 'preset') {
+                    console.log('更新头像:', groupData.avatar);
+                    if (groupData.avatar.type === 'preset' && groupData.avatar.gradient) {
                         const gradient = groupData.avatar.gradient;
                         headerAvatar.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
                         headerAvatar.style.color = 'white';
@@ -9642,25 +9823,56 @@
                         headerAvatar.style.alignItems = 'center';
                         headerAvatar.style.justifyContent = 'center';
                         headerAvatar.style.fontWeight = 'bold';
-                        headerAvatar.textContent = groupData.avatar.text;
-                    } else if (groupData.avatar.type === 'upload') {
+                        headerAvatar.textContent = groupData.avatar.text || '群';
+                    } else if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
                         headerAvatar.style.backgroundImage = `url('${groupData.avatar.imageData}')`;
                         headerAvatar.style.backgroundSize = 'cover';
                         headerAvatar.style.backgroundPosition = 'center';
                         headerAvatar.textContent = '';
+                    } else {
+                        // 默认头像
+                        headerAvatar.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
+                        headerAvatar.style.color = 'white';
+                        headerAvatar.style.display = 'flex';
+                        headerAvatar.style.alignItems = 'center';
+                        headerAvatar.style.justifyContent = 'center';
+                        headerAvatar.style.fontWeight = 'bold';
+                        headerAvatar.textContent = '群';
                     }
                 }
                 
-                // 更新名称
-                const headerName = document.querySelector('#QQ_chat_head .QQ_home_name');
+                // 更新名称 - 查找多个可能的选择器
+                const headerName = chatHeader.querySelector('.QQ_home_name') || 
+                                  chatHeader.querySelector('.chat-title') || 
+                                  chatHeader.querySelector('h2') ||
+                                  chatHeader.querySelector('.name');
+                
                 if (headerName) {
+                    console.log('更新名称:', groupData.name);
                     headerName.textContent = groupData.name;
+                } else {
+                    console.error('未找到名称元素');
+                    // 如果找不到名称元素，尝试直接在头部添加
+                    const nameElement = document.createElement('div');
+                    nameElement.className = 'QQ_home_name';
+                    nameElement.textContent = groupData.name;
+                    nameElement.style.cssText = 'font-size: 16px; font-weight: bold; color: #333; margin-left: 10px;';
+                    chatHeader.appendChild(nameElement);
                 }
                 
                 // 添加群聊成员数显示
-                const headerMsg = document.querySelector('#QQ_chat_head .QQ_home_lastmsg');
+                const headerMsg = chatHeader.querySelector('.QQ_home_lastmsg') || 
+                                 chatHeader.querySelector('.chat-subtitle');
+                
                 if (headerMsg) {
                     headerMsg.textContent = `群聊 · ${groupData.members.length}人`;
+                } else {
+                    // 如果找不到副标题元素，创建一个
+                    const subtitleElement = document.createElement('div');
+                    subtitleElement.className = 'QQ_home_lastmsg';
+                    subtitleElement.textContent = `群聊 · ${groupData.members.length}人`;
+                    subtitleElement.style.cssText = 'font-size: 12px; color: #666; margin-left: 10px;';
+                    chatHeader.appendChild(subtitleElement);
                 }
             }
             
