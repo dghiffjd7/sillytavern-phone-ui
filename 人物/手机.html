@@ -15,7 +15,8 @@
                 /* background-image: url("http://sharkpan.xyz/f/eWhZ/00017-2763077315.png"); */
                 background-size: cover;
                 background-repeat: no-repeat;
-                background-position: top center;
+                background-position: center center;
+                background-attachment: local;
                 display: flex;
                 flex-direction: column;
                 overflow-y: auto;
@@ -817,10 +818,12 @@
                 width: 100%;
                 position: relative;
                 background-size: cover;
-                background-position: top center;
+                background-position: center center;
                 background-repeat: no-repeat;
                 background-image: url("http://sharkpan.xyz/f/6osR/00005-660646865.png");
                 box-sizing: border-box;
+                /* 确保壁纸填满整个界面 */
+                background-attachment: local;
             }
             .dibu {
                 position: absolute;
@@ -4245,8 +4248,8 @@
                     const $activeChatPage = $(".QQ_chat_page:visible").last();
                     if ($activeChatPage.length) {
                         const activePageName = $activeChatPage.attr("data-name");
-                        if (activePageName && activePageName !== targetName) {
-                            console.warn(`🔧 修正消息目标：从 "${targetName}" → "${activePageName}"`);
+                        if (activePageName) {
+                            console.log(`🎯 使用活跃页面作为目标：${activePageName}`);
                             targetName = activePageName;
                         }
                     }
@@ -4283,8 +4286,16 @@
                             content: SpecialHtml,
                         });
                         name = $container.attr("data-name") || "未知用户";
+                        
+                        // 🚨 重要：强制使用 targetName 确保消息发送到正确目标
+                        if (targetName && targetName !== name) {
+                            console.warn(`⚠️ 修正消息目标：容器显示 "${name}"，实际目标 "${targetName}"`);
+                            name = targetName;
+                        }
+                        
                         console.log(`🔍 发送消息调试信息:`);
-                        console.log(`- 当前容器 data-name: ${name}`);
+                        console.log(`- 当前容器 data-name: ${$container.attr("data-name")}`);
+                        console.log(`- 最终发送目标: ${name}`);
                         console.log(`- 发送内容: ${content}`);
                         console.log(`- 是否为群聊: ${QQ_Groups.includes(name)}`);
                         console.log(`- 当前群聊列表: ${QQ_Groups.join(', ')}`);
@@ -4316,14 +4327,14 @@
                     console.log(`✅ 最终确认发送目标: ${name}`);
                     console.log(`缓存消息$:${QQ_CacheSendMsg}`);
                     if (QQ_Groups.includes(name)) {
-                        console.log(`发送群聊消息到: ${name}, 内容: ${content}`);
+                        console.log(`✅ 发送群聊消息到: ${name}, 内容: ${content}`);
                         
-                        // 为群聊添加更多上下文信息
+                        // 为群聊添加更多上下文信息，但限制在当前群聊
                         let groupContext = "";
                         if (QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].members) {
                             groupContext = `\n群聊成员: ${QQ_msgjson.群聊[name].members.join(", ")}`;
                             
-                            // 添加最近几条群聊消息作为上下文
+                            // 添加最近几条群聊消息作为上下文，只包含当前群聊的消息
                             if (QQ_msgjson.群聊[name].msgs && QQ_msgjson.群聊[name].msgs.length > 0) {
                                 const recentMsgs = QQ_msgjson.群聊[name].msgs.slice(-3); // 最后3条消息
                                 groupContext += `\n最近聊天记录: ${recentMsgs.join("; ")}`;
@@ -4355,36 +4366,23 @@
                     QQ_CacheSendMsg = "";
                     if (value) {
                         value += `\n${Request}`;
-                        const namevalue = QQ_GetValueName(value);
-                        if (namevalue) {
-                            for (const match of namevalue) {
-                                let localname = match.name;
-                                let localmsg = match.value;
-                                if (QQ_Groups.includes(localname)) {
-                                    //type = '群聊';
-                                    QQ_msgjson.群聊[localname] =
-                                        QQ_msgjson.群聊[localname] || {};
-                                    QQ_msgjson.群聊[localname].msgs =
-                                        QQ_msgjson.群聊[localname].msgs || [];
-                                    QQ_msgjson.群聊[localname].msgs.push(
-                                        `${UserName}--${localmsg}`,
-                                    );
-                                    //console.log(`加入自己发的群聊消息: ${UserName}--${localmsg}`);
-                                    User_LastMsgMap.群聊[localname] =
-                                        `${UserName}--${localmsg}`;
-                                } else {
-                                    const key = `${UserName}和${localname}的聊天`;
-                                    QQ_msgjson.私聊[key] =
-                                        QQ_msgjson.私聊[key] || [];
-                                    QQ_msgjson.私聊[key].push(
-                                        `${UserName}--${localmsg}`,
-                                    );
-                                    console.log(
-                                        `加入自己发的私聊消息: ${UserName}--${localmsg}`,
-                                    );
-                                    User_LastMsgMap.私聊[localname] =
-                                        `${UserName}--${localmsg}`;
-                                }
+                        // 🚨 重要：直接使用确定的目标名称，不依赖解析结果
+                        if (content) {
+                            if (QQ_Groups.includes(name)) {
+                                // 群聊消息：确保只存储到目标群聊
+                                console.log(`📝 存储群聊消息到: ${name}`);
+                                QQ_msgjson.群聊[name] = QQ_msgjson.群聊[name] || {};
+                                QQ_msgjson.群聊[name].msgs = QQ_msgjson.群聊[name].msgs || [];
+                                QQ_msgjson.群聊[name].msgs.push(`${UserName}--${content}`);
+                                User_LastMsgMap.群聊[name] = `${UserName}--${content}`;
+                                console.log(`✅ 群聊消息已存储到: ${name}`);
+                            } else {
+                                // 私聊消息：存储到对应的私聊记录
+                                const key = `${UserName}和${name}的聊天`;
+                                QQ_msgjson.私聊[key] = QQ_msgjson.私聊[key] || [];
+                                QQ_msgjson.私聊[key].push(`${UserName}--${content}`);
+                                console.log(`📝 存储私聊消息: ${UserName}--${content}`);
+                                User_LastMsgMap.私聊[name] = `${UserName}--${content}`;
                             }
                         }
                     } else {
@@ -8929,6 +8927,10 @@
              * 初始化分组功能
              */
             function initContactGroups() {
+                // 确保 contactGroups 已初始化
+                if (!Array.isArray(contactGroups)) {
+                    contactGroups = [];
+                }
                 loadGroupsFromStorage();
                 renderContactGroups();
                 initGroupDragAndDrop();
@@ -9411,9 +9413,15 @@
                     const stored = localStorage.getItem('contact_groups');
                     if (stored) {
                         contactGroups = JSON.parse(stored);
+                    } else {
+                        contactGroups = [];
                     }
                 } catch (error) {
                     console.error('加载分组数据失败:', error);
+                    contactGroups = [];
+                }
+                // 确保contactGroups是数组
+                if (!Array.isArray(contactGroups)) {
                     contactGroups = [];
                 }
             }
@@ -10535,11 +10543,17 @@
             
             // 将函数绑定到全局
             window.toggleGroupMemberList = toggleGroupMemberList;
-            window.openContactGroupModal = openContactGroupModal;
             window.showNewGroupModal = showNewGroupModal;
             window.closeNewGroupModal = closeNewGroupModal;
             window.createNewGroup = createNewGroup;
-            window.handleNewGroupKeydown = handleNewGroupKeydown;
+            
+            // 确保分组功能函数可用
+            if (typeof openContactGroupModal === 'function') {
+                window.openContactGroupModal = openContactGroupModal;
+            }
+            if (typeof handleNewGroupKeydown === 'function') {
+                window.handleNewGroupKeydown = handleNewGroupKeydown;
+            }
             
             // 调试：检查函数是否正确定义
             console.log('🔧 全局函数检查:');
