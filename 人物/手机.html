@@ -1503,19 +1503,129 @@
             .contact-item {
                 display: flex;
                 align-items: center;
-                padding: 8px 0;
-                border-bottom: 1px solid #f0f0f0;
+                padding: 12px 8px;
+                border-radius: 8px;
+                margin-bottom: 6px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                border: 2px solid transparent;
             }
             
             .contact-item:last-child {
-                border-bottom: none;
+                margin-bottom: 0;
+            }
+            
+            .contact-item:hover {
+                background-color: #f8f9fa;
+                transform: translateX(2px);
+            }
+            
+            .contact-item.selected {
+                background: linear-gradient(135deg, #199AFF 0%, #0066CC 100%);
+                color: white;
+                border-color: #0066CC;
+                box-shadow: 0 4px 12px rgba(25, 154, 255, 0.3);
+            }
+            
+            .contact-item.selected .contact-name {
+                color: white;
+                font-weight: 500;
+            }
+            
+            .contact-item.selected .contact-avatar {
+                border: 2px solid rgba(255, 255, 255, 0.3);
             }
             
             .contact-checkbox {
-                margin-right: 10px;
-                width: 16px;
-                height: 16px;
-                accent-color: #199AFF;
+                display: none; /* 隐藏原始复选框 */
+            }
+            
+            /* 群聊成员搜索框样式 */
+            .group-member-search {
+                position: relative;
+                margin-bottom: 15px;
+            }
+            
+            .group-search-input {
+                width: 100%;
+                padding: 10px 12px 10px 35px;
+                border: 2px solid #e9ecef;
+                border-radius: 8px;
+                font-size: 14px;
+                outline: none;
+                transition: border-color 0.2s;
+                box-sizing: border-box;
+                background-color: #f8f9fa;
+            }
+            
+            .group-search-input:focus {
+                border-color: #199AFF;
+                background-color: white;
+            }
+            
+            .group-search-icon {
+                position: absolute;
+                left: 10px;
+                top: 50%;
+                transform: translateY(-50%);
+                color: #666;
+                font-size: 14px;
+            }
+            
+            .group-search-clear {
+                position: absolute;
+                right: 10px;
+                top: 50%;
+                transform: translateY(-50%);
+                color: #999;
+                cursor: pointer;
+                font-size: 16px;
+                padding: 2px;
+                border-radius: 50%;
+                transition: all 0.2s;
+                display: none;
+            }
+            
+            .group-search-clear:hover {
+                background-color: #e9ecef;
+                color: #666;
+            }
+            
+            .group-search-clear.show {
+                display: block;
+            }
+            
+            /* 联系人列表容器 */
+            .contact-list-container {
+                max-height: 250px;
+                overflow-y: auto;
+                padding-right: 5px;
+            }
+            
+            .contact-list-container::-webkit-scrollbar {
+                width: 4px;
+            }
+            
+            .contact-list-container::-webkit-scrollbar-track {
+                background: #f1f1f1;
+                border-radius: 4px;
+            }
+            
+            .contact-list-container::-webkit-scrollbar-thumb {
+                background: #c1c1c1;
+                border-radius: 4px;
+            }
+            
+            .contact-list-container::-webkit-scrollbar-thumb:hover {
+                background: #a8a8a8;
+            }
+            
+            /* 无搜索结果提示 */
+            .no-results {
+                text-align: center;
+                color: #999;
+                padding: 20px;
+                font-size: 14px;
             }
             
             .contact-avatar {
@@ -7056,8 +7166,22 @@
                     </div>
                     <div class="group-members-section">
                         <div class="group-members-label">选择群成员</div>
-                        <div id="contact_list_for_group">
-                            <!-- 这里将动态加载联系人列表 -->
+                        <div class="group-member-search">
+                            <span class="group-search-icon">🔍</span>
+                            <input 
+                                type="text" 
+                                class="group-search-input" 
+                                id="group_member_search" 
+                                placeholder="搜索联系人..."
+                                oninput="filterGroupMembers()"
+                                onkeydown="handleGroupSearchKeydown(event)"
+                            >
+                            <span class="group-search-clear" id="group_search_clear" onclick="clearGroupSearch()">✕</span>
+                        </div>
+                        <div class="contact-list-container">
+                            <div id="contact_list_for_group">
+                                <!-- 这里将动态加载联系人列表 -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -7128,8 +7252,16 @@
                         // 加载联系人列表
                         loadContactsForGroup();
                         
-                        // 重置表单
+                        // 重置表单和搜索
                         document.getElementById('group_name_input').value = '';
+                        const searchInput = document.getElementById('group_member_search');
+                        if (searchInput) {
+                            searchInput.value = '';
+                        }
+                        const clearBtn = document.getElementById('group_search_clear');
+                        if (clearBtn) {
+                            clearBtn.classList.remove('show');
+                        }
                         updateConfirmButtonState();
                         
                         // 添加背景点击关闭功能
@@ -7212,12 +7344,15 @@
                     
                     const contactItem = document.createElement('div');
                     contactItem.className = 'contact-item';
+                    contactItem.setAttribute('data-contact-name', contactName);
+                    contactItem.setAttribute('data-contact-index', index);
+                    contactItem.onclick = () => toggleContactSelection(contactItem);
+                    
                     contactItem.innerHTML = `
                         <input 
                             type="checkbox" 
                             id="contact_${index}" 
                             class="contact-checkbox"
-                            onchange="updateConfirmButtonState()"
                             data-contact-name="${contactName}"
                         >
                         <div class="contact-avatar" style="${avatarStyle}">
@@ -7234,17 +7369,119 @@
             }
             
             /**
+             * 切换联系人选择状态
+             */
+            function toggleContactSelection(contactItem) {
+                const checkbox = contactItem.querySelector('.contact-checkbox');
+                
+                if (contactItem.classList.contains('selected')) {
+                    // 取消选择
+                    contactItem.classList.remove('selected');
+                    checkbox.checked = false;
+                } else {
+                    // 选择
+                    contactItem.classList.add('selected');
+                    checkbox.checked = true;
+                }
+                
+                updateConfirmButtonState();
+            }
+            
+            /**
+             * 群聊成员搜索功能
+             */
+            function filterGroupMembers() {
+                const searchInput = document.getElementById('group_member_search');
+                const clearBtn = document.getElementById('group_search_clear');
+                const contactItems = document.querySelectorAll('#contact_list_for_group .contact-item');
+                const contactListContainer = document.getElementById('contact_list_for_group');
+                
+                if (!searchInput || !contactItems.length) return;
+                
+                const searchTerm = searchInput.value.toLowerCase().trim();
+                
+                // 显示/隐藏清除按钮
+                if (searchTerm.length > 0) {
+                    clearBtn.classList.add('show');
+                } else {
+                    clearBtn.classList.remove('show');
+                }
+                
+                let visibleCount = 0;
+                
+                contactItems.forEach(item => {
+                    const contactName = item.getAttribute('data-contact-name').toLowerCase();
+                    
+                    if (contactName.includes(searchTerm)) {
+                        item.style.display = 'flex';
+                        visibleCount++;
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+                
+                // 显示无搜索结果提示
+                let noResultsDiv = contactListContainer.querySelector('.no-results');
+                if (visibleCount === 0 && searchTerm.length > 0) {
+                    if (!noResultsDiv) {
+                        noResultsDiv = document.createElement('div');
+                        noResultsDiv.className = 'no-results';
+                        noResultsDiv.textContent = '未找到匹配的联系人';
+                        contactListContainer.appendChild(noResultsDiv);
+                    }
+                    noResultsDiv.style.display = 'block';
+                } else if (noResultsDiv) {
+                    noResultsDiv.style.display = 'none';
+                }
+            }
+            
+            /**
+             * 清除群聊成员搜索
+             */
+            function clearGroupSearch() {
+                const searchInput = document.getElementById('group_member_search');
+                const clearBtn = document.getElementById('group_search_clear');
+                
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchInput.focus();
+                }
+                
+                if (clearBtn) {
+                    clearBtn.classList.remove('show');
+                }
+                
+                // 重新过滤（显示所有）
+                filterGroupMembers();
+            }
+            
+            /**
+             * 处理群聊搜索键盘事件
+             */
+            function handleGroupSearchKeydown(event) {
+                if (event.key === 'Escape') {
+                    clearGroupSearch();
+                } else if (event.key === 'Enter') {
+                    // 如果只有一个可见的联系人，直接选择它
+                    const visibleItems = document.querySelectorAll('#contact_list_for_group .contact-item[style*="flex"], #contact_list_for_group .contact-item:not([style*="none"])');
+                    if (visibleItems.length === 1) {
+                        toggleContactSelection(visibleItems[0]);
+                    }
+                }
+            }
+            
+            /**
              * 更新确认按钮状态
              */
             function updateConfirmButtonState() {
                 const confirmBtn = document.getElementById('group_confirm_btn');
                 const groupNameInput = document.getElementById('group_name_input');
-                const checkboxes = document.querySelectorAll('#contact_list_for_group .contact-checkbox:checked');
+                const selectedItems = document.querySelectorAll('#contact_list_for_group .contact-item.selected');
                 
                 if (!confirmBtn || !groupNameInput) return;
                 
                 const hasName = groupNameInput.value.trim().length > 0;
-                const hasMembers = checkboxes.length > 0;
+                const hasMembers = selectedItems.length > 0;
                 
                 confirmBtn.disabled = !(hasName && hasMembers);
             }
@@ -7254,12 +7491,12 @@
              */
             function createGroupChat() {
                 const groupNameInput = document.getElementById('group_name_input');
-                const checkboxes = document.querySelectorAll('#contact_list_for_group .contact-checkbox:checked');
+                const selectedItems = document.querySelectorAll('#contact_list_for_group .contact-item.selected');
                 
                 if (!groupNameInput) return;
                 
                 const groupName = groupNameInput.value.trim();
-                const selectedMembers = Array.from(checkboxes).map(cb => cb.getAttribute('data-contact-name'));
+                const selectedMembers = Array.from(selectedItems).map(item => item.getAttribute('data-contact-name'));
                 
                 if (!groupName || selectedMembers.length === 0) {
                     alert('请填写群聊名称并选择至少一个群成员');
