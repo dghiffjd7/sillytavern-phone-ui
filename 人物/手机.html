@@ -9372,17 +9372,17 @@
                     const gradient = selectedAvatarData.gradient;
                     previewElement.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
                     previewElement.style.backgroundImage = 'none';
-                    previewElement.innerHTML = `<div class="default-group-avatar">${selectedAvatarData.text}</div>`;
-                    textElement.textContent = '已设置预设头像';
-                } else if (selectedAvatarData.type === 'upload') {
-                    // 上传的头像
-                    previewElement.style.background = 'none';
-                    previewElement.style.backgroundImage = `url('${selectedAvatarData.imageData}')`;
-                    previewElement.style.backgroundSize = 'cover';
-                    previewElement.style.backgroundPosition = 'center';
-                    previewElement.innerHTML = '';
-                    textElement.textContent = '已设置自定义头像';
-                }
+                                            previewElement.innerHTML = `<div class="default-group-avatar">${window.selectedAvatarData.text}</div>`;
+                        textElement.textContent = '已设置预设头像';
+                    } else if (window.selectedAvatarData.type === 'upload') {
+                        // 上传的头像
+                        previewElement.style.background = 'none';
+                        previewElement.style.backgroundImage = `url('${window.selectedAvatarData.imageData}')`;
+                        previewElement.style.backgroundSize = 'cover';
+                        previewElement.style.backgroundPosition = 'center';
+                        previewElement.innerHTML = '';
+                        textElement.textContent = '已设置自定义头像';
+                    }
                 
                 console.log('头像设置成功，关闭选择器');
                 closeAvatarSelector();
@@ -10018,6 +10018,222 @@
                 });
             }
             
+        </script>
+        
+        <!-- 修复按钮点击问题：将关键函数放在单独的script标签中 -->
+        <script>
+            // 确保全局变量可用
+            window.selectedAvatarData = null;
+            
+            // 确保这些函数在全局作用域中可用
+            window.confirmAvatarSelection = function() {
+                console.log('🔵 confirmAvatarSelection 被调用！');
+                console.log('当前选中的头像数据:', window.selectedAvatarData);
+                
+                // 如果没有选择头像，使用默认头像
+                if (!window.selectedAvatarData) {
+                    window.selectedAvatarData = {
+                        type: 'preset',
+                        gradient: { start: '#199AFF', end: '#0066CC' },
+                        text: '群'
+                    };
+                    console.log('使用默认头像:', selectedAvatarData);
+                }
+                
+                const previewElement = document.getElementById('group_avatar_preview');
+                const textElement = document.querySelector('.group-avatar-text');
+                
+                if (!previewElement || !textElement) {
+                    console.error('找不到头像预览元素');
+                    alert('找不到头像预览元素，请检查页面结构');
+                    return;
+                }
+                
+                try {
+                    if (window.selectedAvatarData.type === 'preset') {
+                        // 预设头像
+                        const gradient = window.selectedAvatarData.gradient;
+                        previewElement.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
+                        previewElement.style.backgroundImage = 'none';
+                        previewElement.innerHTML = `<div class="default-group-avatar">${selectedAvatarData.text}</div>`;
+                        textElement.textContent = '已设置预设头像';
+                    } else if (selectedAvatarData.type === 'upload') {
+                        // 上传的头像
+                        previewElement.style.background = 'none';
+                        previewElement.style.backgroundImage = `url('${selectedAvatarData.imageData}')`;
+                        previewElement.style.backgroundSize = 'cover';
+                        previewElement.style.backgroundPosition = 'center';
+                        previewElement.innerHTML = '';
+                        textElement.textContent = '已设置自定义头像';
+                    }
+                    
+                    console.log('头像设置成功，关闭选择器');
+                    
+                    // 关闭头像选择器
+                    const modal = document.getElementById('avatar_selector_modal');
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                    
+                    alert('头像设置成功！');
+                    
+                } catch (error) {
+                    console.error('头像设置时出错:', error);
+                    alert('头像设置失败：' + error.message);
+                }
+            };
+            
+            window.createGroupChat = function() {
+                console.log('🔵 createGroupChat 被调用！');
+                
+                try {
+                    const nameInput = document.getElementById('group_name_input');
+                    if (!nameInput) {
+                        console.error('找不到群聊名称输入框');
+                        alert('系统错误：找不到群聊名称输入框');
+                        return;
+                    }
+                    
+                    const groupName = nameInput.value.trim();
+                    console.log('群聊名称:', groupName);
+                    
+                    if (!groupName) {
+                        alert('请输入群聊名称');
+                        return;
+                    }
+                    
+                    // 获取选中的成员
+                    const selectedContacts = Array.from(document.querySelectorAll('#contact_list_for_group .contact-item.selected'));
+                    
+                    console.log('=== 群聊创建调试信息 ===');
+                    console.log('所有联系人项目:', document.querySelectorAll('#contact_list_for_group .contact-item'));
+                    console.log('选中的联系人项目:', selectedContacts);
+                    console.log('选中的联系人数量:', selectedContacts.length);
+                    
+                    if (selectedContacts.length === 0) {
+                        alert('请至少选择一个群成员');
+                        return;
+                    }
+                    
+                    // 禁用创建按钮防止重复点击
+                    const confirmBtn = document.getElementById('group_confirm_btn');
+                    if (confirmBtn) {
+                        confirmBtn.disabled = true;
+                        confirmBtn.textContent = '创建中...';
+                    }
+                    
+                    // 创建群聊数据
+                    const groupId = 'group_' + Date.now();
+                    const members = selectedContacts.map(contact => {
+                        const nameElement = contact.querySelector('.contact-name');
+                        return nameElement ? nameElement.textContent.trim() : '';
+                    }).filter(name => name);
+                    
+                    // 获取头像数据
+                    let avatarData = null;
+                    if (window.selectedAvatarData) {
+                        avatarData = window.selectedAvatarData;
+                    } else {
+                        // 使用默认渐变头像
+                        avatarData = {
+                            type: 'preset',
+                            gradient: { start: '#199AFF', end: '#0066CC' },
+                            text: '群'
+                        };
+                    }
+                    
+                    const groupData = {
+                        id: groupId,
+                        name: groupName,
+                        members: members,
+                        avatar: avatarData,
+                        type: 'group',
+                        lastMessage: '群聊已创建',
+                        timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
+                        unread: 0
+                    };
+                    
+                    console.log('群聊数据创建完成:', groupData);
+                    
+                    // 保存群聊数据（如果函数存在）
+                    if (typeof saveGroupToStorage === 'function') {
+                        saveGroupToStorage(groupData);
+                    } else {
+                        console.warn('saveGroupToStorage 函数不存在，数据未保存');
+                    }
+                    
+                    // 添加到联系人列表和消息列表（如果函数存在）
+                    if (typeof addGroupToContactList === 'function') {
+                        addGroupToContactList(groupData);
+                    } else {
+                        console.warn('addGroupToContactList 函数不存在');
+                    }
+                    
+                    if (typeof addGroupToMessageList === 'function') {
+                        addGroupToMessageList(groupData);
+                    } else {
+                        console.warn('addGroupToMessageList 函数不存在');
+                    }
+                    
+                    // 关闭弹窗
+                    const modal = document.getElementById('group_create_modal');
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                    
+                    // 重置表单
+                    nameInput.value = '';
+                    window.selectedAvatarData = null;
+                    const preview = document.getElementById('group_avatar_preview');
+                    const text = document.querySelector('.group-avatar-text');
+                    if (preview && text) {
+                        preview.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
+                        preview.innerHTML = '<div class="default-group-avatar">+</div>';
+                        text.textContent = '点击设置头像';
+                    }
+                    
+                    console.log('群聊创建成功:', groupData);
+                    alert(`群聊"${groupName}"创建成功！\n成员：${members.join(', ')}`);
+                    
+                    // 恢复创建按钮状态
+                    if (confirmBtn) {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = '创建群聊';
+                    }
+                    
+                } catch (error) {
+                    console.error('创建群聊时出错:', error);
+                    alert('创建群聊失败：' + error.message);
+                    
+                    // 恢复按钮状态
+                    const confirmBtn = document.getElementById('group_confirm_btn');
+                    if (confirmBtn) {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = '创建群聊';
+                    }
+                }
+            };
+            
+            // 调试：检查函数是否正确定义
+            console.log('🔧 全局函数检查:');
+            console.log('- confirmAvatarSelection:', typeof window.confirmAvatarSelection);
+            console.log('- createGroupChat:', typeof window.createGroupChat);
+            
+            // 调试：检查按钮是否存在
+            setTimeout(() => {
+                const avatarBtn = document.getElementById('avatar_confirm_btn');
+                const groupBtn = document.getElementById('group_confirm_btn');
+                console.log('🔧 按钮检查:');
+                console.log('- avatar_confirm_btn:', avatarBtn ? '存在' : '不存在');
+                console.log('- group_confirm_btn:', groupBtn ? '存在' : '不存在');
+                
+                if (avatarBtn) {
+                    console.log('- avatar按钮onclick:', avatarBtn.getAttribute('onclick'));
+                }
+                if (groupBtn) {
+                    console.log('- group按钮onclick:', groupBtn.getAttribute('onclick'));
+                }
+            }, 1000);
         </script>
     </body>
 </html>
