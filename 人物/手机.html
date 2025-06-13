@@ -1845,6 +1845,7 @@
                             </div>
                         </div>
                         <div id="QQ_message_list_page" style="display: none; flex-direction: column; height: 100%;">
+                            <!-- 直接复制联系人页面的完整结构 -->
                             <div style="width: 100%; height: 30px"></div>
                             <div
                                 style="
@@ -1960,7 +1961,7 @@
                             </div>
                             <div style="width: 100%; height: 13px"></div>
                             <div id="QQ_message_list_chars" style="flex: 1; overflow-y: auto;">
-                                <!-- 消息联系人列表将在这里动态生成 -->
+                                <!-- 消息联系人列表，直接使用联系人页面的逻辑 -->
                             </div>
                         </div>
                         <div
@@ -3451,6 +3452,7 @@
                         $message_svg.css("fill", "#019aff");
                         $("#QQ_message_list_page").css('display','flex');
                         $("#App_QQ").css("background-color", "#eff3ff");
+                        // 每次切换到消息页面时都更新列表
                         QQ_UpdateMessageList();
                     } else if (page === "people") {
                         $people_svg.css("fill", "#019aff");
@@ -5265,12 +5267,18 @@
                 const $messageChars = $("#QQ_message_list_chars");
                 const $homeChars = $("#QQ_home_chars");
                 
-                $messageChars.find('.QQ_home_usermsg').remove();
+                // 清空消息页面的联系人列表
+                $messageChars.empty();
                 
+                // 直接复制联系人页面的完整内容
+                const $homeCharsClone = $homeChars.clone(true);
+                $messageChars.append($homeCharsClone.html());
+                
+                // 然后过滤，只显示有消息沟通过的联系人
                 const contactedUsers = [];
                 let firstContact = null;
                 
-                $('.QQ_home_usermsg').each(function() {
+                $messageChars.find('.QQ_home_usermsg').each(function() {
                     const $contact = $(this);
                     const name = $contact.attr('data-name');
                     const $newMsgBadge = $contact.find('.QQ_home_usermsg_new');
@@ -5278,20 +5286,20 @@
                     const lastMsg = $contact.find('.QQ_home_lastmsg').text().trim();
                     
                     if (!firstContact) {
-                        firstContact = $contact.clone(true);
+                        firstContact = $contact;
                     }
                     
-                    if (hasNewMessages || lastMsg) {
-                        contactedUsers.push($contact.clone(true));
+                    // 如果没有消息记录且没有未读消息，隐藏这个联系人
+                    if (!hasNewMessages && !lastMsg) {
+                        $contact.hide();
+                    } else {
+                        contactedUsers.push($contact);
                     }
                 });
                 
+                // 如果没有任何联系过的用户，显示第一个联系人
                 if (contactedUsers.length === 0 && firstContact) {
-                    $messageChars.append(firstContact);
-                } else {
-                    contactedUsers.forEach(function($contact) {
-                        $messageChars.append($contact);
-                    });
+                    firstContact.show();
                 }
             }
             function QQ_HideAllChat() {
@@ -5699,6 +5707,7 @@
                         ).text(LastTime);
                         QQ_SetHomeTips(name, NewMsgCount);
                         $msgContent.scrollTop($msgContent[0].scrollHeight);
+                        // 有新消息时更新消息列表
                         QQ_UpdateMessageList();
                     } catch (error) {
                         throw error;
@@ -5793,6 +5802,7 @@
                         } else {
                             $Tips.hide();
                         }
+                        // 群聊消息更新时也更新消息列表
                         QQ_UpdateMessageList();
                     } catch (error) {
                         assertIsError(error);
