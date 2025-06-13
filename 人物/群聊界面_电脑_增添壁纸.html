@@ -1,0 +1,5134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            background-color: transparent;
+        }
+
+        /* 主容器 */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            width: 450px; /* 调整宽度 */
+            margin-top: 20px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        /* 顶栏样式 */
+        .top-bar {
+            background: linear-gradient(to right, #87CEEB, #00BFFF);
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            color: white;
+            font-weight: 500;
+            font-size: clamp(13px, 3.8vw, 15px);
+            flex-shrink: 0;
+        }
+
+        .top-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .divider {
+            width: 1px;
+            height: clamp(16px, 5vw, 20px);
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .question-icon, .help-icon {
+            width: clamp(16px, 5vw, 20px);
+            height: clamp(16px, 5vw, 20px);
+            opacity: 1;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        .question-icon:hover, .help-icon:hover {
+            transform: scale(1.1);
+        }
+
+        .question-icon img, .help-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .question-icon img {
+            filter: brightness(0) invert(1);
+        }
+
+        .help-icon img {
+            filter: brightness(0) saturate(129%) invert(192%) sepia(85%)
+                    saturate(1498%) hue-rotate(194deg) brightness(139%) contrast(101%);
+        }
+
+        /* 聊天容器 */
+        .chat-container {
+            height: 700px; /* 再次调整高度 */
+            background-color: #ecf4f4;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* 消息列表容器 */
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            box-sizing: border-box;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+            min-height: 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* 隐藏 Webkit 浏览器的滚动条 */
+        .messages-container::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* 移除旧的滚动条样式 */
+        .messages-container::-webkit-scrollbar-track {
+            display: none;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb {
+            display: none;
+        }
+
+        /* 标题栏容器 */
+        .chat-header {
+            background: rgba(255, 255, 255, 0.85);
+            padding: clamp(4px, 1.5vw, 6px) clamp(8px, 3vw, 12px);
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            margin: 10px 10px 0 10px;
+            flex-shrink: 0;
+            cursor: pointer; /* 添加鼠标指针样式表明可点击 */
+            position: relative; /* 为弹窗定位提供参考点 */
+            transition: background-color 0.2s ease; /* 添加过渡效果 */
+        }
+
+        .chat-header:hover {
+            background: rgba(255, 255, 255, 0.95); /* 悬停时轻微变亮 */
+        }
+
+        /* New: Container for chat title and members button */
+        .chat-header-main {
+            display: flex;
+            align-items: center;
+            gap: 8px; /* Space between title and button */
+            flex-grow: 1; /* Allow it to take available space */
+            /* Clicks on this container (not on button/icons) should trigger status popup */
+        }
+
+        .group-members-button {
+            background: #FF0000; /* Bright red background */
+            border: 2px solid #000000; /* Solid black border */
+            color: #FFFFFF; /* White icon color */
+            font-size: 24px; /* Even larger icon */
+            cursor: pointer;
+            padding: 8px 12px; /* More padding */
+            line-height: 1;
+            border-radius: 5px;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+            /* margin-left: 8px; */ /* This is handled by JS, but can be here too */
+            z-index: 2000; /* Ensure it's on top of top-bar content */
+            display: inline-flex; /* Ensure proper display as a flex item */
+            align-items: center;
+            justify-content: center;
+        }
+
+        .group-members-button:hover {
+            background-color: #CC0000; /* Darker red hover */
+            border-color: #333333;
+        }
+
+        /* New: Group members dropdown */
+        .group-members-dropdown {
+            display: none; /* Initially hidden */
+            position: absolute;
+            /* top: calc(100% + 1px); */ /* Old: Relative to chat-header */
+            /* left: 10px; */ /* Old: Relative to chat-header */
+            /* right: 10px; */ /* Old: Relative to chat-header */
+            top: 100%; /* New: Relative to top-bar (covers full height of top-bar) */
+            left: 0; /* New: Align to the left of top-bar */
+            width: 250px; /* New: Set a fixed width or make it dynamic */
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 0 0 8px 8px; 
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            padding: 10px;
+            z-index: 1500; /* Increased z-index, ensure it's above top-bar and other elements */
+            max-height: 220px; 
+            overflow-y: auto;
+            animation: slideDown 0.3s ease-out;
+            transform-origin: top center;
+        }
+
+        .group-members-dropdown::-webkit-scrollbar {
+            width: 5px;
+        }
+        .group-members-dropdown::-webkit-scrollbar-thumb {
+            background: rgba(0,0,0,0.2);
+            border-radius: 3px;
+        }
+        .group-members-dropdown::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.05);
+        }
+
+        .group-member-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 8px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: background-color 0.2s ease;
+            margin-bottom: 4px; 
+        }
+
+        .group-member-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .group-member-item:hover {
+            background-color: rgba(0, 0, 0, 0.08);
+        }
+
+        .group-member-item img.avatar {
+            width: 30px; 
+            height: 30px;
+            border-radius: 50%;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+
+        .group-member-item .username {
+            font-size: 13px; 
+            color: #333;
+            font-weight: 500;
+        }
+
+        /* 状态栏弹窗 */
+        .status-popup {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            z-index: 100;
+            display: none;
+            margin: 0 10px;
+            animation: slideDown 0.3s ease-out;
+            transform-origin: top center;
+        }
+
+        @keyframes slideDown {
+            from { transform: scaleY(0); opacity: 0; }
+            to { transform: scaleY(1); opacity: 1; }
+        }
+
+        /* 状态栏内容布局 */
+        .status-content {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        /* 角色头像样式 */
+        .character-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #87CEEB; /* 浅蓝色边框 */
+            margin-right: 15px;
+        }
+
+        /* 角色信息区域 */
+        .character-info {
+            flex: 1;
+        }
+
+        .character-name {
+            font-weight: 600;
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .character-status {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* 状态指示器区域样式 */
+        .camera-status-section {
+            margin-top: 10px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            padding-top: 10px;
+        }
+
+        .camera-status-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        /* 摄像头状态指示器 */
+        .camera-status {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        
+        /* 分组状态样式 */
+        .camera-status-group {
+            margin-bottom: 15px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        }
+        
+        .status-controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        .camera-label {
+            font-size: 13px;
+            color: #555;
+        }
+
+        /* 状态指示器增强样式 */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 20px;
+            transition: all 0.2s ease;
+            background-color: rgba(255, 255, 255, 0.6);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            backdrop-filter: blur(4px);
+        }
+        
+        .status-indicator:hover {
+            background-color: rgba(255, 255, 255, 0.85);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+        }
+        
+        .status-indicator:active {
+            transform: translateY(0);
+        }
+        
+        /* 状态图标样式 */
+        .status-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
+            transition: fill 0.2s ease;
+        }
+        
+        /* 开启状态样式 */
+        .status-on {
+            background-color: rgba(76, 217, 100, 0.15);
+            border-color: rgba(76, 217, 100, 0.3);
+        }
+        
+        .status-on:hover {
+            background-color: rgba(76, 217, 100, 0.25);
+        }
+        
+        .status-on .status-icon {
+            fill: #4CD964;
+        }
+        
+        /* 关闭状态样式 */
+        .status-off {
+            background-color: rgba(255, 59, 48, 0.15);
+            border-color: rgba(255, 59, 48, 0.3);
+        }
+        
+        .status-off:hover {
+            background-color: rgba(255, 59, 48, 0.25);
+        }
+        
+        .status-off .status-icon {
+            fill: #FF3B30;
+        }
+        
+        /* 交互模块特殊样式 */
+        .camera-status:last-child .status-indicator {
+            min-width: 70px;
+            justify-content: center;
+        }
+
+        .status-text {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* 标题文字 */
+        .chat-header-title {
+            font-size: clamp(11px, 3vw, 12px);
+            color: #333;
+            font-weight: 600;
+        }
+
+        /* 右侧图标容器 */
+        .chat-header-icons {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        /* 心形图标 */
+        .heart-icon {
+            color: #8e8e93;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: clamp(16px, 5vw, 20px);
+            height: clamp(16px, 5vw, 20px);
+        }
+
+        .heart-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 消息图标 */
+        .message-icon {
+            color: #8e8e93;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: clamp(16px, 5vw, 20px);
+            height: clamp(16px, 5vw, 20px);
+        }
+
+        .message-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 问号图标点击动画 */
+        .question-icon {
+            cursor: pointer;
+            transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .question-icon:active {
+            transform: scale(0.85);
+        }
+
+        .question-icon img {
+            transition: filter 0.2s ease;
+        }
+
+        .question-icon:hover img {
+            filter: brightness(0.9);
+        }
+
+        /* 帮助图标样式保持不变 */
+        .help-icon {
+            cursor: pointer;
+            transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .help-icon:active {
+            transform: scale(0.85);
+        }
+
+        .help-icon img {
+            transition: filter 0.2s ease;
+        }
+
+        .help-icon:hover img {
+            filter: brightness(0.9);
+        }
+
+        /* 消息容器 */
+        .message {
+            display: flex;
+            margin-bottom: 15px; /* Reduced margin-bottom for all messages */
+            align-items: flex-start;
+            width: 100%;
+            padding-right: clamp(8px, 2vw, 10px);
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        /* 同组消息的后续消息 */
+        .message.follow-up {
+            padding-left: clamp(40px, 12vw, 48px);
+            margin-left: 0;
+            margin-bottom: 6px; /* Reduced margin-bottom for follow-up messages */
+            margin-top: 4px; /* Reduced margin-top for follow-up messages */
+            width: 100%;
+        }
+
+        /* 消息内容容器的动画 */
+        .message-content {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            /* opacity: 0; */ /* 移除，将由 .message.show 控制 */
+            /* transform: translateY(10px); */ /* 移除，将由 .message.show 控制 */
+            /* transition: opacity 0.3s, transform 0.3s; */ /* 移除，将由 .message.show 控制 */
+        }
+
+        /* 统一的消息元素入场动画 */
+        .message .avatar,
+        .message .message-content {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+        }
+
+        .message.show .avatar,
+        .message.show .message-content {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* 头像样式 */
+        .avatar {
+            width: clamp(32px, 10vw, 40px);
+            height: clamp(32px, 10vw, 40px);
+            border-radius: 50%;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+
+        /* 同组的第一条消息也需要减少下方间距，但保持适当距离 */
+        .message:has(+ .message.follow-up) {
+            margin-bottom: 3px; /* Even smaller margin-bottom before follow-up */
+        }
+
+        /* 玩家消息样式 */
+        .message.player-message {
+            flex-direction: row-reverse;
+            padding-right: 0;
+            margin-right: 0;
+            margin-left: auto;
+            width: auto;
+        }
+
+        /* 玩家的后续消息也需要调整间距 */
+        .message.player-message.follow-up {
+            padding-right: 0;
+            padding-left: 0;
+            margin-top: 4px; /* Reduced margin-top for player follow-up messages */
+            margin-bottom: 6px; /* Reduced margin-bottom for player follow-up messages */
+            width: auto;
+        }
+
+        /* 同组玩家消息的第一条也需要减少下方间距 */
+        .message.player-message:has(+ .message.player-message.follow-up) {
+            margin-bottom: 3px; /* Even smaller margin-bottom for player before follow-up */
+        }
+
+        .message.player-message .avatar {
+            display: none;
+        }
+
+        .message.player-message .message-content {
+            align-items: flex-end;
+            margin-right: 0;  /* 确保玩家消息右对齐 */
+        }
+
+        .message.player-message .username {
+            display: none;
+        }
+
+        /* 用户名样式 */
+        .username {
+            font-size: clamp(12px, 3.5vw, 14px);
+            color: #494848;
+            margin-bottom: 4px;
+            font-family: "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+            font-weight: 550;
+        }
+
+        /* 消息气泡 */
+        .message-bubble {
+            background-color: #ffffff;
+            padding: clamp(6px, 2vw, 10px); /* 减小默认内边距 */
+            border-radius: 8px;
+            font-size: clamp(11px, 3vw, 13px); /* 减小默认字体大小 */
+            color: #767474;  /* 保持指定的颜色 */
+            box-shadow: 0 2px 8px rgba(255, 255, 255, 0.08);
+            position: relative;
+            font-family: "Noto Sans SC", "华文彩云", "YouYuan", "STYuanti", "HYRoundedZhiB", "PingFang SC", sans-serif;
+            font-weight: 550;  /* 调整字重，使文字更加醒目 */
+            letter-spacing: 0.2px;  /* 适当的字间距 */
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            width: fit-content;
+            max-width: min(450px, calc(100% - 30px)); /* 减小最大宽度 */
+            word-wrap: break-word;
+            white-space: normal;
+            line-height: 1.6;
+            margin-left: 0;
+            -webkit-font-smoothing: antialiased;  /* 增加字体平滑效果 */
+            -moz-osx-font-smoothing: grayscale;  /* Firefox字体平滑 */
+            text-rendering: optimizeLegibility;  /* 优化字体渲染 */
+        }
+
+        .message-bubble::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: white;
+            border-radius: 8px;
+            z-index: -1;
+        }
+
+        /* 后续消息的气泡样式 */
+        .message.follow-up .message-bubble,
+        .message.player-message .message-bubble,
+        .message.player-message.follow-up .message-bubble {
+            max-width: min(450px, calc(100% - 30px)); /* 统一减小最大宽度 */
+            margin-left: 0;
+        }
+
+        /* 玩家消息的气泡样式 */
+        .message.player-message .message-bubble {
+            background-color: #00BFFF;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-left: auto;
+            margin-right: 5px; /* 减少右边距到5px */
+            max-width: min(500px, calc(100% - 10px)); /* 减少最大宽度的计算值 */
+            box-shadow: 0 2px 8px rgba(0, 191, 255, 0.15);
+        }
+
+        .message.player-message .message-bubble::before {
+            background-color: #00BFFF;
+        }
+
+        /* 玩家后续消息的气泡样式 */
+        .message.player-message.follow-up .message-bubble {
+            max-width: min(500px, calc(100% - 20px));
+            margin-left: 0;
+        }
+
+        /* 图片消息样式 */
+        .message-bubble img {
+            max-width: 200px;
+            max-height: 150px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        /* 表情包样式 */
+        .emoji-image {
+            max-width: clamp(100px, 15vw, 120px);
+            border-radius: 8px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+
+        /* 输入框容器 */
+        .input-container {
+            background: #ffffff;
+            padding: clamp(8px, 2.5vw, 12px);
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* 输入框样式 */
+        .message-input {
+            flex: 1;
+            min-width: 0; /* 防止输入框溢出 */
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            padding: clamp(6px, 2vw, 8px) clamp(10px, 3.8vw, 15px);
+            font-size: clamp(12px, 3.5vw, 14px);
+            outline: none;
+            background: #f5f5f5;
+            transition: border-color 0.3s, background-color 0.3s;
+            resize: none; /* 允许手动调整高度 */
+            min-height: 20px; /* 设置最小高度 */
+            max-height: 100px; /* 设置最大高度 */
+            overflow-y: auto; /* 内容超出时显示滚动条 */
+        }
+
+        .message-input:focus {
+            border-color: #00BFFF;
+            background: #ffffff;
+        }
+
+        /* 底部图标按钮通用样式 */
+        .input-icon-button {
+            width: clamp(26px, 8vw, 32px);
+            height: clamp(26px, 8vw, 32px);
+            min-width: clamp(26px, 8vw, 32px); /* 防止按钮被压缩 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: none;
+            cursor: pointer;
+            padding: 0;
+            transition: opacity 0.3s;
+            flex-shrink: 0; /* 防止按钮被压缩 */
+        }
+
+        .input-icon-button:hover {
+            opacity: 0.8;
+        }
+
+        .input-icon-button svg {
+            width: clamp(14px, 5vw, 20px);
+            height: clamp(14px, 5vw, 20px);
+        }
+
+        /* 发送按钮特殊样式 */
+        .send-button {
+            background: #00BFFF;
+            border-radius: 50%;
+        }
+
+        .send-button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .topics-container {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            padding: 10px;
+            margin: 10px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .topics-header {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .topics-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .topic-item {
+            background: #f0f0f0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .choices-container {
+            margin: 15px 0;
+        }
+
+        .choices-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .choice-button {
+            background: linear-gradient(to right, #87CEEB, #00BFFF);
+            border: none;
+            padding: 10px 15px;
+            border-radius: 20px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            text-align: left;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .choice-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        /* 话题弹出层样式 */
+        .topics-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .topics-modal.active {
+            display: flex;
+        }
+        
+        .topics-modal-content {
+            position: relative;
+            width: 90%;
+            max-width: 350px;
+            padding: 12px 10px;
+            border-radius: 10px;
+            background-color: transparent;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            transform: translateY(0);
+            transition: transform 0.3s ease;
+            margin: 0 auto;
+            z-index: 2;
+            overflow: hidden;
+        }
+
+        .topics-modal-content::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            background-image: var(--modal-bg);
+            background-size: cover;
+            background-position: center;
+            transform: rotate(-1deg);
+            z-index: -1;
+            border-radius: 10px;
+            margin: auto;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .topics-modal.active .topics-modal-content {
+            animation: slideIn 0.3s ease;
+        }
+
+        .topics-modal .close-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            z-index: 3;
+        }
+
+        .topics-modal .close-button:hover {
+            opacity: 1;
+        }
+
+        .topics-modal .close-button svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .topics-modal .topics-container {
+            margin: 0;
+            background: none;
+            box-shadow: none;
+            padding: 0;
+            position: relative;
+            z-index: 2;
+        }
+
+        .topics-modal .topic-item {
+            background: rgba(255, 255, 255, 0.85);
+            margin-bottom: 4px;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #333;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .topics-modal .topic-item:hover {
+            background: rgba(255, 255, 255, 0.95);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+        }
+
+        .topics-modal .topics-header {
+            color: #333;
+            text-shadow: none;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* 选项特定样式 */
+        .choice-item {
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: linear-gradient(to right, #87CEEB, #00BFFF) !important;
+            color: white !important;
+            border: none !important;
+        }
+
+        .choice-item:hover {
+            background: linear-gradient(to right, #87CEEB, #00BFFF) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            opacity: 0.9;
+        }
+
+        .choice-item:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            opacity: 1;
+        }
+
+        /* 加载界面样式 */
+        .loading-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .loading-icon {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            animation: flip 1.5s infinite;
+            transform-style: preserve-3d;
+        }
+
+        .loading-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        @keyframes flip {
+            0% {
+                transform: rotateY(0deg) translateZ(1px);
+            }
+            50% {
+                transform: rotateY(180deg) translateZ(1px);
+            }
+            100% {
+                transform: rotateY(360deg) translateZ(1px);
+            }
+        }
+
+        .loading-progress {
+            width: 200px;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(to right, #87CEEB, #00BFFF);
+            transition: width 0.3s ease;
+        }
+
+        .loading-text {
+            margin-top: 15px;
+            color: white;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        /* 图片文本消息样式 */
+        .image-text-container {
+            position: relative;
+            background: #ffffff;
+            padding: 12px 18px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            max-width: 260px;
+            width: 100%;  /* 添加宽度100%确保响应式行为 */
+            box-sizing: border-box; /* 确保padding不会增加元素宽度 */
+        }
+        
+        /* 添加图片预览容器的悬停效果 */
+        .image-text-container:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .message.player-message .image-text-container:hover {
+            box-shadow: 0 2px 8px rgba(0, 191, 255, 0.25);
+        }
+
+        .image-text-preview {
+            color: #666;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;  /* 防止文本换行 */
+            overflow: hidden;     /* 防止内容溢出 */
+            text-overflow: ellipsis;  /* 如果文字太长，显示省略号 */
+        }
+
+        .image-text-preview svg {
+            width: 16px;
+            height: 16px;
+            fill: #666;
+            flex-shrink: 0;  /* 防止SVG图标被压缩 */
+        }
+
+        /* 响应式设计：针对不同屏幕尺寸优化图片预览显示 */
+        @media screen and (max-width: 480px) {
+            .image-text-container {
+                max-width: 100%; /* 在窄屏上使用更灵活的最大宽度 */
+                padding: 10px 14px; /* 减小内边距以节省空间 */
+            }
+            
+            .image-text-preview {
+                font-size: 13px; /* 在窄屏上使用更小的字体 */
+                letter-spacing: -0.2px; /* 稍微压缩字符间距 */
+            }
+
+            /* 新增：调整消息气泡在窄屏上的大小 */
+            .message-bubble {
+                padding: clamp(3px, 1.2vw, 6px); /* 进一步减小内边距 */
+                font-size: clamp(9px, 2.5vw, 11px); /* 进一步减小字体大小 */
+                max-width: 85%; /* 进一步减小最大宽度 */
+            }
+
+            .message.player-message .message-bubble {
+                /* padding 和 font-size 会从上面的 .message-bubble 继承 */
+                max-width: 85%; /* 统一玩家消息气泡的最大宽度 */
+            }
+        }
+        
+        /* 在超窄屏设备上进一步优化 */
+        @media screen and (max-width: 320px) {
+            .image-text-container {
+                padding: 8px 12px; /* 进一步减小内边距 */
+            }
+            
+            .image-text-preview {
+                font-size: 12px; /* 在超窄屏上进一步减小字体 */
+                letter-spacing: -0.3px; /* 更加压缩字符间距 */
+            }
+            
+            .image-text-preview svg {
+                width: 14px; /* 稍微减小图标尺寸 */
+                height: 14px;
+            }
+        }
+
+        /* 全屏蒙版 */
+        .fullscreen-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(3px);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            z-index: 2000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            padding-top: 20px;
+        }
+
+        .fullscreen-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* 详细内容容器 */
+        .detail-container {
+            width: 100%;
+            max-width: 450px; /* 调整最大宽度 */
+            height: 700px; 
+            background: url('https://files.catbox.moe/ij0rwt.png') center/cover no-repeat;
+            border-radius: 12px;
+            overflow: hidden;
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            margin: 0 10px;
+            padding-bottom: 60px; /* 为按钮预留空间 */
+        }
+        
+        /* 按钮容器 */
+        .detail-container::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 70px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.2) 50%, transparent);
+            pointer-events: none;
+            z-index: 2000; /* 确保渐变在图片上方，按钮下方 */
+        }
+
+        @media screen and (max-width: 400px) {
+            .detail-container {
+                margin: 0 5px;
+            }
+        }
+
+        .detail-container::before {
+            display: none;
+        }
+
+        .detail-header {
+            display: none;
+        }
+
+        /* 隐藏滚动条 */
+        .detail-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            line-height: 1.6;
+            color: #fff;
+            font-size: 14px;
+            white-space: pre-wrap;
+            background: transparent;
+            position: relative;
+            z-index: 2;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+
+        .detail-content::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        .detail-content img, .detail-image {
+            max-width: 100%;
+            max-height: calc(100vh - 200px); /* 预留顶部文字和边距空间 */
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transform-origin: center; /* 确保旋转和缩放以中心点为基准 */
+            transition: transform 0.3s ease; /* 平滑过渡效果 */
+        }
+
+        /* 专门针对旋转后的横屏图片 */
+        .detail-image.rotated-landscape {
+            max-height: none !important;
+            max-width: calc(100vh - 200px) !important;
+        }
+
+        .detail-text {
+            width: 100%;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        /* 修改滚动条样式 */
+        .detail-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .detail-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .detail-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+
+        /* 修改消息气泡样式以适应新的图片文本 */
+        .message-bubble.has-image-text {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .message-bubble.has-image-text:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        /* 输入状态指示器样式 */
+        .typing-indicator {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 4px;  /* 减小底部间距 */
+            /* opacity: 0; */ /* 移除，由 .typing-indicator.active 控制 */
+            /* transform: translateY(10px); */ /* 移除，由 .typing-indicator.active 控制 */
+            /* transition: opacity 0.3s, transform 0.3s; */ /* 移除，由 .typing-indicator.active 控制 */
+        }
+
+        /* 统一的输入状态指示器元素入场动画 */
+        .typing-indicator .avatar,
+        .typing-indicator .message-content {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+        }
+
+        .typing-indicator.active .avatar,
+        .typing-indicator.active .message-content {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* 移除旧的 .typing-indicator .message-content 动画规则 (已被上面统一规则覆盖) */
+        /* .typing-indicator .message-content {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s, transform 0.3s;
+            display: flex;
+            flex-direction: column;
+        } */
+
+        /* 保留 typing-indicator .message-content 的布局属性 */
+        .typing-indicator .message-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 移除旧的 .typing-indicator.active (已被上面统一规则覆盖) */
+        /* .typing-indicator.active {
+            opacity: 1;
+            transform: translateY(0);
+        } */
+
+        .typing-bubble {
+            background-color: #ffffff;
+            padding: 12px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            position: relative;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            width: fit-content;
+            min-width: unset;
+        }
+
+        /* 省略号动画 */
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            background: #8e8e93;
+            border-radius: 50%;
+            animation: typingAnimation 1.4s infinite;
+            opacity: 0.6;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typingAnimation {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-4px);
+            }
+        }
+
+        /* 添加叙事消息样式 */
+        .narration-bubble {
+            background-color: #dcecfc;
+            padding: clamp(8px, 2.5vw, 15px);
+            border-radius: 12px;
+            font-size: clamp(12px, 3.5vw, 14px);
+            color: #666;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            text-align: left;
+            margin: 6px auto;
+            max-width: 80%;
+            line-height: 1.6;
+            font-family: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            position: relative;
+            width: fit-content;
+            display: inline-block;
+            box-sizing: border-box;
+        }
+
+        /* 当消息是narration类型时的特殊处理 */
+        .message:has(.narration-bubble) {
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            padding: 0;
+        }
+
+        .message:has(.narration-bubble) + .message:has(.narration-bubble) {
+            margin-top: 2px;
+        }
+
+        /* 确保narration容器在所有屏幕尺寸下都居中 */
+        .narration-container {
+            width: 100%;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* 处理分段narration的样式 */
+        .narration-segment {
+            display: inline-block;
+            width: 100%;
+            text-align: center;
+            margin-bottom: 2px;
+        }
+
+        .narration-segment:last-child {
+            margin-bottom: 0;
+        }
+
+        /* 添加媒体查询以确保在不同屏幕尺寸下的响应式居中 */
+        @media screen and (max-width: 768px) {
+            .narration-bubble {
+                max-width: 90%;
+                margin: 4px auto;
+            }
+        }
+
+        @media screen and (max-width: 480px) {
+            .narration-bubble {
+                max-width: 95%;
+                padding: 6px 10px;
+                margin: 3px auto;
+            }
+        }
+
+        /* 投票弹窗样式 */
+        .vote-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .vote-modal.active {
+            display: flex;
+        }
+
+        .vote-modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 350px;
+            position: relative;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .vote-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .vote-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .vote-input {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .vote-options-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .vote-option-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .vote-option-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .add-option-button {
+            background: #f0f0f0;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #666;
+            transition: background-color 0.3s;
+        }
+
+        .add-option-button:hover {
+            background: #e0e0e0;
+        }
+
+        .remove-option-button {
+            background: none;
+            border: none;
+            color: #ff4444;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 18px;
+        }
+
+        .vote-submit-button {
+            background: linear-gradient(to right, #87CEEB, #00BFFF);
+            border: none;
+            padding: 10px;
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: opacity 0.3s;
+        }
+
+        .vote-submit-button:hover {
+            opacity: 0.9;
+        }
+
+        .vote-modal .close-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .vote-modal .close-button:hover {
+            opacity: 1;
+        }
+
+        /* 手机刘海屏 */
+        .phone-notch {
+            display: none;
+        }
+
+        .notch-camera, .notch-speaker, .notch-sensor {
+            display: none;
+        }
+
+        /* 响应式调整 */
+        @media screen and (max-width: 400px) {
+            body {
+                margin: 0;
+                padding: 0;
+            }
+
+            .main-container {
+                margin: 10px;
+                width: calc(100% - 20px);
+                border-radius: 12px;
+            }
+
+            .input-container {
+                padding: clamp(8px, 2.5vw, 12px);
+                gap: 6px;
+            }
+
+            .message-input {
+                padding: clamp(6px, 2vw, 8px) clamp(10px, 3.8vw, 15px);
+                font-size: clamp(12px, 3.5vw, 14px);
+            }
+
+            .input-icon-button {
+                width: clamp(26px, 8vw, 32px);
+                height: clamp(26px, 8vw, 32px);
+                min-width: clamp(26px, 8vw, 32px);
+            }
+
+            .topics-modal-content {
+                width: 85%;
+                padding: 15px;
+            }
+        }
+
+        @media screen and (max-width: 320px) {
+            .main-container {
+                margin: 5px;
+                width: calc(100% - 10px);
+            }
+
+            .input-container {
+                padding: clamp(6px, 2vw, 12px);
+                gap: 4px;
+            }
+
+            .message-input {
+                padding: clamp(5px, 2vw, 10px) clamp(10px, 3.8vw, 15px);
+                font-size: clamp(12px, 3.5vw, 14px);
+            }
+
+            .input-icon-button {
+                width: clamp(26px, 8vw, 32px);
+                height: clamp(26px, 8vw, 32px);
+                min-width: clamp(26px, 8vw, 32px);
+            }
+
+            .topics-modal-content {
+                width: 80%;
+                padding: 12px;
+            }
+        }
+
+        /* 强制竖屏显示 */
+        @media screen and (orientation: landscape) and (max-height: 450px) {
+            body {
+                height: 100dvh;
+                width: 100%;
+            display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .main-container {
+                height: 100dvh;
+                width: auto;
+                aspect-ratio: 9/16;
+                max-height: 100dvh;
+                margin: 0;
+            }
+        }
+
+        /* ... existing styles ... */
+        .avatar-placeholder {
+            width: 50px;
+            min-width: 50px;
+            height: 50px;
+            margin-right: 10px;
+        }
+
+        .message-container:not(:first-child) {
+            margin-top: 5px;
+        }
+
+        .message-container:not(:first-child) .message-content {
+            margin-left: 60px;
+        }
+
+        .message.follow-up .avatar,
+        .message.follow-up .username {
+            display: none;
+        }
+
+        /* 玩家的后续消息也需要调整间距 */
+        .message.player-message.follow-up {
+            padding-right: 0;
+            padding-left: 0;
+            margin-top: 4px; /* Reduced margin-top for player follow-up messages */
+            margin-bottom: 6px; /* Reduced margin-bottom for player follow-up messages */
+            width: auto;
+        }
+
+        /* 响应式调整 */
+        @media screen and (max-width: 600px) {
+            .message.player-message .message-bubble,
+            .message.player-message.follow-up .message-bubble {
+                max-width: calc(100% - 10px); /* 减少最大宽度的计算值 */
+                margin-right: 5px; /* 保持一致的右边距 */
+            }
+        }
+        /* ... existing styles ... */
+
+        /* 同一角色的最后一条消息需要有更大的底部间距 */
+        .message.follow-up:last-of-type,
+        .message.follow-up:not(:has(+ .message.follow-up)) {
+            margin-bottom: 15px; /* 与下一个角色的消息保持较大间距 */
+        }
+
+        /* 确保玩家消息中的图片预览容器样式也兼容窄屏 */
+        .message.player-message .image-text-container {
+            margin-left: auto; /* 右对齐 */
+            background-color: #00BFFF; /* 与玩家消息气泡颜色一致 */
+            color: white;
+        }
+        
+        .message.player-message .image-text-preview {
+            color: white; /* 文字颜色改为白色 */
+        }
+        
+        .message.player-message .image-text-preview svg {
+            fill: white; /* 图标颜色改为白色 */
+        }
+        
+        @media screen and (max-width: 480px) {
+            .message.player-message .image-text-container {
+                max-width: calc(100% - 20px); /* 窄屏下的最大宽度 */
+            }
+        }
+
+        /* 图片旋转按钮样式 */
+        .rotate-button, .zoom-in-button, .zoom-out-button, .move-up-button, .move-down-button {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 2010;
+            transition: background 0.2s ease, transform 0.2s ease;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            bottom: 15px;
+        }
+
+        .move-up-button {
+            left: calc(50% - 100px);
+        }
+
+        .move-down-button {
+            left: calc(50% - 50px);
+        }
+
+        .zoom-out-button {
+            left: calc(50% + 0px);
+        }
+
+        .zoom-in-button {
+            left: calc(50% + 50px);
+        }
+
+        .rotate-button {
+            left: calc(50% + 100px);
+        }
+
+        .rotate-button:hover, .zoom-in-button:hover, .zoom-out-button:hover, .move-up-button:hover, .move-down-button:hover {
+            background: rgba(0, 0, 0, 0.9);
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+        }
+
+        .rotate-button svg, .zoom-in-button svg, .zoom-out-button svg, .move-up-button svg, .move-down-button svg {
+            width: 24px;
+            height: 24px;
+            fill: white;
+            transition: transform 0.3s ease;
+        }
+
+        /* 旋转按钮图标的旋转状态 */
+        .rotate-button[data-rotation="90"] svg {
+            transform: rotate(90deg);
+        }
+        
+        .rotate-button[data-rotation="180"] svg {
+            transform: rotate(180deg);
+        }
+        
+        .rotate-button[data-rotation="270"] svg {
+            transform: rotate(270deg);
+        }
+
+        /* 旋转动画 */
+        @keyframes rotate-image {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(90deg); }
+        }
+
+        .rotating-image {
+            transition: transform 0.3s ease;
+        }
+
+        /* 移动端优化 */
+        @media screen and (max-width: 480px) {
+            .detail-container {
+                height: 85vh; /* 调整高度以适应移动设备 */
+                max-width: 95%; /* 使容器更宽以充分利用屏幕空间 */
+            }
+            
+            .move-up-button {
+                left: calc(50% - 90px);
+            }
+            
+            .move-down-button {
+                left: calc(50% - 45px);
+            }
+            
+            .zoom-out-button {
+                left: calc(50% + 0px);
+            }
+            
+            .zoom-in-button {
+                left: calc(50% + 45px);
+            }
+            
+            .rotate-button {
+                left: calc(50% + 90px);
+            }
+            
+            .detail-image.rotated-landscape {
+                max-width: 85vh !important; /* 移动端旋转后的最大宽度 */
+            }
+            
+            .detail-text {
+                font-size: 13px; /* 移动端文字稍小 */
+            }
+        }
+        
+        /* 小屏幕设备的特殊调整 */
+        @media screen and (max-width: 375px) {
+            .rotate-button, .zoom-in-button, .zoom-out-button, .move-up-button, .move-down-button {
+                width: 36px;
+                height: 36px;
+            }
+            
+            .move-up-button {
+                left: calc(50% - 80px);
+            }
+            
+            .move-down-button {
+                left: calc(50% - 40px);
+            }
+            
+            .zoom-out-button {
+                left: calc(50% + 0px);
+            }
+            
+            .zoom-in-button {
+                left: calc(50% + 40px);
+            }
+            
+            .rotate-button {
+                left: calc(50% + 80px);
+            }
+        }
+        
+        /* 触屏设备优化 */
+        @media (hover: none) and (pointer: coarse) {
+            .rotate-button, .zoom-in-button, .zoom-out-button, .move-up-button, .move-down-button {
+                width: 48px; /* 触屏设备按钮更大，便于点击 */
+                height: 48px;
+            }
+            
+            .rotate-button svg, .zoom-in-button svg, .zoom-out-button svg, .move-up-button svg, .move-down-button svg {
+                width: 28px;
+                height: 28px;
+            }
+        }
+
+        /* 状态指示器区域样式 */
+        .camera-status-section {
+            margin-top: 10px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            padding-top: 10px;
+        }
+
+        .camera-status-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        /* 摄像头状态指示器 */
+        .camera-status {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+
+        .camera-label {
+            font-size: 13px;
+            color: #555;
+            flex: 1;
+        }
+
+        .status-control-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.05);
+            transition: all 0.2s ease;
+            position: relative;
+            min-width: 34px;
+            border: 1px solid transparent;
+        }
+
+        .status-indicator:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .status-indicator svg {
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
+        }
+
+        .status-text {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+            background-color: currentColor;
+        }
+
+        /* 开启状态样式 */
+        .status-on {
+            background-color: rgba(76, 217, 100, 0.15);
+            border-color: rgba(76, 217, 100, 0.3);
+        }
+
+        .status-on:hover {
+            background-color: rgba(76, 217, 100, 0.25);
+        }
+
+        .status-on svg {
+            fill: #4CD964;
+        }
+
+        .status-on .status-text {
+            color: #4CD964;
+        }
+
+        .status-on .status-dot {
+            background-color: #4CD964;
+            box-shadow: 0 0 5px rgba(76, 217, 100, 0.5);
+        }
+
+        /* 关闭状态样式 */
+        .status-off {
+            background-color: rgba(255, 59, 48, 0.15);
+            border-color: rgba(255, 59, 48, 0.3);
+        }
+
+        .status-off:hover {
+            background-color: rgba(255, 59, 48, 0.25);
+        }
+
+        .status-off svg {
+            fill: #FF3B30;
+        }
+
+        .status-off .status-text {
+            color: #FF3B30;
+        }
+
+        .status-off .status-dot {
+            background-color: #FF3B30;
+            box-shadow: 0 0 5px rgba(255, 59, 48, 0.5);
+        }
+
+        /* 交互模块特殊样式 */
+        .camera-status:last-child .status-indicator {
+            min-width: 70px;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="top-bar">
+            <span style="cursor: pointer;" onclick="triggerSlash('/send 查看消息列表')">JUUSTAGRAM</span>
+            <div class="top-right">
+                <div class="question-icon" id="topicsButton">
+                    <img src="https://files.catbox.moe/d33q3q.png" alt="Question">
+        </div>
+                <div class="divider"></div>
+                <div class="help-icon" id="skipTriggerButton">
+                    <img src="https://files.catbox.moe/xps1qc.png" alt="Help">
+    </div>
+            </div>
+            </div>
+            
+        <!-- 添加话题弹出层 -->
+        <div class="topics-modal" id="topicsModal">
+            <div class="topics-modal-content">
+                <div class="topics-container">
+                    <div class="topics-header">当前话题：</div>
+                    <div class="topics-list" id="topicsList">
+                </div>
+    </div>
+                </div>
+            </div>
+
+        <!-- 添加选项弹出层 -->
+        <div class="topics-modal" id="choicesModal">
+            <div class="topics-modal-content">
+                <div class="topics-container">
+                    <div class="topics-header">可用选项：</div>
+                    <div class="topics-list" id="choicesList">
+                </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-container">
+            <div class="chat-header">
+                <!-- MODIFIED: Added .chat-header-main to wrap title and new button -->
+                <!-- Original title is now inside .chat-header-main -->
+                <!-- New groupMembersButton will be added by JS inside .chat-header-main -->
+                <!-- New groupMembersDropdown will be added by JS inside .chat-header -->
+                <div class="chat-header-title">重樱阵营专用频道</div>
+                <div class="chat-header-icons">
+                    <span class="heart-icon">
+                        <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M50 70
+                                    C 20 50, 5 30, 20 15
+                                    C 35 0, 50 10, 50 30
+                                    C 50 10, 65 0, 80 15
+                                    C 95 30, 80 50, 50 70 Z"
+                                fill="#8e8e93"/>
+                        </svg>
+                    </span>
+                    <span class="message-icon">
+                        <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                            <!-- 气泡主体 -->
+                            <circle cx="45" cy="45" r="30" fill="#8e8e93"/>
+
+                            <!-- 更粗的气泡尾巴（倒三角形） -->
+                            <polygon points="55,72 78,88 60,55" fill="#8e8e93"/>
+
+                            <!-- 省略号 -->
+                            <circle cx="35" cy="45" r="4" fill="white"/>
+                            <circle cx="45" cy="45" r="4" fill="white"/>
+                            <circle cx="55" cy="45" r="4" fill="white"/>
+                        </svg>
+                    </span>
+            </div>
+            
+                <!-- 添加状态栏弹窗 -->
+                <div class="status-popup">
+                    <div class="status-content">
+                        <img class="character-avatar" src="https://files.catbox.moe/tf6npr.png" alt="当前角色">
+                        <div class="character-info">
+                            <div class="character-name">赤城</div>
+                            <div class="character-status">当前私聊对象</div>
+        </div>
+    </div>
+                    <div class="camera-status-section">
+                        <div class="camera-status-title">状态控制面板</div>
+                        
+                        <!-- 我方状态 -->
+                        <div class="camera-status camera-status-group">
+                            <div class="camera-label">我方镜头状态:</div>
+                            <div class="status-controls">
+                                <div class="status-indicator status-on" data-status="myVideo">
+                                    <svg class="status-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+                                    </svg>
+                                    <div class="status-text">开启</div>
+                                </div>
+                                <div class="status-indicator status-on" data-status="myAudio">
+                                    <svg class="status-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+                                    </svg>
+                                    <div class="status-text">开启</div>
+            </div>
+        </div>
+    </div>
+    
+                        <!-- 对方状态 -->
+                        <div class="camera-status camera-status-group">
+                            <div class="camera-label">对方镜头状态:</div>
+                            <div class="status-controls">
+                                <div class="status-indicator status-off" data-status="theirVideo">
+                                    <svg class="status-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+                                    </svg>
+                                    <div class="status-text">关闭</div>
+                                </div>
+                                <div class="status-indicator status-off" data-status="theirAudio">
+                                    <svg class="status-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+                                    </svg>
+                                    <div class="status-text">关闭</div>
+                                </div>
+                            </div>
+            </div>
+            
+                        <!-- 交互模块 -->
+                        <div class="camera-status">
+                            <div class="camera-label">交互模块:</div>
+                            <div class="status-controls">
+                                <div class="status-indicator status-on" data-status="interaction">
+                                    <svg class="status-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4v-1h4v1zm3.25-3H6.75V4h10.5v14z"/>
+                                    </svg>
+                                    <div class="status-text">开启</div>
+            </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="messages-container">
+                <!-- 消息内容将在这里动态添加 -->
+            </div>
+        </div>
+        <div class="input-container">
+            <button class="input-icon-button">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#8e8e93" stroke-width="2"/>
+                    <path d="M8 14C8 14 9.5 16 12 16C14.5 16 16 14 16 14" stroke="#8e8e93" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="9" cy="9" r="1.5" fill="#8e8e93"/>
+                    <circle cx="15" cy="9" r="1.5" fill="#8e8e93"/>
+                </svg>
+            </button>
+            <input type="text" class="message-input" placeholder="输入消息...">
+            <button class="input-icon-button" id="optionsTriggerButton">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <!-- 笔记本主体 -->
+                    <rect x="4" y="4" width="16" height="16" rx="2" stroke="#8e8e93" stroke-width="2"/>
+                    <!-- 横线装饰 -->
+                    <line x1="8" y1="9" x2="16" y2="9" stroke="#8e8e93" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="8" y1="13" x2="16" y2="13" stroke="#8e8e93" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="8" y1="17" x2="12" y2="17" stroke="#8e8e93" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </button>
+            <button class="input-icon-button send-button">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z" fill="white"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 添加全局镜头状态变量
+        let userSetCameraStatus = {
+            myVideo: null,  // 我方画面状态 - null表示未设置
+            myAudio: null,  // 我方语音状态 - null表示未设置
+            theirVideo: null, // 对方画面状态 - null表示未设置
+            theirAudio: null, // 对方语音状态 - null表示未设置
+            interaction: null // 交互模块 - null表示未设置
+        };
+        
+        // 初始化聊天界面
+        const chatData = ``;
+
+        // 添加基础URL常量
+        const BASE_AVATAR_URL = "https://files.catbox.moe/";
+
+        // 添加头像映射
+        const avatarMap = {
+            "kikukiku": "kf7xbn.png",
+            "黑天鹅": "we44ht.webp",
+            "花火": "tdzd2z.webp",
+            "镜流": "idgzj1.webp",
+            "卡芙卡": "62xu7t.webp",
+            "克拉拉": "5plt1b.webp",
+            "流萤": "xojyam.webp",
+            "娜塔莎": "6eise3.webp",
+            "刃": "fkssjy.webp",
+            "阮梅": "jvx5qa.webp",
+            "银狼": "g6meht.webp",
+            "桂乃芬": "i6pgps.webp",
+            
+            // 原有头像
+            "赞妮": "y5c95i.png",
+            "玛奇玛": "1baoc0.png",
+            "四万十": "9xv28m.png",
+            "土佐": "n7gieg.png",
+            "维达": "wd00e7.png",
+            "武藏": "d08ukg.png",
+            "翔鹤": "6r202z.png",
+            "瑞鹤": "enwrnz.png",
+            "信浓": "gs441f.png",
+            "爱宕": "4xlrow.png",
+            "高雄": "72ecnc.png",
+            "白龙": "wd4d29.png",
+            "不知火": "z17k14.png",
+            "苍龙": "2448fq.png",
+            "飞龙": "82lwdk.png",
+            "长门": "kv5m2l.png",
+            "赤城": "tf6npr.png",
+            "加贺": "e53z26.png",
+            "天城": "o2xt90.png",
+            "大凤": "9jtdi7.png",
+            "风云": "gdzp40.png",
+            "樫野": "mue2h3.png",
+            "酒匂": "wt1epp.png",
+            "能代": "fq5otg.png",
+            "绫波": "fzyqbo.png",
+            "明石": "epubcb.png",
+            "三笠": "n50ag7.png",
+            "青空杏花": "oc1s3a.png",
+
+            // 皇家角色头像
+            "贝尔法斯特": "cgmkx0.png",
+            "标枪": "1e9fvk.png",
+            "不挠": "93mjb0.png",
+            "柴郡": "48uwod.png",
+            "黛朵": "gpa11r.png",
+            "德文郡": "69xl0k.png",
+            "独角兽": "lfrmu4.png",
+            "光辉": "4y8ubd.png",
+            "光荣": "krd1dp.png",
+            "海王星": "jxin9h.png",
+            "豪": "o5893y.png",
+            "赫敏": "04xqnm.png",
+            "皇家方舟": "b2xbja.png",
+            "胡德": "ubysyg.png",
+            "贾维斯": "mn3yds.png",
+            "君主": "cfnm70.png",
+            "可畏": "r1pr5e.png",
+            "伦敦": "0rb5ow.png",
+            "纳尔逊": "c3ju6q.png",
+            "普利茅斯": "08tvyu.png",
+            "前卫": "uhoglp.png",
+            "乔治五世": "ezgat5.png",
+            "确捷": "ls5yts.png",
+            "胜利": "d0iz7u.png",
+            "斯库拉": "seviif.png",
+            "天狼星": "ocz4fw.png",
+            "威尔士亲王": "5x04rk.png",
+            "雅努斯": "vwwb8v.png",
+            "厌战": "f8hsob.png",
+            "伊丽莎白": "elt5ql.png",
+            "英仙座": "6rmz4j.png",
+            "冤仇": "um8vh6.png",
+            "爱丁堡": "qv4pzk.png",
+            "谢菲尔德": "7g2l51.png",
+            "卡律布狄斯": "0dalq6.png",
+
+            // 铁血舰娘头像
+            "阿达尔伯特亲王": "vrviem.png",
+            "艾姆登": "fpkfej.png",
+            "奥古斯特": "4p0xe6.png",
+            "俾斯麦": "nlpb8r.png",
+            "布吕歇尔": "m4afty.png",
+            "德意志": "fcovdr.png",
+            "菲力克斯": "cpiksn.png",
+            "腓特烈大帝": "xrsueo.png",
+            "弗里茨": "am96vo.png",
+            "海因里希": "uui4ou.png",
+            "罗恩": "01nq6a.png",
+            "马格德堡": "aspsb0.png",
+            "美因茨": "6gybh0.png",
+            "齐柏林": "6myivd.png",
+            "彼得": "4xlxjb.png",
+            "斯佩": "uevyxm.png",
+            "提尔比茨": "e7ftld.png",
+            "胡滕": "1cbn5g.png",
+            "兴登堡": "znc5mk.png",
+            "希佩尔": "664x96.png",
+            "易北": "jn8rss.png",
+            "z23": "eh0b8v.png",
+            "z46": "9c17kb.png",
+            "z52": "5az405.png",
+            "Z23": "eh0b8v.png",
+            "Z46": "9c17kb.png",
+            "Z52": "5az405.png",
+            "欧根亲王": "p7jtmz.png",
+            "埃吉尔": "nf7qfk.png",
+            "雷根斯堡": "lxwi4z.png",
+
+            // 北方联合舰娘头像
+            "阿芙乐尔": "4pwpdn.png",
+            "幻柯": "uqe51y.png",
+            "涅普": "f58l8v.png",
+            "沅汐": "9r2r7m.png",
+            "安陌": "m3xeic.png",
+            "胧叶": "g27ye7.png",
+            "曦琰": "ier5q7.png",
+            "伏尔加": "tdtjce.png",
+            "古比雪夫": "yc5i0f.png",
+            "火力": "yc5i0f.png",
+            "基辅": "771h5n.png",
+            "基洛夫": "z3l63v.png",
+            "喀琅施塔达": "u3lw2k.png",
+            "摩尔曼斯克": "gamqvm.png",
+            "纳西莫夫": "snqe62.png",
+            "恰巴耶夫": "inn422.png",
+            "水星纪念": "6e1wg5.png",
+            "苏维埃罗西亚": "kmaylh.png",
+            "苏维埃同盟": "h1nfp9.png",
+            "塔什干": "nuiapp.png",
+
+            // 飓风阵营头像
+            "冈依沙瓦": "6ejk0s.png",
+            "海豚号": "goowlb.png",
+            "和睦号": "v91lks.png",
+            "皇家财富": "w8pwen.png",
+            "幻想号": "az0iw9.png",
+            "加里冒险号": "3nxgc6.png",
+            "金鹿号": "uh9j8m.png",
+            "玛丽": "l0bqdy.png",
+            "朴茨茅斯": "70e8cg.png",
+            "圣马丁": "s9g0iz.png",
+            "维达号": "wd00e7.png",
+
+            // 白鹰舰娘头像
+            "埃尔德里奇": "xwzv55.png",
+            "埃塞克斯": "6rg3pl.png",
+            "安克雷奇": "92a5pv.png",
+            "巴尔的摩": "7m5l8k.png",
+            "北安普顿": "f4qjsj.png",
+            "波特兰": "9mc7yw.png",
+            "布莱默顿": "04seli.png",
+            "大黄蜂": "qs85oq.png",
+            "大青花鱼": "7qoe4m.png",
+            "法戈": "lfjke7.png",
+            "哥伦比亚": "l6gik4.png",
+            "关岛": "b4ly1w.png",
+            "哈尔福德": "od712v.png",
+            "海伦娜": "4u4kxz.png",
+            "哈曼": "18m1f1.png",
+            "火奴鲁鲁": "a0o456.png",
+            "克利夫兰": "348m91.png",
+            "拉菲": "4jc2um.png",
+            "里诺": "2a1094.png",
+            "路易斯维尔": "62rzsa.png",
+            "马萨诸塞": "66evk0.png",
+            "蒙彼利埃": "09qdmp.png",
+            "明尼阿波利斯": "d0hkq9.png",
+            "南达科他": "7w5zer.png",
+            "匹兹堡": "g8d4t7.png",
+            "普林斯顿": "8wipdh.png",
+            "奇尔沙治": "uqpgjy.png",
+            "企业": "5sgst3.png",
+            "圣地亚哥": "czl290.png",
+            "圣路易斯": "p22n3b.png",
+            "突击者": "bkalzb.png",
+            "无畏": "b2iiuq.png",
+            "新泽西": "i9e0cp.png",
+            "休斯顿": "5y0yh3.png",
+            "约克城": "lue5m3.png",
+            "芝加哥": "apgqo7.png",
+            "朱诺": "xxa3ot.png",
+            "北卡罗莱纳": "rmuirw.png",
+
+            // 撒丁帝国角色头像
+            "阿布鲁齐": "c6d44q.png",
+            "安德烈亚": "gpaw09.png",
+            "巴托洛梅奥": "s0rmba.png",
+            "博尔扎诺": "ug8lhf.png",
+            "波拉": "xaa1z6.png",
+            "的里雅斯特": "4r646d.png",
+            "凯撒": "vulod0.png",
+            "拉斐尔": "mmgi4y.png",
+            "利托里奥": "qw6owz.png",
+            "罗马": "ayus5r.png",
+            "马可波罗": "j1kenp.png",
+            "那不勒斯": "ew9jbj.png",
+            "特伦托": "3pa31v.png",
+            "托里拆利": "cpwjnw.png",
+            "维内托": "izyvr2.png",
+            "扎拉": "hfhvep.png",
+
+            // 鸢尾阵营角色头像
+            "阿尔萨斯": "t9o08t.png",
+            "埃米尔": "r573io.png",
+            "贝亚德": "q77myc.png",
+            "布雷斯特": "5lifui.png",
+            "布伦努斯": "b3yqz7.png",
+            "凯旋": "2znmim.png",
+            "可怖": "xwmjru.png",
+            "里昂": "i8v97u.png",
+            "黎塞留": "uyc6ml.png",
+            "路易九世": "u5drq1.png",
+            "莫加多尔": "n56tg6.png",
+            "圣女贞德": "bgb2y7.png",
+            "香槟": "7ddtai.png",
+            "絮库夫": "oied98.png",
+            "重剑": "pz33wu.png",
+            "阿尔及利亚": "dxkpfx.png",
+            "不屈": "nxul29.png",
+            "迪普莱克斯": "xze9ix.png",
+            "敦刻尔克": "4h9po5.png",
+            "恶毒": "uzlqo1.png",
+            "弗兰德尔": "q9ol7i.png",
+            "拂煦": "msze23.png",
+            "果敢": "3ms1jc.png",
+            "加斯科涅": "wmbmv5.png",
+            "凯尔圣": "oor4j9.png",
+            "克莱蒙梭": "5pyoip.png",
+            "马赛曲": "v5t6ot.png",
+            "让巴尔": "pi94m7.png",
+            "斯特拉斯堡": "68obdj.png",
+            "霞飞": "tk7f8i.png",
+
+            // 东煌角色头像
+            "长风": "bl6gkq.png",
+            "定安": "3qrv0z.png",
+            "飞云": "rfq9qu.png",
+            "伏波": "1vqy38.png",
+            "哈尔滨": "18n3af.png",
+            "海容": "a2ppma.png",
+            "海天": "mha6lq.png",
+            "花甲": "y91enl.png",
+            "济安": "doyhlf.png",
+            "建武": "ubq5xl.png",
+            "宁海": "ek8xij.png",
+            "平海": "cvrb0f.png",
+            "应瑞": "d8j7rw.png",
+            "逸仙": "w634w4.png",
+            "肇和": "87q2jn.png",
+            "镇海": "8t5l59.png",
+
+            // 小船头像
+            "小贝法": "wzxqvz.png",
+            "小比睿": "1f941b.png",
+            "小柴郡": "jwow5u.png",
+            "小赤城": "0mkoq4.png",
+            "小大凤": "k6pe2b.png",
+            "小腓特烈": "r96why.png",
+            "小光辉": "idpgtf.png",
+            "小海伦娜": "9c5um9.png",
+            "小克利夫兰": "pk2yni.png",
+            "小可畏": "xbzr00.png",
+            "小欧根": "59zjgo.png",
+            "小齐柏林": "eexjai.png",
+            "小企业": "dvidch.png",
+            "小圣地亚哥": "p2k3iw.png",
+            "小声望": "es3a6m.png",
+            "小斯佩": "7ne549.png",
+            "小天城": "exiycl.png",
+            "小信浓": "xgejup.png",
+            // 新增角色头像
+            "夏空": "pjy33l.png",
+            "安可": "je0g55.png",
+            "白芷": "85b22r.png",
+            "布兰特": "dyms2f.png",
+            "炽霞": "wost9t.png",
+            "椿": "j7yf7a.png",
+            "丹瑾": "cukl65.png",
+            "灯灯": "xldewy.png",
+            "菲比": "wjp6zl.png",
+            "忌炎": "arapo5.png",
+            "鉴心": "8ljvdt.png",
+            "今汐": "1yfgj1.png",
+            "卡卡罗": "ovxovt.png",
+            "坎特雷拉": "f7bfj6.png",
+            "珂莱塔": "4b8dki.png",
+            "洛可可": "hyrkti.png",
+            "莫特斐": "40ddex.png",
+            "漂泊者": "fmtvqf.png",
+            "秋水": "z8ogqh.png",
+            "散华": "6fl8q6.png",
+            "守岸人": "lstr8g.png",
+            "桃祈": "za1mve.png",
+            "维里奈": "wtd6gk.png",
+            "相里要": "55gfx4.png",
+            "秧秧": "uviurx.png",
+            "吟霖": "sstjeg.png",
+            "釉瑚": "80u0p0.png",
+            "渊武": "bqrwlr.png",
+            "长离": "xqwizt.png",
+            "折纸": "65598g.png",
+            "维托里奥·维内托": "pqrtrz.jpg",
+            "云仙": "7kxqqj.jpg",
+            "玛丽·西莱斯特号": "5ksggb.jpg",
+            "圣马丁号": "3thjxc.jpg",
+            "萨拉托加": "wbgz6q.jpg",
+            "鲁普雷希特亲王": "tdsxew.jpg",
+            "初月": "sw1jta.jpg",
+            "雪风": "7b5pjk.jpg",
+            "江风": "hiqj9y.jpg",
+            "喀琅施塔得": "31fffn.jpg",
+            "樫野": "9rclok.jpg",
+            "华甲": "bz8a1a.jpg",
+            "提康德罗加": "kn7xio.jpg",
+            "甘古特": "mb48xu.jpg",
+            "狮": "ilqq5p.jpg",
+            "约克城2": "euutve.jpg",
+            "弗里茨·鲁梅": "p7948a.jpg",
+            "柯妮": "uxxsj8.jpg",
+            "特拉法尔加": "vkj4lh.jpg",
+            "吾妻": "kbt0ga.jpg",
+            "德雷克": "95kn3i.jpg",
+            "筑摩": "qu5nsj.jpg",
+            "大山": "yl4szf.jpg",
+            "契卡洛夫": "18gmux.jpg",
+            "奥丁": "l346a8.jpg",
+            "北风": "6irin2.jpg",
+            "佐治亚": "rt5j3l.jpg",
+            "西雅图": "vq7vq9.jpg",
+            "出云": "bv9nxq.jpg",
+            "伊吹": "7kkgo2.jpg",
+            "金色暗影": "qyf2zu.jpg",
+            "梦梦·贝莉雅·戴比路克": "07xto1.jpg",
+            "娜娜·阿丝达·戴比路克": "3ci5d8.jpg",
+            "菈菈·撒塔琳·戴比路克": "z0ysmi.jpg",
+            "雪不归": "q9jnwo.jpg",
+            "雪泉": "d55jsv.jpg",
+            "焰": "m0i6kw.jpg",
+            "斑鸠": "7ft1bb.jpg",
+            "飞鸟": "liij4t.jpg",
+            "卡菈·伊迪亚斯": "jodyd9.jpg",
+            "帕特莉夏·阿贝尔海姆": "80hg2t.jpg",
+            "科洛蒂娅·巴兰茨": "b2mvo4.jpg",
+            "莱莎琳·斯托特": "kfrl5d.jpg",
+            "公主": "zi28yh.jpg",
+            "第二代": "a2d371.jpg",
+            "飞鸟川千濑": "auqlll.jpg",
+            "南梦芽": "ppzo02.jpg",
+            "新条茜": "1rof5h.jpg",
+            "宝多六花": "ujnwp9.jpg",
+            "三浦梓": "iscoc5.jpg",
+            "水濑伊织": "7fda2v.jpg",
+            "如月千早": "ltzz71.jpg",
+            "天海春香": "v5wq4a.jpg",
+            "环": "lmcb3z.jpg",
+            "露娜": "g5p9e7.jpg",
+            "海咲": "u5f3v4.jpg",
+            "霞": "struhu.jpg",
+            "穗香": "qfdaem.jpg",
+            "玛莉萝丝": "22ws1s.jpg",
+            "绊爱": "41bos6.jpg",
+            "露露缇耶": "c3o80g.jpg",
+            "猫音": "beknsp.jpg",
+            "久远": "f3ibqe.jpg",
+            "翡绿之心": "gw87bb.jpg",
+            "群白之心": "s68szu.jpg",
+            "绀紫之心": "o4aigj.jpg",
+            "克利奥佩特拉": "zh86jm.jpg",
+            "七省": "se0gcj.jpg",
+            "喀山": "od1d6u.jpg",
+            "圣塔菲": "k0ffis.jpg",
+            "富兰克林": "iwxqci.jpg",
+            "巴拉卡少校": "12j85q.jpg",
+            "杜伊斯堡": "2j5765.jpg",
+            "冈依沙瓦号": "akcpi7.jpg",
+            "渡良濑": "qmus55.jpg",
+            "Z47": "gh05od.jpg",
+            "亚尔薇特": "udbmxr.jpg",
+            "腓特烈·卡尔": "pjpxlp.jpg",
+            "努比亚人": "rn7wb1.jpg",
+            "寰昌": "gyircl.jpg",
+            "松鲷": "9g6zys.jpg",
+            "星座": "as0ojo.jpg",
+            "尾张": "feyf11.jpg",
+            "吉尚": "jtpjgx.jpg",
+            "伴尔维": "5puwgr.jpg",
+            "戈里齐亚": "vnwgxi.jpg",
+            "阿蒂利奥·雷戈洛": "fkd6pi.jpg",
+            "奥托·冯·阿尔文斯莱本": "8sb8so.jpg",
+            "伏罗希洛夫": "cw9rs0.jpg",
+            "库尔斯克": "a2domv.jpg",
+            "皇家橡树": "38427c.jpg",
+            "忒修斯": "5whfdo.jpg",
+            "阿尔比恩": "wfwl3i.jpg",
+            "若月": "02edfo.jpg",
+            "布伦希尔德": "fyhf1s.jpg",
+            "朱塞佩·加里波第": "wujbqh.jpg",
+            "莱昂纳多·达·芬奇": "1qikws.jpg"
+        };
+
+        // --- BEGIN: ADDED CHARACTER WALLPAPERS ---
+        const characterWallpapers = {
+            "贝尔法斯特": "https://files.catbox.moe/0k6gzm.jpg",
+            "赫敏": "https://files.catbox.moe/td9duk.jpg",
+            "黛朵": "https://files.catbox.moe/mf0t8o.jpg",
+            "谢菲尔德": "https://files.catbox.moe/k2qccs.jpg",
+            "天狼星": "https://files.catbox.moe/veemf6.jpg",
+            "卡律布狄斯": "https://files.catbox.moe/fw53cu.jpg",
+            "斯库拉": "https://files.catbox.moe/bi47g7.jpg",
+            "光辉": "https://files.catbox.moe/63ounq.jpg",
+            "独角兽": "https://files.catbox.moe/4x7ej9.jpg",
+            "标枪": "https://files.catbox.moe/sb78ho.jpg",
+            "伊丽莎白": "https://files.catbox.moe/rztpzg.jpg",
+            "胡德": "https://files.catbox.moe/pdptnn.jpg",
+            "恶毒": "https://files.catbox.moe/9bxbgw.jpg",
+            "綾波": "https://files.catbox.moe/4rg3ai.jpg",
+            "信浓": "https://files.catbox.moe/824g13.jpg",
+            "岛风": "https://files.catbox.moe/29bjts.jpg",
+            "大凤": "https://files.catbox.moe/qi8blf.jpg",
+            "长门": "https://files.catbox.moe/mh8ou6.jpg",
+            "能代": "https://files.catbox.moe/ztc1ks.jpg",
+            "酒匂": "https://files.catbox.moe/cvovwk.jpg",
+            "利托里奥": "https://files.catbox.moe/5j6d03.jpg",
+            "奥斯特雷德·冯·帕赫贝尔": "https://files.catbox.moe/ptydjr.jpg",
+            "拉菲": "https://files.catbox.moe/oj39ns.jpg",
+            "Z23": "https://files.catbox.moe/a71d3o.jpg",
+            "长春": "https://files.catbox.moe/ovn697.jpg",
+            "欧根亲王": "https://files.catbox.moe/mhx6s3.jpg",
+            "龙凤": "https://files.catbox.moe/fxdf9u.jpg",
+            "圣地亚哥": "https://files.catbox.moe/7mywhq.jpg",
+            "可畏": "https://files.catbox.moe/bgj0aq.jpg",
+            "布莱默顿": "https://files.catbox.moe/8b1xdh.jpg",
+            "彼得": "https://files.catbox.moe/mtr499.jpg",
+            "罗恩": "https://files.catbox.moe/gx1yt3.jpg",
+            "亚德": "https://files.catbox.moe/2axoct.jpg",
+            "菲利克斯": "https://files.catbox.moe/ni94x6.jpg",
+            "怨仇": "https://files.catbox.moe/2j6dn7.jpg",
+            "弗兰德尔": "https://files.catbox.moe/ybvh9r.jpg",
+            "皇家财富号": "https://files.catbox.moe/f4e6rn.jpg",
+            "圣路易斯": "https://files.catbox.moe/cj334a.jpg",
+            "海伦娜": "https://files.catbox.moe/l7kag1.jpg",
+            "莫加多尔": "https://files.catbox.moe/8nux24.jpg",
+            "四万十": "https://files.catbox.moe/kytirt.jpg",
+            "赤城": "https://files.catbox.moe/9fdwty.jpg",
+            "加贺": "https://files.catbox.moe/traqgg.jpg",
+            "夕立": "https://files.catbox.moe/l0gtv2.jpg",
+            "高雄": "https://files.catbox.moe/e8tt7d.jpg",
+            "爱宕": "https://files.catbox.moe/tcd0f2.jpg",
+            "埃吉尔": "https://files.catbox.moe/f447xe.jpg",
+            "兴登堡": "https://files.catbox.moe/6degkv.jpg",
+            "安克雷奇": "https://files.catbox.moe/isokl1.jpg",
+            "镇海": "https://files.catbox.moe/al5mgu.jpg",
+            "胡滕": "https://files.catbox.moe/c18ujm.jpg",
+            "武藏": "https://files.catbox.moe/ve7vub.jpg",
+            "前卫": "https://files.catbox.moe/ayfm1q.jpg",
+            "阿尔萨斯": "https://files.catbox.moe/tns3v6.jpg",
+            "企业": "https://files.catbox.moe/ty4jtm.jpg",
+            "腓特烈大帝": "https://files.catbox.moe/tdshh1.jpg",
+            "俾斯麦": "https://files.catbox.moe/qzp41j.jpg",
+            "翔鹤": "https://files.catbox.moe/4fg9xl.jpg",
+            "天城": "https://files.catbox.moe/e0ph63.jpg",
+            "提尔比茨": "https://files.catbox.moe/10cad9.jpg",
+            "纳希莫夫": "https://files.catbox.moe/3eqt9b.jpg",
+            "奇尔沙治": "https://files.catbox.moe/wzinug.jpg",
+            "明石": "https://files.catbox.moe/73fb2e.jpg",
+            "雅努斯": "https://files.catbox.moe/vp75q6.jpg",
+            "维托里奥·维内托": "https://files.catbox.moe/x0s8qm.jpg",
+            "马可波罗": "https://files.catbox.moe/34tqm6.jpg",
+            "英仙座": "https://files.catbox.moe/xwoh39.jpg",
+            "普利茅斯": "https://files.catbox.moe/qdn6eq.jpg",
+            "云仙": "https://files.catbox.moe/6g25ey.jpg",
+            "苏维埃同盟": "https://files.catbox.moe/s6ol8k.jpg",
+            "新泽西": "https://files.catbox.moe/dg1pql.jpg",
+            "哈尔滨": "https://files.catbox.moe/51bzjb.jpg",
+            "白龙": "https://files.catbox.moe/iw6hoo.jpg",
+            "黎塞留": "https://files.catbox.moe/acms3f.jpg",
+            "让巴尔": "https://files.catbox.moe/opmymv.jpg",
+            "玛丽·西莱斯特号": "https://files.catbox.moe/tdspl6.jpg",
+            "维达号": "https://files.catbox.moe/yadlq8.jpg",
+            "海豚号": "https://files.catbox.moe/fmc2el.jpg",
+            "金鹿号": "https://files.catbox.moe/zhx01f.jpg",
+            "圣马丁号": "https://files.catbox.moe/zlgp61.jpg",
+            "塔什干": "https://files.catbox.moe/ctceid.jpg",
+            "加斯科涅": "https://files.catbox.moe/ocgfeg.jpg",
+            "萨拉托加": "https://files.catbox.moe/qfdanq.jpg",
+            "鲁普雷希特亲王": "https://files.catbox.moe/gwf6wu.jpg",
+            "埃塞克斯": "https://files.catbox.moe/f8bhgo.jpg",
+            "关岛": "https://files.catbox.moe/nzlu3p.jpg",
+            "和睦号": "https://files.catbox.moe/gxm9h6.jpg",
+            "初月": "https://files.catbox.moe/6zhllh.jpg",
+            "逸仙": "https://files.catbox.moe/k01pxh.jpg",
+            "厌战": "https://files.catbox.moe/9rz2pu.jpg",
+            "雪风": "https://files.catbox.moe/70wi7c.jpg",
+            "江风": "https://files.catbox.moe/bbbzns.jpg",
+            "应瑞": "https://files.catbox.moe/uwmrqw.jpg",
+            "肇和": "https://files.catbox.moe/k2cjql.jpg",
+            "喀琅施塔得": "https://files.catbox.moe/qr94pq.jpg",
+            "哈尔福德": "https://files.catbox.moe/9vnf8u.jpg",
+            "樫野": "https://files.catbox.moe/ps5d90.jpg",
+            "罗马": "https://files.catbox.moe/mthivo.jpg",
+            "苏维埃罗西亚": "https://files.catbox.moe/6thq9h.jpg",
+            "华甲": "https://files.catbox.moe/xz0x5v.jpg",
+            "柴郡": "https://files.catbox.moe/5tsvix.jpg",
+            "提康德罗加": "https://files.catbox.moe/u6wy0c.jpg",
+            "长风": "https://files.catbox.moe/cgdpvs.jpg",
+            "甘古特": "https://files.catbox.moe/7v995v.jpg",
+            "伏波": "https://files.catbox.moe/k1gchs.jpg",
+            "飞云": "https://files.catbox.moe/v3zh90.jpg",
+            "火奴鲁鲁": "https://files.catbox.moe/nr70ms.jpg",
+            "扎拉": "https://files.catbox.moe/2u7ne6.jpg",
+            "波拉": "https://files.catbox.moe/ywrtjx.jpg",
+            "狮": "https://files.catbox.moe/tk98au.jpg",
+            "约克城2": "https://files.catbox.moe/quki7s.jpg",
+            "弗里茨·鲁梅": "https://files.catbox.moe/d497ji.jpg",
+            "柯妮": "https://files.catbox.moe/1stiq2.jpg",
+            "拉斐尔": "https://files.catbox.moe/fw1j3v.jpg",
+            "特拉法尔加": "https://files.catbox.moe/ds9jfd.jpg",
+            "吾妻": "https://files.catbox.moe/dzqk9n.jpg",
+            "德雷克": "https://files.catbox.moe/nrkvhs.jpg",
+            "布雷斯特": "https://files.catbox.moe/iueuqs.jpg",
+            "那不勒斯": "https://files.catbox.moe/k0dj7l.jpg",
+            "筑摩": "https://files.catbox.moe/eu9eea.jpg",
+            "大山": "https://files.catbox.moe/w6u3w2.jpg",
+            "贝亚德": "https://files.catbox.moe/fcld2n.jpg",
+            "契卡洛夫": "https://files.catbox.moe/byna30.jpg",
+            "美因茨": "https://files.catbox.moe/dmkpym.jpg",
+            "香槟": "https://files.catbox.moe/e4ug0l.jpg",
+            "奥丁": "https://files.catbox.moe/csmugs.jpg",
+            "北风": "https://files.catbox.moe/1uciju.jpg",
+            "佐治亚": "https://files.catbox.moe/9ewh17.jpg",
+            "西雅图": "https://files.catbox.moe/qob6ee.jpg",
+            "路易九世": "https://files.catbox.moe/j8xwap.jpg",
+            "出云": "https://files.catbox.moe/pf9qbs.jpg",
+            "伊吹": "https://files.catbox.moe/3wcrlu.jpg",
+            "君主": "https://files.catbox.moe/rlv8yb.jpg",
+            "海王星": "https://files.catbox.moe/qrf8u2.jpg",
+            "金色暗影": "https://files.catbox.moe/16aycv.jpg",
+            "梦梦·贝莉雅·戴比路克": "https://files.catbox.moe/ltx3if.jpg",
+            "娜娜·阿丝达·戴比路克": "https://files.catbox.moe/h9ot9p.jpg",
+            "菈菈·撒塔琳·戴比路克": "https://files.catbox.moe/is6meg.jpg",
+            "雪不归": "https://files.catbox.moe/krmvd9.jpg",
+            "雪泉": "https://files.catbox.moe/w9b1vb.jpg",
+            "焰": "https://files.catbox.moe/rf7gzm.jpg",
+            "斑鸠": "https://files.catbox.moe/hk2nzh.jpg",
+            "飞鸟": "https://files.catbox.moe/t9az2i.jpg",
+            "卡菈·伊迪亚斯": "https://files.catbox.moe/uok4gt.jpg",
+            "帕特莉夏·阿贝尔海姆": "https://files.catbox.moe/xx4tij.jpg",
+            "科洛蒂娅·巴兰茨": "https://files.catbox.moe/3r3gln.jpg",
+            "莱莎琳·斯托特": "https://files.catbox.moe/3yfarc.jpg",
+            "公主": "https://files.catbox.moe/xl17sh.jpg",
+            "第二代": "https://files.catbox.moe/1a1eze.jpg",
+            "飞鸟川千濑": "https://files.catbox.moe/svbilt.jpg",
+            "南梦芽": "https://files.catbox.moe/6ufayk.jpg",
+            "新条茜": "https://files.catbox.moe/xlq3cx.jpg",
+            "宝多六花": "https://files.catbox.moe/mp1yv5.jpg",
+            "三浦梓": "https://files.catbox.moe/0al40b.jpg",
+            "水濑伊织": "https://files.catbox.moe/03uizh.jpg",
+            "如月千早": "https://files.catbox.moe/mnqo29.jpg",
+            "天海春香": "https://files.catbox.moe/0dgenv.jpg",
+            "环": "https://files.catbox.moe/ixd7n8.jpg",
+            "露娜": "https://files.catbox.moe/cr8ons.jpg",
+            "海咲": "https://files.catbox.moe/rs502v.jpg",
+            "霞": "https://files.catbox.moe/991iej.jpg",
+            "穗香": "https://files.catbox.moe/rpul7c.jpg",
+            "玛莉萝丝": "https://files.catbox.moe/m59o4v.jpg",
+            "绊爱": "https://files.catbox.moe/f89ct6.jpg",
+            "露露缇耶": "https://files.catbox.moe/t1rvxl.jpg",
+            "猫音": "https://files.catbox.moe/g70qux.jpg",
+            "久远": "https://files.catbox.moe/stiak7.jpg",
+            "翡绿之心": "https://files.catbox.moe/wqr14b.jpg",
+            "群白之心": "https://files.catbox.moe/42mgqj.jpg",
+            "绀紫之心": "https://files.catbox.moe/rdyp3f.jpg",
+            "克利奥佩特拉": "https://files.catbox.moe/80c3q8.jpg",
+            "七省": "https://files.catbox.moe/f257ur.jpg",
+            "喀山": "https://files.catbox.moe/yf4198.jpg",
+            "圣塔菲": "https://files.catbox.moe/6xt4av.jpg",
+            "富兰克林": "https://files.catbox.moe/p3ud0z.jpg",
+            "巴拉卡少校": "https://files.catbox.moe/68nayb.jpg",
+            "建武": "https://files.catbox.moe/nhkifo.jpg",
+            "杜伊斯堡": "https://files.catbox.moe/da5oyx.jpg",
+            "幻想号": "https://files.catbox.moe/ci8a2z.jpg",
+            "冈依沙瓦号": "https://files.catbox.moe/5bjqxi.jpg",
+            "渡良濑": "https://files.catbox.moe/keum9z.jpg",
+            "法戈": "https://files.catbox.moe/8rghlq.jpg",
+            "匹兹堡": "https://files.catbox.moe/rff1e9.jpg",
+            "果敢": "https://files.catbox.moe/f6ip1n.jpg",
+            "斯特拉斯堡": "https://files.catbox.moe/tyzgu0.jpg",
+            "Z47": "https://files.catbox.moe/1yyqlz.jpg",
+            "亚尔薇特": "https://files.catbox.moe/fgcuqz.jpg",
+            "布伦努斯": "https://files.catbox.moe/p21byd.jpg",
+            "腓特烈·卡尔": "https://files.catbox.moe/fh82n7.jpg",
+            "努比亚人": "https://files.catbox.moe/lfszlg.jpg",
+            "火力": "https://files.catbox.moe/xubr5a.jpg",
+            "寰昌": "https://files.catbox.moe/4ypush.jpg",
+            "松鲷": "https://files.catbox.moe/8je5jm.jpg",
+            "星座": "https://files.catbox.moe/fl7jgi.jpg",
+            "尾张": "https://files.catbox.moe/p3fgis.jpg",
+            "克莱蒙梭": "https://files.catbox.moe/bbh7k0.jpg",
+            "吉尚": "https://files.catbox.moe/ljdvg7.jpg",
+            "伴尔维": "https://files.catbox.moe/cyql9a.jpg",
+            "马赛曲": "https://files.catbox.moe/9kxttn.jpg",
+            "戈里齐亚": "https://files.catbox.moe/0q7pdt.jpg",
+            "阿蒂利奥·雷戈洛": "https://files.catbox.moe/byqeqn.jpg",
+            "雷根斯堡": "https://files.catbox.moe/baw0h0.jpg",
+            "奥托·冯·阿尔文斯莱本": "https://files.catbox.moe/czddtp.jpg",
+            "伏罗希洛夫": "https://files.catbox.moe/oiigqk.jpg",
+            "库尔斯克": "https://files.catbox.moe/ws0k5o.jpg",
+            "皇家橡树": "https://files.catbox.moe/59zexd.jpg",
+            "忒修斯": "https://files.catbox.moe/92spw1.jpg",
+            "古比雪夫": "https://files.catbox.moe/n5hxl3.jpg",
+            "阿尔比恩": "https://files.catbox.moe/9h4x58.jpg",
+            "若月": "https://files.catbox.moe/m741wh.jpg",
+            "布伦希尔德": "https://files.catbox.moe/w0w779.jpg",
+            "朱塞佩·加里波第": "https://files.catbox.moe/bijjro.jpg",
+            "莱昂纳多·达·芬奇": "https://files.catbox.moe/p0kkmq.jpg",
+            "不屈": "https://files.catbox.moe/2g3iha.jpg",
+            "霞飞": "https://files.catbox.moe/sq8mjk.jpg",
+            "不挠": "https://files.catbox.moe/w6lx93.jpg"
+        };
+        // --- END: ADDED CHARACTER WALLPAPERS ---
+
+        // --- BEGIN: GLOBAL DETAIL BACKGROUNDS ---
+        const detailBackgrounds = [
+            'https://files.catbox.moe/ij0rwt.png',
+            'https://files.catbox.moe/971q8r.png',
+            'https://files.catbox.moe/282390.png',
+            'https://files.catbox.moe/h7vwx4.png',
+            'https://files.catbox.moe/ob4r8h.png',
+            'https://files.catbox.moe/lkit7k.png',
+            'https://files.catbox.moe/o6hd1k.png',
+            'https://files.catbox.moe/u4am1n.png',
+            'https://files.catbox.moe/ih9im5.png',
+            'https://files.catbox.moe/543j8v.png',
+            'https://files.catbox.moe/108e0m.png',
+            'https://files.catbox.moe/hxrm8v.png',
+            'https://files.catbox.moe/9wcs1r.png',
+            'https://files.catbox.moe/rg63fj.png',
+            'https://files.catbox.moe/wuz0v8.png',
+            'https://files.catbox.moe/ij0rwt.png',
+            'https://files.catbox.moe/971q8r.png'
+        ];
+        // --- END: GLOBAL DETAIL BACKGROUNDS ---
+
+        // 新增：预加载图标数组
+        const preloadIcons = [
+            'https://files.catbox.moe/amvas7.png',
+
+        ];
+
+        // 表情包资源
+        const emojis = [
+            'vymnu0.gif',
+            'lo6j9j.gif',
+            'gai7xv.jpeg',  // 添加已知的JPEG格式表情包
+            'e34fmt.jpg'    // 添加已知的JPG格式表情包
+            // 在这里添加更多表情包文件名
+        ];
+
+        // 新增：用于存储从<img>标签提取的图片文件名
+        const imageFilesToPreload = [];
+
+        // 添加提取emoji的函数
+        function extractEmojisFromChatData(data) {
+            const extractedEmojis = [];
+            
+            // 直接匹配<emoji>标签内的全部内容，然后提取其中的文件名（支持gif/jpg/jpeg/png）
+            const emojiPattern = /<emoji>(.*?)<\/emoji>/g;
+            let match;
+            
+            while ((match = emojiPattern.exec(data)) !== null) {
+                if (match[1]) {
+                    // 从标签内容中提取文件名，支持所有常见图片格式
+                    const filenameMatch = match[1].match(/([a-zA-Z0-9]+\.(?:gif|jpg|jpeg|png))$/i);
+                    if (filenameMatch && filenameMatch[1]) {
+                        const filename = filenameMatch[1];
+                        if (!emojis.includes(filename)) {
+                            console.log("Found emoji in chat data:", filename);
+                            extractedEmojis.push(filename);
+                        }
+                    }
+                }
+            }
+            
+            return extractedEmojis;
+        }
+
+        // 修改获取头像URL的函数
+        function getAvatarUrl(username) {
+            return BASE_AVATAR_URL + (avatarMap[username] || "kv5m2l.png"); // 默认使用长门头像
+        }
+
+        // 预加载所有资源
+        class ResourceLoader {
+            constructor() {
+                // 计算总资源数（包括所有需要预加载的资源）
+                this.totalResources = [
+                    ...emojis.map(e => BASE_AVATAR_URL + e), // 表情包
+                    ...preloadIcons,              // 图标
+                    ...Object.values(avatarMap).map(a => BASE_AVATAR_URL + a), // 头像
+                    ...imageFilesToPreload.map(f => BASE_AVATAR_URL + f),  // <img>标签图片
+                    ...(characterWallpapers ? Object.values(characterWallpapers) : []), //Safely add character wallpapers
+                    ...(detailBackgrounds || []) // Safely add detail backgrounds
+                ].length;
+
+                this.loadedResources = 0;
+                this.loadingContainer = null;
+                this.progressBar = null;
+                this.loadingText = null;
+                this.imageCache = new Map();
+                this.imageTextCache = new Map();
+                this.loadedEmojis = new Set();
+                this.priorityQueue = new Set();
+                this.isInitialLoad = true;
+            }
+
+            init() {
+                this.createLoadingUI();
+                this.preloadResources();
+            }
+
+            // 添加优先加载队列
+            addToPriorityQueue(username) {
+                if (avatarMap[username] && !this.imageCache.has(BASE_AVATAR_URL + avatarMap[username])) {
+                    this.priorityQueue.add(username);
+                    // 如果不是初始加载阶段，立即开始加载
+                    if (!this.isInitialLoad) {
+                        this.loadPriorityAvatar(username);
+                    }
+                }
+            }
+
+            // 加载优先级头像
+            async loadPriorityAvatar(username) {
+                if (!avatarMap[username]) return;
+                
+                const avatarUrl = BASE_AVATAR_URL + avatarMap[username];
+                if (this.imageCache.has(avatarUrl)) return;
+
+                try {
+                    await this.preloadImage(avatarUrl);
+                    this.priorityQueue.delete(username);
+                } catch (error) {
+                    console.error(`Failed to load priority avatar for ${username}:`, error);
+                }
+            }
+
+            createLoadingUI() {
+                this.loadingContainer = document.createElement('div');
+                this.loadingContainer.className = 'loading-container';
+                // 随机选择一个预加载图标
+                const randomIconUrl = preloadIcons[Math.floor(Math.random() * preloadIcons.length)];
+                this.loadingContainer.innerHTML = `
+                    <div class="loading-icon">
+                        <img src="${randomIconUrl}" alt="Loading">
+                </div>
+                    <div class="loading-progress">
+                        <div class="progress-bar"></div>
+                </div>
+                    <div class="loading-text">正在加载资源...</div>
+                `;
+
+                const chatContainer = document.querySelector('.chat-container');
+                chatContainer.style.position = 'relative';
+                chatContainer.appendChild(this.loadingContainer);
+
+                this.progressBar = this.loadingContainer.querySelector('.progress-bar');
+                this.loadingText = this.loadingContainer.querySelector('.loading-text');
+            }
+
+            updateProgress() {
+                this.loadedResources++;
+                if (this.progressBar && this.loadingText) {
+                const progress = (this.loadedResources / this.totalResources) * 100;
+                this.progressBar.style.width = `${progress}%`;
+                    this.loadingText.textContent = `加载中... ${Math.round(progress)}%`;
+                }
+            }
+
+            preloadImage(url) {
+                return new Promise((resolve) => { // 始终 resolve
+                    if (this.imageCache.has(url)) {
+                        this.updateProgress();
+                        resolve(this.imageCache.get(url)); // 如果已缓存，resolve 缓存的图片
+                        return;
+                    }
+
+                    const img = new Image();
+                    img.onload = () => {
+                        this.imageCache.set(url, img);
+                        this.updateProgress();
+                        resolve(img); // 图片加载成功，resolve 图片对象
+                    };
+                    img.onerror = () => {
+                        console.error(`预加载图片失败: ${url}`); // 输出错误到控制台
+                        this.updateProgress(); // 即使失败，也更新进度
+                        resolve(null); // resolve null 表示加载失败，但不阻塞 Promise.all
+                    };
+                    img.src = url;
+                });
+            }
+
+            preloadResources() {
+                const allUrls = [
+                    ...emojis.map(e => BASE_AVATAR_URL + e),
+                    ...preloadIcons,
+                    ...Object.values(avatarMap).map(a => BASE_AVATAR_URL + a),
+                    ...imageFilesToPreload.map(f => BASE_AVATAR_URL + f),
+                    ...(characterWallpapers ? Object.values(characterWallpapers) : []), //Safely add character wallpapers
+                    ...(detailBackgrounds || []) // Safely add detail backgrounds
+                ];
+                // 在开始加载前正确设置 totalResources
+                this.totalResources = allUrls.length;
+
+
+                const promises = allUrls.map(url => this.preloadImage(url));
+
+                Promise.all(promises).then(() => {
+                    this.isInitialLoad = false;
+                    if (this.loadingContainer) {
+                        this.loadingContainer.style.opacity = '0';
+                        setTimeout(() => {
+                            this.loadingContainer?.remove();
+                            this.loadingContainer = null; // 清理引用
+
+                            // 在加载动画移除后开始流式显示消息
+                            //确保 messages 变量在此作用域可用，如果 parseJuusChat 在外部调用，需要传递 messages
+                            const parsedData = parseJuusChat(chatData); // 重新解析或确保 messages 可访问
+                            streamMessages(parsedData.messages);
+                        }, 300); // 等待淡出动画完成
+                    } else {
+                         // 如果加载容器已不存在，直接开始流式显示
+                        const parsedData = parseJuusChat(chatData); // 重新解析或确保 messages 可访问
+                        streamMessages(parsedData.messages);
+                    }
+                }).catch(error => {
+                    // 一般不会到这里，因为 preloadImage 总是 resolve
+                    console.error("资源预加载阶段发生意外错误:", error);
+                    this.isInitialLoad = false;
+                    if (this.loadingContainer) {
+                        this.loadingContainer.style.opacity = '0';
+                        setTimeout(() => {
+                            this.loadingContainer?.remove();
+                            this.loadingContainer = null;
+                            const parsedData = parseJuusChat(chatData); // 重新解析或确保 messages 可访问
+                            streamMessages(parsedData.messages); // 尝试继续
+                        }, 300);
+                    } else {
+                        const parsedData = parseJuusChat(chatData); // 重新解析或确保 messages 可访问
+                        streamMessages(parsedData.messages);
+                    }
+                });
+            }
+
+            // 获取已缓存的图片
+            getCachedImage(url) {
+                return this.imageCache.get(url);
+            }
+
+            // 获取已缓存的图片文本消息
+            getCachedImageText(url) {
+                return this.imageTextCache.get(url);
+            }
+
+            // 预加载或获取emoji图片
+            getOrLoadEmoji(emojiFilename) {
+                const emojiUrl = `https://files.catbox.moe/${emojiFilename}`;
+                
+                // 如果已经缓存，直接返回
+                if (this.imageCache.has(emojiUrl)) {
+                    return Promise.resolve(this.imageCache.get(emojiUrl));
+                }
+                
+                // 如果不在缓存中，动态加载
+                return this.preloadImage(emojiUrl);
+            }
+        }
+
+        // 初始化资源加载器并导出实例
+        let loader;
+
+        // NEW: Define applyChatWallpaper function
+        function applyChatWallpaper(chatTitle) {
+            console.log('[PC Wallpaper] applyChatWallpaper called with title:', chatTitle); // Log entry and title
+            const chatContainerElement = document.querySelector('.chat-container');
+            
+            if (!chatContainerElement) {
+                console.error('[PC Wallpaper] Critical: chat-container element NOT FOUND.');
+                return;
+            }
+            
+            if (typeof characterWallpapers !== 'object' || !characterWallpapers || Object.keys(characterWallpapers).length === 0) {
+                console.warn("[PC Wallpaper] characterWallpapers object is not found, empty, or not an object.");
+                chatContainerElement.style.backgroundImage = ''; // Clear any existing wallpaper
+                console.log('[PC Wallpaper] Cleared wallpaper because characterWallpapers is unsuitable.');
+                return;
+            }
+
+            let wallpaperUrlToLoad = null;
+            let wallpaperKey = chatTitle; 
+
+            console.log('[PC Wallpaper] Attempting to find wallpaper for key:', wallpaperKey);
+
+            if (chatTitle && characterWallpapers[chatTitle]) {
+                wallpaperUrlToLoad = characterWallpapers[chatTitle];
+                console.log(`[PC Wallpaper] Found specific wallpaper for '${chatTitle}': ${wallpaperUrlToLoad}`);
+            } else {
+                console.log(`[PC Wallpaper] No specific wallpaper for '${chatTitle}'. Attempting to use default or random.`);
+                const wallpaperKeys = Object.keys(characterWallpapers);
+                if (wallpaperKeys.length > 0) {
+                    // Fallback to a specific default or a random one
+                    const defaultWallpaperKey = "贝尔法斯特"; // Example default
+                    if (characterWallpapers[defaultWallpaperKey]) {
+                        wallpaperUrlToLoad = characterWallpapers[defaultWallpaperKey];
+                        wallpaperKey = defaultWallpaperKey;
+                        console.log(`[PC Wallpaper] Using default wallpaper '${wallpaperKey}': ${wallpaperUrlToLoad}`);
+                    } else {
+                        const randomIndex = Math.floor(Math.random() * wallpaperKeys.length);
+                        const randomKey = wallpaperKeys[randomIndex];
+                        wallpaperUrlToLoad = characterWallpapers[randomKey];
+                        wallpaperKey = randomKey;
+                        console.log(`[PC Wallpaper] Using random wallpaper '${wallpaperKey}': ${wallpaperUrlToLoad}`);
+                    }
+                } else {
+                    console.warn("[PC Wallpaper] No wallpapers available in characterWallpapers object.");
+                    chatContainerElement.style.backgroundImage = '';
+                    console.log('[PC Wallpaper] Cleared wallpaper because no wallpapers are available.');
+                    return;
+                }
+            }
+
+            if (wallpaperUrlToLoad) {
+                console.log(`[PC Wallpaper] Applying wallpaper: ${wallpaperUrlToLoad} to .chat-container`);
+                chatContainerElement.style.backgroundImage = `url('${wallpaperUrlToLoad}')`;
+                chatContainerElement.style.backgroundSize = 'cover';
+                chatContainerElement.style.backgroundPosition = 'center';
+                chatContainerElement.style.backgroundRepeat = 'no-repeat';
+            } else {
+                console.warn(`[PC Wallpaper] No wallpaper URL determined for title: '${chatTitle}'. Clearing wallpaper.`);
+                chatContainerElement.style.backgroundImage = '';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Define shared DOM elements high up so they are accessible
+            const chatHeader = document.querySelector('.chat-header');
+            const statusPopup = document.querySelector('.status-popup');
+
+            // 先从聊天数据中提取emoji并添加到预加载列表
+            const extractedEmojis = extractEmojisFromChatData(chatData);
+            console.log("Extracted emojis from chat data:", extractedEmojis);
+            //确保emojis数组中的唯一性
+            extractedEmojis.forEach(emoji => {
+                if (!emojis.includes(emoji)) {
+                    emojis.push(emoji);
+                }
+            });
+            
+            // 解析聊天数据一次
+            const parsedData = parseJuusChat(chatData);
+            const { title, myCameraStatus, theirCameraStatus, messages, topics, choices, imageFilenamesFromImgTags } = parsedData;
+
+            // 将从<img>标签提取的图片文件名添加到预加载列表，确保唯一性
+            if (imageFilenamesFromImgTags) {
+                imageFilenamesFromImgTags.forEach(filename => {
+                    if (!imageFilesToPreload.includes(filename)) {
+                        imageFilesToPreload.push(filename);
+                    }
+                });
+            }
+            
+            // 然后初始化资源加载器
+            loader = new ResourceLoader();
+            loader.init();
+
+            // REMOVED old wallpaper logic from here:
+            // const chatContainerElement = document.querySelector('.chat-container');
+            // if (chatContainerElement && typeof characterWallpapers === 'object' && ...) { ... }
+
+            // NEW: Call applyChatWallpaper after parsing data
+            applyChatWallpaper(title);
+
+            // NEW: Setup MutationObserver for chat title changes
+            const chatTitleElementForObserver = document.querySelector('.chat-header-title');
+            if (chatTitleElementForObserver) {
+                const observer = new MutationObserver(mutationsList => {
+                    for (const mutation of mutationsList) {
+                        // Check for changes to the direct text content or child nodes (if title is wrapped)
+                        if (mutation.type === 'childList' || mutation.type === 'characterData') {
+                            const newTitle = chatTitleElementForObserver.textContent.trim();
+                            console.log('Chat title changed to:', newTitle, '(MutationObserver)');
+                            applyChatWallpaper(newTitle);
+                            break; 
+                        }
+                    }
+                });
+                observer.observe(chatTitleElementForObserver, { childList: true, characterData: true, subtree: true });
+            } else {
+                console.warn("Chat title element (.chat-header-title) not found for MutationObserver.");
+            }
+            
+            // 添加滚动事件监听，跟踪用户主动滚动的时间
+            const messagesContainer = document.querySelector('.messages-container');
+            messagesContainer.addEventListener('scroll', function() {
+                // 只记录用户主动滚动，而非程序触发的滚动
+                if (!scrollThrottleTimer) {
+                    lastScrollTime = Date.now();
+                }
+            });
+
+            // 初始化状态栏弹窗功能
+            initStatusPopup();
+
+            // 新功能：点击消息区域切换输入栏的显示/隐藏
+            const messagesContainerForToggle = document.querySelector('.messages-container');
+            const inputContainerForToggle = document.querySelector('.input-container');
+
+            if (messagesContainerForToggle && inputContainerForToggle) {
+                // 获取 inputContainer 初始的 display 值，以便恢复
+                const originalInputContainerDisplay = window.getComputedStyle(inputContainerForToggle).display;
+
+                messagesContainerForToggle.addEventListener('click', (event) => {
+                    // 如果点击的是消息气泡、头像或叙事气泡，则不切换输入栏的显示状态
+                    if (event.target.closest('.message-bubble') || 
+                        event.target.closest('.narration-bubble') || 
+                        event.target.closest('.avatar') ||
+                        event.target.closest('.emoji-image') || // 防止点击表情包也触发
+                        event.target.closest('.inline-chat-image')) { // 防止点击图片也触发
+                        return;
+                    }
+
+                    if (inputContainerForToggle.style.display === 'none') {
+                        inputContainerForToggle.style.display = originalInputContainerDisplay;
+                    } else {
+                        inputContainerForToggle.style.display = 'none';
+                    }
+                });
+            }
+        });
+
+        // 解析消息数据的函数
+        function parseJuusChat(chatData) {
+            // 移除对 selectRandomBackgrounds 的调用
+            // selectRandomBackgrounds(); 
+
+            const imageFilenamesFromImgTags = []; // 初始化用于收集<img>标签图片文件名的数组
+
+            const titleMatch = chatData.match(/title:(.*?)\n/);
+            const title = titleMatch ? titleMatch[1] : '';
+
+            // 解析我方发送消息
+            const myMessageMatch = chatData.match(/我方发送消息:\[(.*?)\]/);
+            const myMessageText = myMessageMatch ? myMessageMatch[1] : '';
+            
+            // 解析状态变量
+            const myVideoMatch = chatData.match(/我方画面状态:(.*?)\n/);
+            const myAudioMatch = chatData.match(/我方语音状态:(.*?)\n/);
+            const theirVideoMatch = chatData.match(/对方画面状态:(.*?)\n/);
+            const theirAudioMatch = chatData.match(/对方语音状态:(.*?)\n/);
+            const interactionMatch = chatData.match(/交互模块:(.*?)\n/);
+            
+            // 提取状态值
+            const myVideoStatus = myVideoMatch ? myVideoMatch[1].trim() : '';
+            const myAudioStatus = myAudioMatch ? myAudioMatch[1].trim() : '';
+            const theirVideoStatus = theirVideoMatch ? theirVideoMatch[1].trim() : '';
+            const theirAudioStatus = theirAudioMatch ? theirAudioMatch[1].trim() : '';
+            const interactionStatus = interactionMatch ? interactionMatch[1].trim() : '';
+
+            // 修改消息匹配正则，使其能够匹配到 </messages> 结束标签
+            const messagesMatch = chatData.match(/<messages>([\s\S]*?)<\/messages>/);
+            const messagesText = messagesMatch ? messagesMatch[1] : '';
+
+            // 处理我方消息，如果存在分隔符，将其分组
+            let myMessages = [];
+            if (myMessageText) {
+                if (myMessageText.includes('/')) {
+                    const parts = myMessageText.split('/').map(part => part.trim());
+                    myMessages = parts.map((part, index) => ({
+                        username: "指挥官",
+                        content: part,
+                        type: 'text',
+                        isFirstInGroup: index === 0,
+                        isPartOfGroup: true,
+                        isPlayer: true
+                    }));
+                } else {
+                    myMessages = [{
+                        username: "指挥官",
+                        content: myMessageText,
+                        type: 'text',
+                        isFirstInGroup: true,
+                        isPartOfGroup: false,
+                        isPlayer: true
+                    }];
+                }
+            }
+
+            // 解析主要消息
+            const mainMessages = messagesText.split('\n')
+                .filter(line => line.trim()) // 保留这里的trim，它会过滤掉空行
+                .map(line => {
+                    // 处理叙事消息
+                    const narrationMatch = line.match(/<(narration|camera|system|audio|interaction)>(.*?)<\/\1>/);
+                    if (narrationMatch) {
+                        // 分割叙事内容
+                        const narrationParts = narrationMatch[2].split('/').map(part => part.trim());
+                        // 为每个部分创建单独的narration消息
+                        return narrationParts.map(part => ({
+                            type: 'narration',
+                            subtype: narrationMatch[1], // 记录原始标签类型，以便将来可能的扩展
+                            content: part
+                        }));
+                    }
+
+                    // 处理其他类型的消息 (username|content)
+                    if (line.includes('|')) {
+                        const trimmedLine = line.trim();
+                        const [username, originalContentPart] = trimmedLine.split('|', 2);
+                        // 移除可能存在的最外层方括号
+                        const contentToParse = originalContentPart.replace(/^\[|\]$/g, '').trim();
+                        
+                        let resultingMessages = [];
+
+                        // 使用正则表达式分割内容，保留 emoji 和 img 标签作为分隔符本身
+                        // 这会将文本、emoji标签、img标签分成不同的部分
+                        const segments = contentToParse.split(/(<emoji>.*?<\/emoji>|<img>.*?<\/img>)/gi).filter(s => s && s.trim() !== '');
+
+                        if (segments.length === 0 && contentToParse.trim() !== '') {
+                            // 如果分割后为空，但原始解析内容不为空 (例如纯文本无特殊标签)
+                            if (contentToParse.includes('/')) {
+                                contentToParse.split('/').forEach(part => {
+                                    if (part.trim()) {
+                                        resultingMessages.push({ username, content: part.trim(), type: 'text' });
+                                    }
+                                });
+                            } else {
+                                resultingMessages.push({ username, content: contentToParse, type: 'text' });
+                            }
+                        } else {
+                            segments.forEach(segment => {
+                                const trimmedSegment = segment.trim();
+                                const emojiTagMatch = trimmedSegment.match(/^<emoji>(.*?)<\/emoji>$/i);
+                                const imgTagMatch = trimmedSegment.match(/^<img>\[(.*?)\]\[(.*?)\]<\/img>$/i);
+
+                                if (emojiTagMatch) {
+                                    const fileMatch = emojiTagMatch[1].match(/([a-zA-Z0-9]+\.(?:gif|jpg|jpeg|png))$/i);
+                                    if (fileMatch && fileMatch[1]) {
+                                        resultingMessages.push({ username, content: fileMatch[1], type: 'emoji' });
+                                    } else {
+                                        // 如果emoji标签内不是标准的图片文件名，作为文本处理
+                                        resultingMessages.push({ username, content: emojiTagMatch[1], type: 'text' });
+                                    }
+                                } else if (imgTagMatch) {
+                                    const imgFileMatch = imgTagMatch[1].match(/[a-z0-9]+\.(?:png|jpg|gif)$/i);
+                                    if (imgFileMatch && imgFileMatch[0]) {
+                                        // 收集图片文件名用于预加载，确保唯一性
+                                        if (!imageFilenamesFromImgTags.includes(imgFileMatch[0])) {
+                                            imageFilenamesFromImgTags.push(imgFileMatch[0]);
+                                        }
+                                        resultingMessages.push({
+                                username,
+                                content: {
+                                                image: `https://files.catbox.moe/${imgFileMatch[0]}`,
+                                                text: imgTagMatch[2]
+                                            },
+                                            type: 'image-text'
+                                        });
+                                    } else {
+                                         // 如果img标签内图片格式不正确，作为文本处理
+                                        resultingMessages.push({ username, content: `[图片解析错误: ${imgTagMatch[0]}]`, type: 'text'});
+                                    }
+                                } else { // Text segment
+                                    trimmedSegment.split('/').forEach(part => {
+                                        if (part.trim()) {
+                                            resultingMessages.push({ username, content: part.trim(), type: 'text' });
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                        
+                        if (resultingMessages.length > 0) {
+                            return resultingMessages.map((msg, index, arr) => ({
+                                ...msg,
+                                isFirstInGroup: index === 0,
+                                isPartOfGroup: arr.length > 1 
+                            }));
+                        }
+                        return null; // No valid messages produced from this line
+                    }
+                    return null; // If not narration and not a '|' line
+                })
+                .filter(message => message !== null)
+                .flat(); // 展平数组，因为现在可能有嵌套的消息数组
+            
+            // 将我方消息添加到主消息数组的开头
+            const allMessages = [...myMessages, ...mainMessages];
+
+            // 修改话题匹配正则，使其能够在 </messages> 之后匹配，并忽略行首空格
+            const topicMatch = chatData.match(/<topic>\s*\n([\s\S]*?)\n\s*<\/topic>/);
+            const topics = topicMatch ? topicMatch[1]
+                .split('\n')
+                .map(topic => topic.trim())
+                .filter(topic => topic && topic.startsWith('[') && topic.endsWith(']'))
+                .map(topic => topic.slice(1, -1)) : [];
+
+            // 修改选项匹配正则，使其能够在 </topic> 之后匹配，并忽略行首空格
+            const choicesMatch = chatData.match(/<choices>\s*\n([\s\S]*?)\n\s*<\/choices>/);
+            const choices = choicesMatch ? choicesMatch[1]
+                .split('\n')
+                .map(choice => choice.trim())
+                .filter(choice => choice && choice.startsWith('[') && choice.endsWith(']'))
+                .map(choice => choice.slice(1, -1)) : [];
+
+            return { 
+                title, 
+                myCameraStatus: {
+                    video: myVideoStatus,
+                    audio: myAudioStatus
+                },
+                theirCameraStatus: {
+                    video: theirVideoStatus,
+                    audio: theirAudioStatus
+                },
+                interaction: interactionStatus,
+                messages: allMessages, 
+                topics, 
+                choices,
+                imageFilenamesFromImgTags // 返回收集到的图片文件名
+            };
+        }
+
+        // 修改创建消息元素的函数
+        function createMessageElement(message, isPlayer = false, isFollowUp = false) {
+            // 使用消息中的isPlayer标记覆盖参数
+            if (message.isPlayer) {
+                isPlayer = true;
+            }
+            
+            // 处理叙事消息
+            if (message.type === 'narration') {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message';
+                messageDiv.innerHTML = `
+                    <div class="narration-container">
+                        <div class="narration-bubble">${message.content}</div>
+            </div>
+                `;
+                messageDiv.classList.add('show');
+                return messageDiv;
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isPlayer ? 'player-message' : ''} ${isFollowUp ? 'follow-up' : ''}`;
+
+            let contentHtml = '';
+
+            switch (message.type) {
+                case 'image-text':
+                    contentHtml = `
+                        <div class="message-bubble has-image-text">
+                            <img src="${message.content.image}" alt="${message.content.text || 'Image'}" class="inline-chat-image">
+                            ${/* Remove caption from here: message.content.text ? `<div class="image-caption">${message.content.text}</div>` : '' */ ''}
+            </div>
+                    `;
+                    break;
+                case 'emoji':
+                    // 检查是否有文件扩展名，支持多种格式
+                    const emojiMatch = message.content.match(/[a-zA-Z0-9]+\.(?:gif|jpg|jpeg|png)$/i);
+                    // 确保emoji文件名存在
+                    if (emojiMatch && emojiMatch[0]) {
+                        // 预加载或获取emoji图片
+                        loader.getOrLoadEmoji(emojiMatch[0])
+                            .catch(err => console.error("Error loading emoji:", err));
+                        
+                    contentHtml = `
+                        <img src="https://files.catbox.moe/${emojiMatch[0]}" alt="emoji" class="emoji-image">
+                    `;
+                    } else {
+                        // 如果没有标准文件名，可能是直接使用的文件名
+                        contentHtml = `
+                            <img src="https://files.catbox.moe/${message.content}" alt="emoji" class="emoji-image">
+                        `;
+                    }
+                    break;
+                default:
+                    contentHtml = `<div class="message-bubble">${message.content}</div>`;
+            }
+
+            // 检查是否有对应的头像
+            const hasAvatar = avatarMap.hasOwnProperty(message.username);
+            const avatarHtml = hasAvatar ?
+                `<img class="avatar" src="${getAvatarUrl(message.username)}" alt="avatar" style="cursor: pointer;" title="点击@${message.username}">` :
+                `<div class="avatar" style="background: rgba(0,0,0,0.1); cursor: pointer;" title="点击@${message.username}"></div>`;
+
+            messageDiv.innerHTML = `
+                ${isPlayer ? '' : avatarHtml}
+                <div class="message-content">
+                    ${isPlayer || isFollowUp ? '' : `<div class="username">${message.username}</div>`}
+                    ${contentHtml}
+        </div>
+            `;
+
+            // 为头像添加点击事件（无论是否有头像图片）
+            if (!isPlayer && !isFollowUp) {
+                const avatarElement = messageDiv.querySelector('.avatar');
+                let longPressTimer;
+                let isLongPressActionTriggered = false;
+                const LONG_PRESS_DURATION = 750; // milliseconds
+
+                const handleLongPress = () => {
+                    isLongPressActionTriggered = true;
+                    const characterName = message.username;
+                    // 构建符合用户要求的命令格式
+                    const command = `/send 回复私聊\n私聊对象:${characterName}`;
+                    triggerSlash(command);
+
+                    // 长按视觉反馈
+                    avatarElement.style.transition = 'transform 0.1s ease-out';
+                    avatarElement.style.transform = 'scale(0.9)';
+                    setTimeout(() => {
+                        avatarElement.style.transform = 'scale(1)';
+                    }, 150);
+                };
+
+                const handleShortClick = () => {
+                    const input = document.querySelector('.message-input');
+                    const currentValue = input.value;
+                    const cursorPos = input.selectionStart || currentValue.length; // 若selectionStart无效则默认末尾
+
+                    const newValue = currentValue.slice(0, cursorPos) +
+                                   `@${message.username} ` +
+                                   currentValue.slice(cursorPos);
+
+                    input.value = newValue;
+                    const newCursorPos = cursorPos + message.username.length + 2;
+                    input.setSelectionRange(newCursorPos, newCursorPos);
+                    input.focus();
+                };
+
+                const startPress = (e) => {
+                    if (e.type === 'mousedown' && e.button !== 0) return; // 仅处理鼠标左键
+
+                    isLongPressActionTriggered = false;
+                    clearTimeout(longPressTimer); 
+                    longPressTimer = setTimeout(handleLongPress, LONG_PRESS_DURATION);
+                };
+
+                const endPress = (e) => {
+                    if (e.type === 'mouseup' && e.button !== 0) return; // 仅处理鼠标左键
+
+                    clearTimeout(longPressTimer);
+                    if (!isLongPressActionTriggered) {
+                        handleShortClick();
+                    }
+                };
+
+                const cancelPress = () => {
+                    clearTimeout(longPressTimer);
+                };
+
+                // 鼠标事件
+                avatarElement.addEventListener('mousedown', startPress);
+                avatarElement.addEventListener('mouseup', endPress);
+                avatarElement.addEventListener('mouseleave', cancelPress);
+
+                // 触摸事件
+                avatarElement.addEventListener('touchstart', startPress, { passive: true });
+                avatarElement.addEventListener('touchend', endPress);
+                avatarElement.addEventListener('touchcancel', cancelPress);
+                
+                // 注意: 为了区分长按和滑动, 可能需要更复杂的 touchmove 处理逻辑来取消计时器。
+                // 此处为简化版本。
+            }
+
+            // 为图片文本消息添加点击事件 (to the bubble itself)
+            if (message.type === 'image-text') {
+                const bubble = messageDiv.querySelector('.message-bubble.has-image-text');
+                if (bubble) {
+                    bubble.addEventListener('click', function() {
+                    showImageDetail(message);
+                });
+                }
+            }
+
+            return messageDiv;
+        }
+
+        // 创建并显示图片详情
+        async function showImageDetail(message) {
+            const existingOverlay = document.querySelector('.fullscreen-overlay');
+            if (existingOverlay) {
+                existingOverlay.remove();
+            }
+
+            // 创建加载指示器
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 15px 25px;
+                border-radius: 25px;
+                font-size: 14px;
+                z-index: 2001;
+            `;
+            loadingIndicator.textContent = '正在加载图片...';
+            document.body.appendChild(loadingIndicator);
+
+            // 确保背景和内容图片都已加载
+            const randomBg = detailBackgrounds[Math.floor(Math.random() * detailBackgrounds.length)];
+            try {
+                // 等待背景图片加载
+                const bgImage = await new Promise((resolve, reject) => {
+                    const cachedBg = loader.getCachedImage(randomBg);
+                    if (cachedBg) {
+                        resolve(cachedBg);
+                            } else {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.onerror = reject;
+                        img.src = randomBg;
+                    }
+                });
+
+                // 等待内容图片加载
+                const contentImage = await new Promise((resolve, reject) => {
+                    const cachedContent = loader.getCachedImage(message.content.image);
+                    if (cachedContent) {
+                        resolve(cachedContent);
+                    } else {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.onerror = reject;
+                        img.src = message.content.image;
+                    }
+                });
+
+                // 移除加载指示器
+                loadingIndicator.remove();
+
+                // 创建并显示蒙版
+                const overlay = document.createElement('div');
+                overlay.className = 'fullscreen-overlay';
+
+                const backgroundStyle = `background-image: url('${bgImage.src}'); background-position: center; background-size: cover; background-repeat: no-repeat;`;
+
+                overlay.innerHTML = `
+                    <div class="detail-container" style="${backgroundStyle}">
+                        <div class="detail-content">
+                            <div class="detail-text">${message.content.text}</div>
+                            <img src="${contentImage.src}" alt="详情图片" class="detail-image">
+        </div>
+                        <button class="zoom-out-button" title="缩小图片">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z"/>
+                            </svg>
+                        </button>
+                        <button class="zoom-in-button" title="放大图片">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm-2-5h2V7h2v2h2v2h-2v2h-2v-2H7z"/>
+                            </svg>
+                        </button>
+                        <button class="move-up-button" title="向上移动图片">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/>
+                            </svg>
+                        </button>
+                        <button class="move-down-button" title="向下移动图片">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+                            </svg>
+                        </button>
+                        <button class="rotate-button" title="旋转图片">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z"/>
+                            </svg>
+                        </button>
+    </div>
+                `;
+
+                document.body.appendChild(overlay);
+
+                // 获取图片元素和按钮
+                const detailImage = overlay.querySelector('.detail-image');
+                const rotateButton = overlay.querySelector('.rotate-button');
+                const zoomInButton = overlay.querySelector('.zoom-in-button');
+                const zoomOutButton = overlay.querySelector('.zoom-out-button');
+                const moveUpButton = overlay.querySelector('.move-up-button');
+                const moveDownButton = overlay.querySelector('.move-down-button');
+                
+                // 当前旋转角度
+                let currentRotation = 0;
+                // 当前缩放比例，初始为1（原始大小）
+                let currentScale = 1;
+                // 当前Y轴位移值（上下移动），单位像素
+                let currentYPosition = 0;
+                // 缩放步长
+                const scaleStep = 0.05;
+                // 移动步长
+                const moveStep = 10;
+                // 缩放范围限制
+                const minScale = 0.5;
+                const maxScale = 3;
+                // 移动范围限制（像素）
+                const maxYMove = 300;
+                // 长按缩放间隔（毫秒）
+                const zoomInterval = 50;
+                // 长按移动间隔（毫秒）
+                const moveInterval = 50;
+                // 保存长按定时器ID
+                let zoomIntervalId = null;
+                let moveIntervalId = null;
+                
+                // 添加旋转按钮点击事件
+                rotateButton.addEventListener('click', (e) => {
+                    e.stopPropagation(); // 阻止事件冒泡，防止关闭弹窗
+                    
+                    // 更新旋转角度
+                    currentRotation = (currentRotation + 90) % 360;
+                    
+                    // 应用旋转
+                    updateImageTransform();
+                    
+                    // 更新旋转按钮状态
+                    rotateButton.setAttribute('data-rotation', currentRotation.toString());
+                    
+                    // 根据旋转角度调整图片适应方式
+                    if (currentRotation === 90 || currentRotation === 270) {
+                        // 横向图片旋转为竖向时
+                        detailImage.classList.add('rotated-landscape');
+                } else {
+                        // 恢复原始尺寸限制
+                        detailImage.classList.remove('rotated-landscape');
+                    }
+                    
+                    // 通知用户图片已旋转
+                    showHint(`已旋转 ${currentRotation}°`);
+                });
+
+                // 放大按钮长按和点击事件
+                zoomInButton.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    // 先执行一次放大
+                    zoomIn();
+                    // 设置长按定时器
+                    zoomIntervalId = setInterval(zoomIn, zoomInterval);
+                });
+                
+                // 缩小按钮长按和点击事件
+                zoomOutButton.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    // 先执行一次缩小
+                    zoomOut();
+                    // 设置长按定时器
+                    zoomIntervalId = setInterval(zoomOut, zoomInterval);
+                });
+                
+                // 向上移动按钮长按和点击事件
+                moveUpButton.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    // 先执行一次向上移动
+                    moveUp();
+                    // 设置长按定时器
+                    moveIntervalId = setInterval(moveUp, moveInterval);
+                });
+                
+                // 向下移动按钮长按和点击事件
+                moveDownButton.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    // 先执行一次向下移动
+                    moveDown();
+                    // 设置长按定时器
+                    moveIntervalId = setInterval(moveDown, moveInterval);
+                });
+                
+                // 放大功能
+                function zoomIn() {
+                    if (currentScale < maxScale) {
+                        currentScale += scaleStep;
+                        updateImageTransform();
+                        showHint(`放大至 ${Math.round(currentScale * 100)}%`);
+                    }
+                }
+                
+                // 缩小功能
+                function zoomOut() {
+                    if (currentScale > minScale) {
+                        currentScale -= scaleStep;
+                        updateImageTransform();
+                        showHint(`缩小至 ${Math.round(currentScale * 100)}%`);
+                    }
+                }
+                
+                // 向上移动功能
+                function moveUp() {
+                    if (currentYPosition > -maxYMove) {
+                        currentYPosition -= moveStep;
+                        updateImageTransform();
+                        showHint(`向上移动 ${Math.abs(currentYPosition)}px`);
+                    }
+                }
+                
+                // 向下移动功能
+                function moveDown() {
+                    if (currentYPosition < maxYMove) {
+                        currentYPosition += moveStep;
+                        updateImageTransform();
+                        showHint(`向下移动 ${currentYPosition}px`);
+                    }
+                }
+                
+                // 更新图片变换样式
+                function updateImageTransform() {
+                    detailImage.style.transform = `rotate(${currentRotation}deg) scale(${currentScale}) translateY(${currentYPosition}px)`;
+                }
+                
+                // 显示提示信息
+                function showHint(text) {
+                    const hint = document.createElement('div');
+                    hint.style.cssText = `
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: rgba(0, 0, 0, 0.7);
+                        color: white;
+                        padding: 10px 15px;
+                        border-radius: 20px;
+                        font-size: 14px;
+                        z-index: 2002;
+                        opacity: 0;
+                        transition: opacity 0.3s ease;
+                    `;
+                    hint.textContent = text;
+                    document.body.appendChild(hint);
+                    
+                    // 淡入淡出效果显示提示
+            setTimeout(() => {
+                        hint.style.opacity = '1';
+                        setTimeout(() => {
+                            hint.style.opacity = '0';
+                            setTimeout(() => hint.remove(), 300);
+                        }, 800);
+                    }, 10);
+                }
+                
+                // 监听鼠标松开事件，停止缩放
+                document.addEventListener('mouseup', () => {
+                    if (zoomIntervalId !== null) {
+                        clearInterval(zoomIntervalId);
+                        zoomIntervalId = null;
+                    }
+                    if (moveIntervalId !== null) {
+                        clearInterval(moveIntervalId);
+                        moveIntervalId = null;
+                    }
+                });
+                
+                // 监听鼠标离开按钮事件，停止缩放
+                zoomInButton.addEventListener('mouseleave', () => {
+                    if (zoomIntervalId !== null) {
+                        clearInterval(zoomIntervalId);
+                        zoomIntervalId = null;
+                    }
+                });
+                
+                zoomOutButton.addEventListener('mouseleave', () => {
+                    if (zoomIntervalId !== null) {
+                        clearInterval(zoomIntervalId);
+                        zoomIntervalId = null;
+                    }
+                });
+                
+                // 监听鼠标离开按钮事件，停止移动
+                moveUpButton.addEventListener('mouseleave', () => {
+                    if (moveIntervalId !== null) {
+                        clearInterval(moveIntervalId);
+                        moveIntervalId = null;
+                    }
+                });
+                
+                moveDownButton.addEventListener('mouseleave', () => {
+                    if (moveIntervalId !== null) {
+                        clearInterval(moveIntervalId);
+                        moveIntervalId = null;
+                    }
+                });
+                
+                // 为触摸设备添加相应事件
+                zoomInButton.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    zoomIn();
+                    zoomIntervalId = setInterval(zoomIn, zoomInterval);
+                });
+                
+                zoomOutButton.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    zoomOut();
+                    zoomIntervalId = setInterval(zoomOut, zoomInterval);
+                });
+                
+                zoomInButton.addEventListener('touchend', () => {
+                    if (zoomIntervalId !== null) {
+                        clearInterval(zoomIntervalId);
+                        zoomIntervalId = null;
+                    }
+                });
+                
+                zoomOutButton.addEventListener('touchend', () => {
+                    if (zoomIntervalId !== null) {
+                        clearInterval(zoomIntervalId);
+                        zoomIntervalId = null;
+                    }
+                });
+                
+                // 为触摸设备添加上下移动事件
+                moveUpButton.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    moveUp();
+                    moveIntervalId = setInterval(moveUp, moveInterval);
+                });
+                
+                moveDownButton.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    moveDown();
+                    moveIntervalId = setInterval(moveDown, moveInterval);
+                });
+                
+                moveUpButton.addEventListener('touchend', () => {
+                    if (moveIntervalId !== null) {
+                        clearInterval(moveIntervalId);
+                        moveIntervalId = null;
+                    }
+                });
+                
+                moveDownButton.addEventListener('touchend', () => {
+                    if (moveIntervalId !== null) {
+                        clearInterval(moveIntervalId);
+                        moveIntervalId = null;
+                    }
+                });
+                
+                // 点击蒙版关闭
+                overlay.addEventListener('click', () => {
+                    overlay.classList.remove('active');
+                    setTimeout(() => overlay.remove(), 300);
+                });
+
+                // 阻止图片容器的点击事件冒泡
+                overlay.querySelector('.detail-container').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+
+                requestAnimationFrame(() => {
+                    overlay.classList.add('active');
+                });
+
+            } catch (error) {
+                console.error('图片加载失败:', error);
+                loadingIndicator.textContent = '图片加载失败';
+                setTimeout(() => loadingIndicator.remove(), 2000);
+            }
+        }
+
+        // 创建话题元素
+        function createTopicElement(topics) {
+            const topicDiv = document.createElement('div');
+            topicDiv.className = 'topics-container';
+            topicDiv.innerHTML = `
+                <div class="topics-header">当前话题：</div>
+                <div class="topics-list">
+                    ${topics.map(topic => `
+                        <div class="topic-item">${topic}</div>
+                    `).join('')}
+                </div>
+            `;
+            return topicDiv;
+        }
+
+        // 创建选项元素
+        function createChoicesElement(choices) {
+            const choicesDiv = document.createElement('div');
+            choicesDiv.className = 'choices-container';
+            choicesDiv.innerHTML = `
+                <div class="choices-list">
+                    ${choices.map(choice => `
+                        <button class="choice-button">${choice}</button>
+                    `).join('')}
+                </div>
+            `;
+            return choicesDiv;
+        }
+
+        // 发送消息到聊天框和酒馆
+        function sendMessage() {
+            const inputElement = document.querySelector('.message-input');
+            const messageText = inputElement.value.trim();
+
+            if (messageText) {
+                // 创建新消息对象
+                const newMessage = {
+                    username: '指挥官',
+                    content: messageText,
+                    type: 'text'
+                };
+
+                // 创建消息元素
+                const messageElement = createMessageElement(newMessage, true);
+                const messagesContainer = document.querySelector('.messages-container');
+                messagesContainer.appendChild(messageElement);
+
+                // 添加显示动画
+                requestAnimationFrame(() => {
+                    messageElement.classList.add('show');
+                    
+                    // 添加延迟回调，确保在动画完成后再次检查滚动
+                    setTimeout(() => {
+                        if (shouldAutoScroll(messagesContainer)) {
+                            smoothScrollToBottom(messagesContainer);
+                        }
+                    }, 100);
+                });
+
+                // 自动滚动到底部
+                if (shouldAutoScroll(messagesContainer)) {
+                    smoothScrollToBottom(messagesContainer);
+                }
+
+                // 获取聊天标题
+                const chatTitle = document.querySelector('.chat-header-title').textContent;
+                
+                // 获取当前所有状态
+                const statusMap = getCurrentCameraStatus();
+
+                // 触发酒馆回复
+                triggerSlash(`/send 回复私聊内容
+私聊对象:${chatTitle}
+我方画面状态:${statusMap.myVideo}
+我方语音状态:${statusMap.myAudio}
+对方画面状态:${statusMap.theirVideo}
+对方语音状态:${statusMap.theirAudio}
+交互模块:${statusMap.interaction}
+具体内容:${messageText}`);
+
+                // 清空输入框
+                inputElement.value = '';
+            }
+        }
+
+        // 绑定发送按钮点击事件
+        document.querySelector('.send-button').addEventListener('click', sendMessage);
+
+        // 绑定回车键发送
+        document.querySelector('.message-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                // 不再阻止默认行为，允许换行
+                    return;
+                }
+        });
+
+        // 话题弹出层逻辑
+        const topicsModal = document.getElementById('topicsModal');
+        const topicsList = document.getElementById('topicsList');
+        const choicesModal = document.getElementById('choicesModal');
+        const choicesList = document.getElementById('choicesList');
+        // const notebookButton = document.querySelector('.input-icon-button:nth-child(3)'); // 旧的笔记本按钮，现在是触发器
+        // const heartIcon = document.querySelector('.heart-icon'); // 旧的爱心图标，已移动
+        // const messageIcon = document.querySelector('.message-icon'); // 旧的消息图标，已移动
+
+        // 新增：展开式按钮逻辑
+        const expandableTrigger = document.getElementById('expandableTrigger');
+        const expandedPanel = document.getElementById('expandedPanel');
+        const choicesPopupButton = document.getElementById('choicesPopupButton'); // 选项弹出按钮
+        const topicsPopupButton = document.getElementById('topicsPopupButton'); // 新的话题弹出按钮
+        const skipButtonContainer = document.getElementById('skipButtonContainer'); // 新的跳过按钮容器
+
+        if (expandableTrigger && expandedPanel) {
+            expandableTrigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                expandedPanel.classList.toggle('active');
+            });
+
+            document.addEventListener('click', (e) => {
+                if (expandedPanel.classList.contains('active') && !expandedPanel.contains(e.target) && !expandableTrigger.contains(e.target)) {
+                    expandedPanel.classList.remove('active');
+                }
+            });
+        }
+
+        // 更新话题列表内容并添加关闭按钮
+        function updateTopicsList(topics) {
+            const modalContent = document.querySelector('#topicsModal .topics-modal-content');
+            // 移除背景设置
+            // modalContent.style.setProperty('--modal-bg', `url('${currentTopicsBg}')`);
+
+            const closeButton = document.createElement('button');
+            closeButton.className = 'close-button';
+            closeButton.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M18 6L6 18" stroke="#666" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M6 6L18 18" stroke="#666" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            `;
+            closeButton.addEventListener('click', () => {
+                topicsModal.classList.remove('active');
+            });
+
+            topicsList.innerHTML = topics.map(topic => `
+                <div class="topic-item">${topic}</div>
+            `).join('');
+
+            if (!modalContent.querySelector('.close-button')) {
+                modalContent.appendChild(closeButton);
+            }
+
+            // 为每个话题添加点击事件
+            topicsList.querySelectorAll('.topic-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const chatTitle = document.querySelector('.chat-header-title').textContent;
+                    const topicContent = item.textContent;
+
+                    // 创建新消息对象
+                    const newMessage = {
+                        username: '指挥官',
+                        content: `发起话题"${topicContent}"`,
+                        type: 'text'
+                    };
+
+                    // 创建消息元素
+                    const messageElement = createMessageElement(newMessage, true);
+                    const messagesContainer = document.querySelector('.messages-container');
+                    messagesContainer.appendChild(messageElement);
+
+                    // 添加显示动画
+                    requestAnimationFrame(() => {
+                        messageElement.classList.add('show');
+                        
+                        // 添加延迟回调，确保在动画完成后再次检查滚动
+                        setTimeout(() => {
+                            if (shouldAutoScroll(messagesContainer)) {
+                                smoothScrollToBottom(messagesContainer);
+                            }
+                        }, 100);
+                    });
+
+                    // 自动滚动到底部
+                    if (shouldAutoScroll(messagesContainer)) {
+                        smoothScrollToBottom(messagesContainer);
+                    }
+
+                    // 获取当前所有状态
+                    const statusMap = getCurrentCameraStatus();
+
+                    // 触发酒馆回复
+                    triggerSlash(`/send 回复私聊内容
+私聊对象:${chatTitle}
+我方画面状态:${statusMap.myVideo}
+我方语音状态:${statusMap.myAudio}
+对方画面状态:${statusMap.theirVideo}
+对方语音状态:${statusMap.theirAudio}
+交互模块:${statusMap.interaction}
+具体内容:发起话题${topicContent}`);
+
+                    // 关闭弹出层
+                    topicsModal.classList.remove('active');
+                    expandedPanel.classList.remove('active'); // 点击后收起展开面板
+                });
+            });
+        }
+
+        // 修改：显示话题弹出层逻辑，现在由展开面板中的按钮触发
+        if (topicsPopupButton) {
+            topicsPopupButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                topicsModal.classList.add('active');
+                choicesModal.classList.remove('active');
+                updateTopicsList(topics);
+                expandedPanel.classList.remove('active'); // 点击后收起展开面板
+            });
+        }
+
+        // 修改：显示选项弹出层逻辑，现在由新的按钮触发
+        if (choicesPopupButton) {
+            choicesPopupButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                choicesModal.classList.add('active');
+                topicsModal.classList.remove('active');
+                updateChoicesList(choices);
+                expandedPanel.classList.remove('active'); // 点击后收起展开面板
+            });
+        }
+        
+        // 移除或注释掉旧的 messageIcon 和 notebookButton 事件监听器
+        /*
+        messageIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            choicesModal.classList.add('active');
+            topicsModal.classList.remove('active');
+            updateChoicesList(choices);
+        });
+        
+        notebookButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            choicesModal.classList.add('active');
+            topicsModal.classList.remove('active');
+            updateChoicesList(choices);
+        });
+        */
+
+        // 仅保留一个与help-icon相关的条件检查以避免错误 -> 这段将被新的skipTriggerButton逻辑替换
+        // const helpIcon = document.querySelector('.help-icon');
+        // if (helpIcon) {
+        // helpIcon.addEventListener('click', () => {
+        // triggerSlash(`/send 查看消息列表`);
+        // });
+        // }
+
+        // 新的事件监听器设置
+        const optionsTriggerButton = document.getElementById('optionsTriggerButton');
+        if (optionsTriggerButton) {
+            optionsTriggerButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                choicesModal.classList.add('active');
+                topicsModal.classList.remove('active');
+                updateChoicesList(choices);
+                 if (expandedPanel && expandedPanel.classList.contains('active')) { // Если expandedPanel все еще используется где-то
+                    expandedPanel.classList.remove('active');
+                }
+            });
+        }
+
+        const topicsTriggerButtonReal = document.getElementById('topicsButton'); // Используем существующий ID
+        if (topicsTriggerButtonReal) {
+            topicsTriggerButtonReal.addEventListener('click', (e) => {
+                e.stopPropagation();
+                topicsModal.classList.add('active');
+                choicesModal.classList.remove('active');
+                updateTopicsList(topics);
+                if (expandedPanel && expandedPanel.classList.contains('active')) { // Если expandedPanel все еще используется где-то
+                    expandedPanel.classList.remove('active');
+                }
+            });
+        }
+        
+        const skipTriggerButton = document.getElementById('skipTriggerButton');
+        if (skipTriggerButton) {
+            // Старый обработчик для helpIcon удален/закомментирован выше или здесь неявно переопределяется
+            skipTriggerButton.addEventListener('click', (e) => {
+                handleSkipAll(e); // Вызываем существующую функцию для пропуска всех анимаций
+            });
+        }
+
+        // 更新选项列表内容并添加关闭按钮
+        function updateChoicesList(choices) {
+            const modalContent = choicesModal.querySelector('.topics-modal-content');
+            // 移除背景设置
+            // modalContent.style.setProperty('--modal-bg', `url('${currentChoicesBg}')`);
+
+            const closeButton = document.createElement('button');
+            closeButton.className = 'close-button';
+            closeButton.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M18 6L6 18" stroke="#666" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M6 6L18 18" stroke="#666" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            `;
+            closeButton.addEventListener('click', () => {
+                choicesModal.classList.remove('active');
+            });
+
+            choicesList.innerHTML = choices.map(choice => `
+                <div class="topic-item choice-item">${choice}</div>
+            `).join('');
+
+            if (!modalContent.querySelector('.close-button')) {
+                modalContent.appendChild(closeButton);
+            }
+
+            // 为每个选项添加点击事件
+            choicesList.querySelectorAll('.choice-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const chatTitle = document.querySelector('.chat-header-title').textContent;
+                    const choiceContent = item.textContent;
+
+                    // 创建新消息对象
+                    const newMessage = {
+                        username: '指挥官',
+                        content: choiceContent,
+                        type: 'text'
+                    };
+
+                    // 创建消息元素
+                    const messageElement = createMessageElement(newMessage, true);
+                    const messagesContainer = document.querySelector('.messages-container');
+                    messagesContainer.appendChild(messageElement);
+
+                    // 添加显示动画
+                    requestAnimationFrame(() => {
+                        messageElement.classList.add('show');
+                        
+                        // 添加延迟回调，确保在动画完成后再次检查滚动
+                        setTimeout(() => {
+                            if (shouldAutoScroll(messagesContainer)) {
+                                smoothScrollToBottom(messagesContainer);
+                            }
+                        }, 100);
+                    });
+
+                    // 自动滚动到底部
+                    if (shouldAutoScroll(messagesContainer)) {
+                        smoothScrollToBottom(messagesContainer);
+                    }
+
+                    // 获取当前所有状态
+                    const statusMap = getCurrentCameraStatus();
+
+                    // 触发酒馆回复
+                    triggerSlash(`/send 回复私聊内容
+私聊对象:${chatTitle}
+我方画面状态:${statusMap.myVideo}
+我方语音状态:${statusMap.myAudio}
+对方画面状态:${statusMap.theirVideo}
+对方语音状态:${statusMap.theirAudio}
+交互模块:${statusMap.interaction}
+具体内容:${choiceContent}`);
+
+                    // 关闭弹出层
+                    choicesModal.classList.remove('active');
+                });
+            });
+        }
+
+        // 点击其他地方关闭弹出层
+        document.addEventListener('click', (e) => {
+            if (topicsModal.classList.contains('active') &&
+                !e.target.closest('.topics-modal-content')) {
+                topicsModal.classList.remove('active');
+            }
+            if (choicesModal.classList.contains('active') &&
+                !e.target.closest('.topics-modal-content')) {
+                choicesModal.classList.remove('active');
+            }
+        });
+
+        // 阻止弹出层内部点击事件冒泡
+        document.querySelectorAll('.topics-modal-content').forEach(content => {
+            content.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+            });
+
+        // 修改创建输入状态指示器的函数
+        function createTypingIndicator(username) {
+            const hasAvatar = avatarMap.hasOwnProperty(username);
+            const avatarHtml = hasAvatar ?
+                `<img class="avatar" src="${getAvatarUrl(username)}" alt="avatar">` :
+                `<div class="avatar" style="background: rgba(0,0,0,0.1);"></div>`;
+
+            const indicator = document.createElement('div');
+            indicator.className = 'typing-indicator';
+            indicator.innerHTML = `
+                ${avatarHtml}
+                <div class="message-content">
+                    <div class="username">${username}</div>
+                    <div class="typing-bubble">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            `;
+            return indicator;
+        }
+
+        // 计算输入延迟时间
+        function calculateTypingDelay(content) {
+            // 基础延迟时间（毫秒）- 增加基础延迟使感觉更自然
+            const baseDelay = 500;
+            // 每个字符的额外延迟（毫秒）- 微调为更舒适的节奏
+            const charDelay = 18;
+            // 最大延迟时间
+            return Math.min(baseDelay + content.length * charDelay, 2500);
+        }
+
+        // 添加智能滚动控制函数
+        function shouldAutoScroll(container) {
+            // 获取容器的总高度（包括不可见部分）
+            const scrollHeight = container.scrollHeight;
+            // 获取容器的可见高度
+            const clientHeight = container.clientHeight;
+            // 获取当前滚动位置
+            const scrollTop = container.scrollTop;
+            
+            // 对于不同情况使用不同的滚动阈值
+            let threshold = 80; // 增加默认阈值，更容易触发自动滚动
+            
+            // 对于处理连续消息时使用更大的阈值，确保即使稍微滑动也能跟随
+            if (isProcessingFollowUp) {
+                threshold = 180; // 增加连续消息的阈值
+            }
+            
+            // 如果用户正在快速滚动，暂时不要自动滚动
+            const isUserScrolling = Date.now() - lastScrollTime < 300; // 增加判定时间
+            if (isUserScrolling && !isProcessingFollowUp) {
+                return false;
+            }
+            
+            return scrollHeight - (scrollTop + clientHeight) < threshold;
+        }
+
+        // 添加节流控制，避免滚动抖动
+        let scrollThrottleTimer = null;
+        let lastScrollTime = 0;
+        const SCROLL_THROTTLE_TIME = 150; // 增加节流时间，减少滚动频率
+        
+        // 跟踪当前是否在处理follow-up消息
+        let isProcessingFollowUp = false;
+
+        // 平滑滚动到底部（添加节流控制）
+        function smoothScrollToBottom(container) {
+            const now = Date.now();
+            
+            // 如果是在快进模式，或者距离上次滚动时间超过节流时间，则立即滚动
+            if (isSkipping || now - lastScrollTime > SCROLL_THROTTLE_TIME) {
+                performScroll(container);
+                lastScrollTime = now;
+                 } else {
+                // 否则，取消之前的计时器并设置新的延迟滚动
+                if (scrollThrottleTimer) {
+                    clearTimeout(scrollThrottleTimer);
+                }
+                
+                scrollThrottleTimer = setTimeout(() => {
+                    performScroll(container);
+                    lastScrollTime = Date.now();
+                    scrollThrottleTimer = null;
+                }, SCROLL_THROTTLE_TIME - (now - lastScrollTime));
+            }
+        }
+        
+        // 执行实际的滚动操作
+        function performScroll(container) {
+            const targetScrollTop = container.scrollHeight - container.clientHeight;
+            const currentScrollTop = container.scrollTop;
+            const scrollDistance = targetScrollTop - currentScrollTop;
+
+            // 如果是快进模式或滚动距离很小，直接滚动
+            if (isSkipping || scrollDistance < 5) {
+                container.scrollTop = targetScrollTop;
+                return;
+            }
+
+            // 使用自定义动画实现平滑滚动
+            const duration = isProcessingFollowUp ? 180 : 250; // 调整滚动持续时间
+                    let startTime = null;
+                    
+                    function animateScroll(timestamp) {
+                        if (!startTime) startTime = timestamp;
+                        const elapsed = timestamp - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        
+                // 使用缓动函数使滚动更自然
+                const easeProgress = easeOutQuad(progress);
+                container.scrollTop = currentScrollTop + (scrollDistance * easeProgress);
+                        
+                        if (progress < 1) {
+                            window.requestAnimationFrame(animateScroll);
+                        }
+                    }
+                    
+                    window.requestAnimationFrame(animateScroll);
+        }
+
+        // 缓动函数
+        function easeOutQuad(t) {
+            return t * (2 - t);
+        }
+
+        // 修改消息显示逻辑
+        async function displayMessage(message, isFollowUp = false) {
+            const messagesContainer = document.querySelector('.messages-container');
+            const messageElement = createMessageElement(message);
+            
+            // 如果是跟随消息，移除上一条消息的底部间距
+            if (isFollowUp) {
+                const lastMessage = messagesContainer.lastElementChild;
+                if (lastMessage) {
+                    lastMessage.style.marginBottom = '2px';
+                }
+            }
+
+            // 添加消息元素但先不显示
+            messageElement.style.opacity = '0';
+            messageElement.style.transform = 'translateY(8px)';
+            messagesContainer.appendChild(messageElement);
+
+            // 等待一帧以确保DOM更新
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+            // 计算新消息的高度
+            const messageHeight = messageElement.offsetHeight;
+            const containerHeight = messagesContainer.clientHeight;
+            const isOverflow = (messagesContainer.scrollHeight + messageHeight) > containerHeight;
+
+            // 如果新消息会导致溢出，才进行滚动
+            if (isOverflow) {
+                performScroll(messagesContainer);
+            }
+
+            // 显示消息
+            messageElement.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+            messageElement.style.opacity = '1';
+            messageElement.style.transform = 'translateY(0)';
+
+            // 移除输入状态指示器（如果存在）
+            const typingIndicator = document.querySelector('.typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.style.opacity = '0';
+                setTimeout(() => typingIndicator.remove(), 300);
+            }
+        }
+
+        // 修改快进控制
+        let isSkipping = false;
+        let skipTimer = null;
+
+        // 添加快进提示UI
+        const skipIndicator = document.createElement('div');
+        skipIndicator.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 25px;
+            font-size: 14px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 9999;
+            font-family: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+        `;
+        skipIndicator.textContent = '正在加速';
+        document.body.appendChild(skipIndicator);
+
+        // 修改流式显示消息函数
+        async function streamMessages(messages) {
+            const messagesContainer = document.querySelector('.messages-container');
+            messagesContainer.innerHTML = '';
+            let currentUsername = null;
+            let isFirstMessage = true;
+            let lastScrollTime = 0; // 记录上次滚动时间
+
+            // 添加跳过功能变量
+            let shouldSkipAll = false;
+
+            // 绑定快进按钮事件 (现在是 skipButtonContainer)
+            // const skipButton = document.querySelector('.input-icon-button:first-child'); // 旧的选择器
+            // 绑定整个图标区域的跳过事件
+            // const iconArea = document.querySelector('.chat-header-icons'); // 旧的跳过区域，现在已移除
+
+            // 获取输入框左侧的表情包图标按钮
+            const emojiSpeedButton = document.querySelector('.input-container .input-icon-button:first-child');
+
+            function handleSkipStart(e) {
+                // 防止触摸事件的默认行为（如滚动）
+                if (e && e.type === 'touchstart') {
+                    e.preventDefault();
+                }
+
+                isSkipping = true;
+                skipIndicator.style.opacity = '1';
+                if (skipButtonContainer) skipButtonContainer.style.backgroundColor = 'rgba(0, 191, 255, 0.2)';
+
+                // 如果当前正在显示消息，立即滚动到底部
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight - messagesContainer.clientHeight;
+                }
+            }
+
+            function handleSkipEnd() {
+                isSkipping = false;
+                skipIndicator.style.opacity = '0';
+                if (skipButtonContainer) skipButtonContainer.style.backgroundColor = '';
+            }
+
+            // 添加跳过所有动画的处理函数 (例如绑定到双击标题栏或其他按钮)
+            function handleSkipAll(e) {
+                // 阻止事件冒泡，防止触发状态面板
+                if (e) e.stopPropagation(); // 检查 e 是否存在
+                
+                shouldSkipAll = true;
+                
+                // 获取当前已经显示的消息数量
+                const displayedCount = messagesContainer.querySelectorAll('.message').length;
+                
+                // 检查并移除正在显示的输入状态指示器
+                const typingIndicator = messagesContainer.querySelector('.typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+                
+                // 只显示尚未显示的消息
+                messages.slice(displayedCount).forEach(message => {
+                    const isPlayerMessage = message.isPlayer === true;
+                    const isFollowUp = message.username === currentUsername && 
+                                     message.isPartOfGroup === true && 
+                                     !message.isFirstInGroup;
+                    
+                    const messageElement = createMessageElement(message, isPlayerMessage, isFollowUp);
+                    messagesContainer.appendChild(messageElement);
+                    messageElement.classList.add('show');
+                    currentUsername = message.username;
+                });
+                
+                // 滚动到底部
+                messagesContainer.scrollTop = messagesContainer.scrollHeight - messagesContainer.clientHeight;
+                if (expandedPanel && expandedPanel.classList.contains('active')) { // 检查 expandedPanel 是否存在且激活
+                    expandedPanel.classList.remove('active'); // 点击后收起展开面板
+                }
+            }
+
+            // 将skipTriggerButton的点击事件绑定移到这里，在handleSkipAll函数定义之后
+            if (skipTriggerButton) {
+                // 先移除可能存在的旧事件监听器
+                skipTriggerButton.removeEventListener('click', handleSkipAll);
+                // 重新绑定事件
+                skipTriggerButton.addEventListener('click', handleSkipAll);
+            }
+
+            // 绑定新的跳过按钮 (skipButtonContainer) 的事件
+            if (skipButtonContainer) {
+                // 移除旧的长按快进事件监听器
+                skipButtonContainer.removeEventListener('mousedown', handleSkipStart);
+                skipButtonContainer.removeEventListener('mouseup', handleSkipEnd);
+                skipButtonContainer.removeEventListener('mouseleave', handleSkipEnd);
+                skipButtonContainer.removeEventListener('touchstart', handleSkipStart);
+                skipButtonContainer.removeEventListener('touchend', handleSkipEnd);
+                skipButtonContainer.removeEventListener('touchcancel', handleSkipEnd);
+
+                // 添加新的点击事件监听器，触发跳过所有
+                skipButtonContainer.addEventListener('click', handleSkipAll);
+            }
+
+            // 为输入框左侧的表情包按钮重新绑定长按快进事件
+            if (emojiSpeedButton) {
+                emojiSpeedButton.addEventListener('mousedown', handleSkipStart);
+                emojiSpeedButton.addEventListener('mouseup', handleSkipEnd);
+                emojiSpeedButton.addEventListener('mouseleave', handleSkipEnd);
+                emojiSpeedButton.addEventListener('touchstart', handleSkipStart, { passive: false }); // passive: false to allow preventDefault
+                emojiSpeedButton.addEventListener('touchend', handleSkipEnd);
+                emojiSpeedButton.addEventListener('touchcancel', handleSkipEnd);
+            }
+            
+            // 旧的 iconArea 点击跳过所有逻辑需要移除或重新绑定
+            // iconArea.addEventListener('click', handleSkipAll); // 这行需要处理
+            // 如果希望保留"点击chat-header-icons区域跳过所有"的功能，需要将此事件监听器重新绑定到 chat-header-icons
+            // 或者，如果chat-header-icons现在为空，则此功能自然失效
+            const chatHeaderIcons = document.querySelector('.chat-header-icons');
+            if (chatHeaderIcons) {
+                // 如果需要保留此功能，并且chat-header-icons区域仍然可点击 (例如，如果还有其他图标或空白区域)
+                // chatHeaderIcons.addEventListener('click', handleSkipAll); 
+                // 但根据当前需求，此区域已空，可能不再需要此监听
+            }
+
+            try {
+                for (const message of messages) {
+                    // 如果已经触发了跳过，直接退出循环
+                    if (shouldSkipAll) break;
+
+                    // 叙事消息直接显示,不需要输入状态
+                    if (message.type === 'narration') {
+                        const messageElement = createMessageElement(message);
+                        messagesContainer.appendChild(messageElement);
+                        currentUsername = null;  // 重置当前用户
+
+                        // 始终滚动到底部
+                        smoothScrollToBottom(messagesContainer);
+
+                        await new Promise(resolve => setTimeout(resolve, isSkipping ? 100 : 500));
+                        isFirstMessage = false;
+                        continue;
+                    }
+
+                    // 判断当前消息是否为玩家(我方)消息
+                    const isPlayerMessage = message.isPlayer === true;
+                    
+                    // 判断是否是同一组消息的后续消息
+                    // 需考虑玩家消息和NPC消息分开处理
+                    const isFollowUp = message.username === currentUsername && 
+                                      message.isPartOfGroup === true && 
+                                      !message.isFirstInGroup;
+
+                    // 设置全局标志，用于滚动动画优化
+                    isProcessingFollowUp = isFollowUp;
+
+                    // 显示输入状态（仅对非follow-up消息且非玩家消息显示）
+                    if (!isFollowUp && !isPlayerMessage) {
+                        const typingIndicator = createTypingIndicator(message.username);
+                        messagesContainer.appendChild(typingIndicator);
+
+                        // 始终滚动到底部，但对于非第一条消息，使用已创建的节流机制
+                        smoothScrollToBottom(messagesContainer);
+
+                        await new Promise(resolve => requestAnimationFrame(resolve));
+                        typingIndicator.classList.add('active');
+
+                        // 根据是否快进来决定延迟时间
+                        const delay = isSkipping ? 150 : calculateTypingDelay(message.content);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
+                        typingIndicator.classList.remove('active');
+                        await new Promise(resolve => setTimeout(resolve, isSkipping ? 50 : 400)); // 增加输入指示器淡出的时间
+                        typingIndicator.remove();
+                    } else if (!isFollowUp && isPlayerMessage) {
+                        // 玩家消息有更短的延迟和不同的动画
+                        await new Promise(resolve => setTimeout(resolve, isSkipping ? 50 : 200));
+                    }
+
+                    // 为玩家消息传递正确的isPlayer参数
+                    const messageElement = createMessageElement(message, isPlayerMessage, isFollowUp);
+                    messagesContainer.appendChild(messageElement);
+
+                    // 更新当前用户（考虑玩家用户名）
+                    currentUsername = message.username;
+
+                    // 对于follow-up消息，减少滚动频率，避免抖动
+                    if (!isFollowUp || isSkipping) {
+                        // 非follow-up消息或快进模式时，正常滚动
+                        smoothScrollToBottom(messagesContainer);
+            } else {
+                        // follow-up消息时，等待动画开始后再滚动，减少抖动
+                        await new Promise(resolve => requestAnimationFrame(resolve));
+                    }
+
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                    messageElement.classList.add('show');
+
+                    // 为follow-up消息添加一次滚动，确保在内容显示后滚动
+                    if (isFollowUp && !isSkipping) {
+                        await new Promise(resolve => setTimeout(resolve, 100)); // 增加延时，给内容显示留出更多时间
+                        smoothScrollToBottom(messagesContainer);
+                    }
+
+                    // 消息间隔也根据是否快进和是否是玩家消息来决定
+                    const delay = isSkipping ? 150 : 
+                                 (isFollowUp ? 300 : 
+                                 (isPlayerMessage ? 300 : 600));
+                    await new Promise(resolve => setTimeout(resolve, delay));
+
+                    isFirstMessage = false;
+                }
+            } finally {
+                // 清理事件监听器
+                if (skipButtonContainer) {
+                    // 清理新的点击事件监听器 (如果需要，例如在组件销毁时)
+                    // skipButtonContainer.removeEventListener('click', handleSkipAll);
+                    
+                    // 确保旧的快进相关事件监听器确实被清除了 (虽然理论上在绑定新事件前已移除)
+                    skipButtonContainer.removeEventListener('mousedown', handleSkipStart);
+                    skipButtonContainer.removeEventListener('mouseup', handleSkipEnd);
+                    skipButtonContainer.removeEventListener('mouseleave', handleSkipEnd);
+                    skipButtonContainer.removeEventListener('touchstart', handleSkipStart);
+                    skipButtonContainer.removeEventListener('touchend', handleSkipEnd);
+                    skipButtonContainer.removeEventListener('touchcancel', handleSkipEnd);
+                }
+                // 清理输入框左侧表情包按钮的快进事件监听器 (如果需要，例如在组件销毁时)
+                if (emojiSpeedButton) {
+                    emojiSpeedButton.removeEventListener('mousedown', handleSkipStart);
+                    emojiSpeedButton.removeEventListener('mouseup', handleSkipEnd);
+                    emojiSpeedButton.removeEventListener('mouseleave', handleSkipEnd);
+                    emojiSpeedButton.removeEventListener('touchstart', handleSkipStart);
+                    emojiSpeedButton.removeEventListener('touchend', handleSkipEnd);
+                    emojiSpeedButton.removeEventListener('touchcancel', handleSkipEnd);
+                }
+                // 确保提示隐藏
+                skipIndicator.style.opacity = '0';
+                if (skipButtonContainer) skipButtonContainer.style.backgroundColor = '';
+                if (emojiSpeedButton) emojiSpeedButton.style.backgroundColor = ''; // 确保表情按钮背景也恢复
+            }
+        }
+
+        // 修改处理聊天数据的部分
+        const { title, myCameraStatus, theirCameraStatus, messages, topics, choices } = parseJuusChat(chatData);
+
+        // 更新标题
+        const chatTitleElement = document.querySelector('.chat-header-title');
+        if (chatTitleElement) {
+            chatTitleElement.textContent = title;
+        }
+
+        // --- 新增代码开始 ---
+
+        // 定义角色个性签名映射
+        const characterSubtitles = {
+            "银狼": "不会做游戏就不要做",
+            "卡芙卡": "听我说",
+            "流萤": "会找到的，属于我的梦"
+            // 在这里添加更多角色的签名...
+        };
+
+        // 获取副标题元素
+        const chatSubtitleElement = document.querySelector('.chat-header-subtitle');
+
+        if (chatSubtitleElement && title) {
+            // 查找对应的签名，如果找不到则使用默认值
+            const subtitle = characterSubtitles[title] || "消息通讯中";
+            chatSubtitleElement.textContent = subtitle;
+        }
+
+        // --- 新增代码结束 ---
+
+        // 添加新函数，用于处理图片加载后的滚动
+        function handleImageLoad(messagesContainer) {
+            // 获取所有最近添加的消息中的图片
+            const recentMessages = Array.from(messagesContainer.querySelectorAll('.message')).slice(-5);
+            const images = [];
+
+            recentMessages.forEach(msg => {
+                const msgImages = msg.querySelectorAll('img');
+                if (msgImages.length > 0) {
+                    images.push(...msgImages);
+                }
+            });
+
+            // 如果找到图片，为每个图片添加加载事件
+            if (images.length > 0) {
+                let loadedCount = 0;
+                const totalImages = images.length;
+
+                images.forEach(img => {
+                    // 如果图片已经加载完成
+                    if (img.complete) {
+                        loadedCount++;
+                        if (loadedCount === totalImages) {
+                            // 使用节流机制的滚动函数
+                            setTimeout(() => smoothScrollToBottom(messagesContainer), 200); // 增加延迟时间
+                        }
+                    } else {
+                        // 为未加载完成的图片添加事件
+                        img.addEventListener('load', () => {
+                            loadedCount++;
+                            if (loadedCount === totalImages) {
+                                // 使用节流机制的滚动函数
+                                setTimeout(() => smoothScrollToBottom(messagesContainer), 200); // 增加延迟时间
+                            }
+                        }, { once: true });
+                    }
+                });
+            }
+        }
+
+        // 修改原有的addMessage, addSystemMessage和addNarrationMessage函数
+        const originalAddMessage = addMessage;
+        addMessage = function(message) {
+            const result = originalAddMessage.apply(this, arguments);
+            handleImageLoad(messagesContainer);
+            return result;
+        };
+
+        const originalAddSystemMessage = addSystemMessage;
+        addSystemMessage = function(content) {
+            const result = originalAddSystemMessage.apply(this, arguments);
+            handleImageLoad(messagesContainer);
+            return result;
+        };
+
+        const originalAddNarrationMessage = addNarrationMessage;
+        addNarrationMessage = function(content) {
+            const result = originalAddNarrationMessage.apply(this, arguments);
+            handleImageLoad(messagesContainer);
+            return result;
+        };
+
+        // 初始化状态栏弹窗功能
+        function initStatusPopup() {
+            // REMOVED: const chatHeader = document.querySelector('.chat-header');
+            // REMOVED: const statusPopup = document.querySelector('.status-popup');
+            // REMOVED: let isPopupOpen = false; // State is handled by newer, more direct listeners
+
+            // 阻止弹窗内部点击事件冒泡到文档 - This uses the statusPopup from the outer scope
+            if (statusPopup) { // Add a check in case statusPopup is not found
+                statusPopup.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+            }
+            
+            // 添加镜头状态点击切换功能
+            const statusIndicators = document.querySelectorAll('.status-indicator');
+            statusIndicators.forEach((indicator) => {
+                indicator.addEventListener('click', () => {
+                    const statusType = indicator.getAttribute('data-status');
+                    const isCurrentlyOn = indicator.classList.contains('status-on');
+                    const statusText = indicator.querySelector('.status-text');
+                    
+                    // 切换状态
+                    if (isCurrentlyOn) {
+                        indicator.classList.remove('status-on');
+                        indicator.classList.add('status-off');
+                        statusText.textContent = '关闭';
+                    } else {
+                        indicator.classList.remove('status-off');
+                        indicator.classList.add('status-on');
+                        statusText.textContent = '开启';
+                    }
+                    
+                    // 保存用户设置的状态
+                    if (statusType && userSetCameraStatus.hasOwnProperty(statusType)) {
+                        userSetCameraStatus[statusType] = !isCurrentlyOn ? '开启' : '关闭';
+                    }
+                });
+            });
+        }
+        
+        // 更新状态栏内容函数
+        function updateStatusPopup() {
+            // 获取当前对话的角色信息
+            const currentCharacter = getCurrentCharacter();
+            
+            // 更新角色头像和名称
+            const characterAvatar = document.querySelector('.character-avatar');
+            const characterName = document.querySelector('.character-name');
+            
+            if (currentCharacter) {
+                // 设置角色头像
+                if (avatarMap[currentCharacter]) {
+                    characterAvatar.src = `${BASE_AVATAR_URL}${avatarMap[currentCharacter]}`;
+                }
+                // 设置角色名称
+                characterName.textContent = currentCharacter;
+            }
+            
+            // 更新镜头状态（这里设置为随机状态，您可以根据实际逻辑修改）
+            updateCameraStatus();
+        }
+        
+        // 获取当前对话角色
+        function getCurrentCharacter() {
+            // 获取当前对话标题，通常包含角色名称
+            const chatTitle = document.querySelector('.chat-header-title').textContent;
+            
+            // 从所有已知角色中查找匹配的角色名
+            for (const character in avatarMap) {
+                if (chatTitle.includes(character)) {
+                    return character;
+                }
+            }
+            
+            // 如果找不到匹配角色，返回默认角色或第一个角色
+            return Object.keys(avatarMap)[0]; // 返回第一个角色作为默认
+        }
+        
+        // 更新镜头状态显示
+        function updateCameraStatus() {
+            // 获取所有状态指示器
+            const statusIndicators = document.querySelectorAll('.status-indicator');
+            
+            // 从聊天数据中提取状态
+            const myVideoMatch = chatData.match(/我方画面状态:(开启|关闭)/);
+            const myAudioMatch = chatData.match(/我方语音状态:(开启|关闭)/);
+            const theirVideoMatch = chatData.match(/对方画面状态:(开启|关闭)/);
+            const theirAudioMatch = chatData.match(/对方语音状态:(开启|关闭)/);
+            const interactionMatch = chatData.match(/交互模块:(开启|关闭)/);
+            
+            // 遍历所有状态指示器并更新
+            statusIndicators.forEach(indicator => {
+                const statusType = indicator.getAttribute('data-status');
+                if (!statusType) return;
+                
+                let statusValue = userSetCameraStatus[statusType];
+                let matchResult = null;
+                
+                // 根据状态类型选择对应的匹配结果
+                switch(statusType) {
+                    case 'myVideo': matchResult = myVideoMatch; break;
+                    case 'myAudio': matchResult = myAudioMatch; break;
+                    case 'theirVideo': matchResult = theirVideoMatch; break;
+                    case 'theirAudio': matchResult = theirAudioMatch; break;
+                    case 'interaction': matchResult = interactionMatch; break;
+                }
+                
+                // 如果用户未手动设置状态，则从聊天数据更新
+                if (statusValue === null && matchResult && matchResult[1]) {
+                    statusValue = matchResult[1];
+                    // 初始化时设置全局状态
+                    userSetCameraStatus[statusType] = statusValue;
+                }
+                
+                // 更新UI
+                if (statusValue) {
+                    const isOn = statusValue === '开启';
+                    indicator.className = isOn ? 'status-indicator status-on' : 'status-indicator status-off';
+                    
+                    const statusText = indicator.querySelector('.status-text');
+                    if (statusText) {
+                        statusText.textContent = statusValue;
+                    }
+                }
+            });
+        }
+
+        // 添加辅助函数，获取当前镜头状态并同时更新全局变量
+        function getCurrentCameraStatus() {
+            const statusMap = {};
+            const statusIndicators = document.querySelectorAll('.status-indicator');
+            
+            // 遍历所有状态指示器并获取当前状态
+            statusIndicators.forEach(indicator => {
+                const statusType = indicator.getAttribute('data-status');
+                if (!statusType) return;
+                
+                const statusValue = indicator.classList.contains('status-on') ? '开启' : '关闭';
+                statusMap[statusType] = statusValue;
+                
+                // 更新全局状态变量
+                userSetCameraStatus[statusType] = statusValue;
+            });
+            
+            return statusMap;
+        }
+
+        // 添加退出按钮点击事件
+        document.getElementById('exitButton').addEventListener('click', (e) => {
+            e.stopPropagation(); // 阻止事件冒泡到chat-header
+            triggerSlash('/send 退出私聊');
+        });
+
+        // --- START: NEW GROUP MEMBERS DROPDOWN LOGIC ---
+        const groupMembersButton = document.createElement('button');
+        groupMembersButton.id = 'groupMembersButton';
+        groupMembersButton.className = 'group-members-button';
+        groupMembersButton.innerHTML = '👥'; // Using an emoji or an SVG icon
+        
+        const topBar = document.querySelector('.top-bar');
+        const juustagramTitle = topBar ? topBar.querySelector('span') : null; // Assuming JUUSTAGRAM is the first span
+
+        if (topBar && juustagramTitle) {
+            juustagramTitle.parentNode.insertBefore(groupMembersButton, juustagramTitle.nextSibling);
+            groupMembersButton.style.marginLeft = '8px'; 
+        } else if (topBar) {
+            topBar.appendChild(groupMembersButton); // Fallback if span not found
+        }
+
+        const groupMembersDropdown = document.createElement('div');
+        groupMembersDropdown.id = 'groupMembersDropdown';
+        groupMembersDropdown.className = 'group-members-dropdown';
+        if (topBar) {
+            topBar.appendChild(groupMembersDropdown); 
+        }
+
+        // Event listener for chatHeader (to open status popup)
+        chatHeader.addEventListener('click', (e) => {
+            // If the click is on the group members button or within its dropdown, do nothing here.
+            if (groupMembersButton.contains(e.target) || groupMembersDropdown.contains(e.target)) {
+                return;
+            }
+            // If the click is on an icon within chat-header-icons (original icons), also do nothing here
+            if (e.target.closest('.chat-header-icons')) {
+                return;
+            }
+            
+            const statusPopup = document.querySelector('.status-popup');
+            // Toggle status popup
+            if (statusPopup.style.display === 'block') {
+                statusPopup.style.display = 'none';
+            } else {
+                updateStatusPopupContent(getCurrentCharacter()); // Update with current main character
+                statusPopup.style.display = 'block';
+                if (groupMembersDropdown.style.display === 'block') groupMembersDropdown.style.display = 'none'; // Close group members if open
+            }
+        });
+        
+        // Event listener for the new groupMembersButton
+        groupMembersButton.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent chatHeader click event if button is elsewhere, good practice
+            const statusPopup = document.querySelector('.status-popup'); 
+
+            if (groupMembersDropdown.style.display === 'block') {
+                groupMembersDropdown.style.display = 'none';
+            } else {
+                populateGroupMembersDropdown();
+                groupMembersDropdown.style.display = 'block';
+                if (statusPopup) statusPopup.style.display = 'none'; // Close status popup if open
+            }
+        });
+
+        function populateGroupMembersDropdown() {
+            groupMembersDropdown.innerHTML = ''; // Clear previous items
+            const characters = Object.keys(avatarMap); // Assuming all avatars in avatarMap are group members
+
+            characters.forEach(charName => {
+                const item = document.createElement('div');
+                item.className = 'group-member-item';
+                
+                const avatarImg = document.createElement('img');
+                avatarImg.className = 'avatar';
+                avatarImg.src = getAvatarUrl(charName);
+                avatarImg.alt = charName;
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'username';
+                nameSpan.textContent = charName;
+                
+                item.appendChild(avatarImg);
+                item.appendChild(nameSpan);
+                
+                item.addEventListener('click', () => {
+                    updateStatusPopupContent(charName); // Update with selected character
+                    const statusPopup = document.querySelector('.status-popup');
+                    if (statusPopup) statusPopup.style.display = 'block';
+                    groupMembersDropdown.style.display = 'none'; // Hide dropdown
+                });
+                
+                groupMembersDropdown.appendChild(item);
+            });
+        }
+
+        function updateStatusPopupContent(characterName) {
+            const statusPopup = document.querySelector('.status-popup');
+            if (!statusPopup) return; // Guard if status popup doesn't exist
+            
+            const popupAvatar = statusPopup.querySelector('.character-avatar');
+            const popupName = statusPopup.querySelector('.character-name');
+
+            if (avatarMap[characterName]) {
+                popupAvatar.src = getAvatarUrl(characterName);
+                popupAvatar.alt = characterName;
+            } else {
+                popupAvatar.src = getAvatarUrl(Object.keys(avatarMap)[0]); // Default avatar
+                popupAvatar.alt = "默认头像";
+            }
+            popupName.textContent = characterName;
+        }
+            
+        // Global click listener to close popups when clicking outside
+        document.addEventListener('click', (e) => {
+            const statusPopup = document.querySelector('.status-popup');
+            // const topBarElement = document.querySelector('.top-bar'); // Already defined as topBar if needed
+
+            // Close statusPopup if click is outside chatHeader and statusPopup itself
+            if (statusPopup && statusPopup.style.display === 'block' && !chatHeader.contains(e.target) && !statusPopup.contains(e.target)) {
+                statusPopup.style.display = 'none';
+            }
+            
+            // Close groupMembersDropdown if click is outside groupMembersButton and groupMembersDropdown itself
+            if (groupMembersDropdown.style.display === 'block' && 
+                !groupMembersButton.contains(e.target) && 
+                !groupMembersDropdown.contains(e.target)) {
+                 groupMembersDropdown.style.display = 'none';
+            }
+        });
+        // --- END: NEW GROUP MEMBERS DROPDOWN LOGIC ---
+
+        // 初始化聊天界面和表情包数据
+        const titleElement = document.querySelector('.chat-header-title');
+        let initialTitle = 'Unknown Chat'; // Default title
+        if (titleElement && titleElement.textContent.trim()) {
+            initialTitle = titleElement.textContent.trim();
+        }
+        console.log('[PC Wallpaper] Initial chat title for wallpaper:', initialTitle);
+        applyChatWallpaper(initialTitle); // Apply initial wallpaper
+
+        // Setup MutationObserver to watch for chat title changes
+        const chatHeaderTitleElement = document.querySelector('.chat-header-title');
+        if (chatHeaderTitleElement) {
+            console.log('[PC Wallpaper] Setting up MutationObserver for .chat-header-title');
+            const observer = new MutationObserver(mutations => {
+                mutations.forEach(mutation => {
+                    if (mutation.type === 'characterData' || mutation.type === 'childList') {
+                        const newTitle = chatHeaderTitleElement.textContent.trim();
+                        console.log('[PC Wallpaper] MutationObserver detected title change. Old title may have been different. New title:', newTitle);
+                        applyChatWallpaper(newTitle);
+                    }
+                });
+            });
+            observer.observe(chatHeaderTitleElement, { childList: true, characterData: true, subtree: true });
+            console.log('[PC Wallpaper] MutationObserver is now observing .chat-header-title.');
+        } else {
+            console.error('[PC Wallpaper] Critical: .chat-header-title element NOT FOUND for MutationObserver.');
+        }
+
+    </script>
+    <!-- disable-default-loading -->
+</body>
+</html>
