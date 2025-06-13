@@ -1101,7 +1101,7 @@
                 -webkit-align-items: start;
                 align-items: start;
                 margin-bottom: 20px;
-                margin-right: 28px;
+                margin-right: 15px; /* 减少右边距让头像靠近边缘 */
             }
             .QQ_chat_charmsg {
                 max-width: 80%;
@@ -1111,7 +1111,7 @@
                 -webkit-align-items: start;
                 align-items: start;
                 margin-bottom: 20px;
-                margin-left: 28px;
+                margin-left: 15px; /* 减少左边距让头像靠近边缘 */
             }
             .QQ_chat_msgdiv {
                 box-shadow: 2px 2px 2px rgba(15, 15, 15, 0.3);
@@ -1509,6 +1509,7 @@
                 cursor: pointer;
                 transition: all 0.3s ease;
                 border: 2px solid transparent;
+                position: relative; /* 为选择标记提供定位基准 */
             }
             
             .contact-item:last-child {
@@ -1521,15 +1522,17 @@
             }
             
             .contact-item.selected {
-                background: linear-gradient(135deg, #199AFF 0%, #0066CC 100%);
-                color: white;
-                border-color: #0066CC;
-                box-shadow: 0 4px 12px rgba(25, 154, 255, 0.3);
+                background: linear-gradient(135deg, #199AFF 0%, #0066CC 100%) !important;
+                color: white !important;
+                border-color: #0066CC !important;
+                box-shadow: 0 4px 12px rgba(25, 154, 255, 0.3) !important;
+                transform: scale(1.02) !important;
+                transition: all 0.2s ease !important;
             }
             
             .contact-item.selected .contact-name {
-                color: white;
-                font-weight: 500;
+                color: white !important;
+                font-weight: 500 !important;
             }
             
             /* 选中状态下的搜索高亮样式 */
@@ -1539,7 +1542,21 @@
             }
             
             .contact-item.selected .contact-avatar {
-                border: 2px solid rgba(255, 255, 255, 0.3);
+                border: 2px solid rgba(255, 255, 255, 0.5) !important;
+                box-shadow: 0 0 8px rgba(255, 255, 255, 0.3) !important;
+            }
+            
+            /* 增强选择状态的视觉反馈 */
+            .contact-item.selected::before {
+                content: '✓';
+                position: absolute;
+                right: 8px;
+                top: 50%;
+                transform: translateY(-50%);
+                color: white;
+                font-weight: bold;
+                font-size: 16px;
+                z-index: 10;
             }
             
             .contact-checkbox {
@@ -7684,7 +7701,7 @@
             }
             
             /**
-             * 过滤联络人列表
+             * 过滤联络人列表（支持分组）
              * @param {string} searchTerm 搜索关键词
              */
             function filterContacts(searchTerm) {
@@ -7694,63 +7711,160 @@
                     return;
                 }
                 
-                // 获取所有联络人项目（排除搜索框）
-                const contacts = contactsList.querySelectorAll('.QQ_home_usermsg');
-                let visibleCount = 0;
-                
                 // 预处理搜索词
                 const search = searchTerm.toLowerCase().trim();
                 const isEmpty = search === '';
+                let totalVisibleCount = 0;
                 
-                contacts.forEach(contact => {
-                    const nameElement = contact.querySelector('.QQ_home_name');
-                    const lastMsgElement = contact.querySelector('.QQ_home_lastmsg');
+                // 处理分组中的联系人
+                const contactGroups = contactsList.querySelectorAll('.contact-group');
+                contactGroups.forEach(groupElement => {
+                    const groupContent = groupElement.querySelector('.group-content');
+                    const contacts = groupContent ? groupContent.querySelectorAll('.QQ_home_usermsg') : [];
+                    let groupVisibleCount = 0;
                     
-                    if (!nameElement) {
-                        console.warn("联络人项目缺少姓名元素", contact);
-                        return;
-                    }
-                    
-                    // 获取原始文本内容
-                    const originalName = nameElement.getAttribute('data-original-text') || nameElement.textContent;
-                    const name = originalName.toLowerCase();
-                    const lastMsg = lastMsgElement ? lastMsgElement.textContent.toLowerCase() : '';
-                    
-                    // 检查是否匹配搜索条件
-                    const nameMatches = isEmpty || name.includes(search);
-                    const msgMatches = isEmpty || lastMsg.includes(search);
-                    const isMatch = nameMatches || msgMatches;
-                    
-                    if (isMatch) {
-                        // 显示联络人
-                        contact.style.display = '';
-                        
-                        // 处理高亮显示
-                        if (!isEmpty && nameMatches) {
-                            highlightSearchTerm(nameElement, searchTerm);
-                        } else {
-                            // 恢复原始文本，移除高亮
-                            if (nameElement.getAttribute('data-original-text')) {
-                                nameElement.innerHTML = originalName;
-                            }
+                    contacts.forEach(contact => {
+                        const isVisible = filterSingleContact(contact, search, searchTerm, isEmpty);
+                        if (isVisible) {
+                            groupVisibleCount++;
+                            totalVisibleCount++;
                         }
-                        
-                        visibleCount++;
+                    });
+                    
+                    // 显示/隐藏分组（如果分组内有匹配的联系人就显示分组）
+                    if (!isEmpty) {
+                        if (groupVisibleCount > 0) {
+                            groupElement.style.display = '';
+                            // 如果分组是折叠状态且有搜索结果，展开分组
+                            const groupToggle = groupElement.querySelector('.group-toggle');
+                            const groupContentDiv = groupElement.querySelector('.group-content');
+                            if (groupToggle && groupToggle.classList.contains('collapsed')) {
+                                groupToggle.classList.remove('collapsed');
+                                groupContentDiv.classList.remove('collapsed');
+                                groupContentDiv.classList.add('expanded');
+                            }
+                        } else {
+                            groupElement.style.display = 'none';
+                        }
                     } else {
-                        // 隐藏不匹配的联络人
-                        contact.style.display = 'none';
+                        // 搜索为空时显示所有分组
+                        groupElement.style.display = '';
+                    }
+                });
+                
+                // 处理未分组的联系人
+                const ungroupedSection = contactsList.querySelector('.ungrouped-contacts');
+                if (ungroupedSection) {
+                    const ungroupedContacts = ungroupedSection.querySelectorAll('.QQ_home_usermsg');
+                    let ungroupedVisibleCount = 0;
+                    
+                    ungroupedContacts.forEach(contact => {
+                        const isVisible = filterSingleContact(contact, search, searchTerm, isEmpty);
+                        if (isVisible) {
+                            ungroupedVisibleCount++;
+                            totalVisibleCount++;
+                        }
+                    });
+                    
+                    // 显示/隐藏未分组区域
+                    if (!isEmpty) {
+                        ungroupedSection.style.display = ungroupedVisibleCount > 0 ? '' : 'none';
+                    } else {
+                        ungroupedSection.style.display = '';
+                    }
+                }
+                
+                // 处理独立的联系人（如果没有分组系统）
+                const independentContacts = contactsList.querySelectorAll('.QQ_home_usermsg:not(.contact-group .QQ_home_usermsg):not(.ungrouped-contacts .QQ_home_usermsg)');
+                independentContacts.forEach(contact => {
+                    const isVisible = filterSingleContact(contact, search, searchTerm, isEmpty);
+                    if (isVisible) {
+                        totalVisibleCount++;
                     }
                 });
                 
                 // 在控制台输出搜索结果（调试用）
                 if (!isEmpty) {
-                    console.log(`搜索"${searchTerm}": 找到 ${visibleCount} 个联络人`);
+                    console.log(`搜索"${searchTerm}": 找到 ${totalVisibleCount} 个联络人`);
                 }
                 
                 // 如果没有找到任何匹配项，可以显示提示（可选）
-                if (!isEmpty && visibleCount === 0) {
+                if (!isEmpty && totalVisibleCount === 0) {
                     console.log("没有找到匹配的联络人");
                 }
+            }
+            
+            /**
+             * 过滤单个联系人
+             * @param {Element} contact 联系人元素
+             * @param {string} search 搜索词（小写）
+             * @param {string} searchTerm 原始搜索词
+             * @param {boolean} isEmpty 是否为空搜索
+             * @returns {boolean} 是否显示该联系人
+             */
+            function filterSingleContact(contact, search, searchTerm, isEmpty) {
+                const nameElement = contact.querySelector('.QQ_home_name');
+                const lastMsgElement = contact.querySelector('.QQ_home_lastmsg');
+                
+                if (!nameElement) {
+                    console.warn("联络人项目缺少姓名元素", contact);
+                    return false;
+                }
+                
+                // 获取原始文本内容
+                const originalName = nameElement.getAttribute('data-original-text') || nameElement.textContent;
+                const name = originalName.toLowerCase();
+                const lastMsg = lastMsgElement ? lastMsgElement.textContent.toLowerCase() : '';
+                
+                // 检查是否匹配搜索条件
+                const nameMatches = isEmpty || name.includes(search);
+                const msgMatches = isEmpty || lastMsg.includes(search);
+                const isMatch = nameMatches || msgMatches;
+                
+                if (isMatch) {
+                    // 显示联络人
+                    contact.style.display = '';
+                    
+                    // 处理高亮显示
+                    if (!isEmpty && nameMatches) {
+                        highlightContactSearchTerm(nameElement, searchTerm, originalName);
+                    } else {
+                        // 恢复原始文本，移除高亮
+                        if (nameElement.getAttribute('data-original-text')) {
+                            nameElement.innerHTML = originalName;
+                        }
+                    }
+                    
+                    return true;
+                } else {
+                    // 隐藏不匹配的联络人
+                    contact.style.display = 'none';
+                    return false;
+                }
+            }
+            
+            /**
+             * 联系人搜索高亮功能
+             * @param {Element} element 要高亮的元素
+             * @param {string} searchTerm 搜索词
+             * @param {string} originalText 原始文本
+             */
+            function highlightContactSearchTerm(element, searchTerm, originalText) {
+                if (!searchTerm || searchTerm.trim() === '') {
+                    element.innerHTML = originalText;
+                    return;
+                }
+                
+                // 保存原始文本
+                if (!element.getAttribute('data-original-text')) {
+                    element.setAttribute('data-original-text', originalText);
+                }
+                
+                // 创建高亮HTML
+                const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                const highlightedText = originalText.replace(regex, '<span style="background-color: #FFE066; color: #333; font-weight: bold; padding: 1px 2px; border-radius: 2px;">$1</span>');
+                
+                element.innerHTML = highlightedText;
             }
             
             /**
@@ -8141,14 +8255,19 @@
                 if (contactItem.classList.contains('selected')) {
                     // 取消选择
                     contactItem.classList.remove('selected');
-                    checkbox.checked = false;
+                    if (checkbox) checkbox.checked = false;
                 } else {
                     // 选择
                     contactItem.classList.add('selected');
-                    checkbox.checked = true;
+                    if (checkbox) checkbox.checked = true;
                 }
                 
                 updateConfirmButtonState();
+                
+                // 添加选择状态的调试信息
+                const contactName = contactItem.getAttribute('data-contact-name');
+                const isSelected = contactItem.classList.contains('selected');
+                console.log(`联系人 "${contactName}" 选择状态: ${isSelected ? '已选中' : '未选中'}`);
             }
             
             /**
