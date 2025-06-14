@@ -7108,7 +7108,7 @@
                     const $newMsgBadge = $contact.find('.QQ_home_usermsg_new');
                     const hasNewMessages = $newMsgBadge.is(':visible') && parseInt($newMsgBadge.text()) > 0;
                     const lastMsg = $contact.find('.QQ_home_lastmsg').text().trim();
-                    const isGroup = $contact.attr('data-group-type') === 'true';
+                    const isGroup = $contact.attr('data-group-type') === 'true' || $contact.attr('data-group-type') === 'group' || $contact.attr('data-group-id');
                     
                     if (!firstContact) {
                         firstContact = $contact.clone(true);
@@ -7145,6 +7145,7 @@
                     if (isGroup) {
                         const groups = loadGroupsFromStorage();
                         const groupExists = groups.some(g => g.name === name);
+                        console.log('检查群聊:', name, '是否存在:', groupExists, '群聊数据:', groups.length);
                         if (groupExists) {
                             console.log('添加群聊到消息列表:', name);
                             contactedUsers.push($contact.clone(true));
@@ -7170,16 +7171,31 @@
                 setTimeout(() => {
                     const groups = loadGroupsFromStorage();
                     groups.forEach(groupData => {
-                        const messageGroupElement = $messageChars.find(`[data-name="${groupData.name}"][data-group-type="true"]`);
+                        // 尝试多种方式查找群聊元素
+                        let messageGroupElement = $messageChars.find(`[data-group-id="${groupData.id}"]`);
+                        if (messageGroupElement.length === 0) {
+                            messageGroupElement = $messageChars.find(`[data-name="${groupData.name}"][data-group-type="true"]`);
+                        }
+                        if (messageGroupElement.length === 0) {
+                            messageGroupElement = $messageChars.find(`[data-name="${groupData.name}"][data-group-type="group"]`);
+                        }
+                        
                         if (messageGroupElement.length > 0) {
                             console.log('更新消息列表中的群聊头像:', groupData.name);
-                            updateGroupAvatarInElement(messageGroupElement[0], groupData);
+                            updateGroupInMessageList(messageGroupElement[0], groupData);
+                        } else {
+                            console.log('未找到消息列表中的群聊元素:', groupData.name);
                         }
                     });
                 }, 50);
                 
                 // 确保消息页面的联系人也能点击
                 console.log("消息列表更新完成，重新绑定点击事件");
+                
+                // 确保群聊在消息列表中正确显示
+                setTimeout(() => {
+                    ensureGroupsInMessageList();
+                }, 100);
             }
             function QQ_HideAllChat() {
                 // for (let name of QQ_pages) {
@@ -11679,6 +11695,8 @@
                 avatarDiv.className = 'QQ_home_head';
                 avatarDiv.style.cssText = 'width: 50px; height: 50px; border-radius: 50%; margin-right: 15px; flex-shrink: 0;';
                 
+                console.log('创建消息列表群聊头像:', groupData.name, '头像数据:', groupData.avatar);
+                
                 if (groupData.avatar && groupData.avatar.type === 'preset' && groupData.avatar.gradient) {
                     const gradient = groupData.avatar.gradient;
                     avatarDiv.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
@@ -11689,6 +11707,14 @@
                     avatarDiv.style.fontWeight = 'bold';
                     avatarDiv.style.fontSize = '18px';
                     avatarDiv.textContent = groupData.avatar.text || '群';
+                    console.log('应用预设头像:', gradient);
+                } else if (groupData.avatar && groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                    avatarDiv.style.backgroundImage = `url('${groupData.avatar.imageData}')`;
+                    avatarDiv.style.backgroundSize = 'cover';
+                    avatarDiv.style.backgroundPosition = 'center';
+                    avatarDiv.style.backgroundRepeat = 'no-repeat';
+                    avatarDiv.textContent = '';
+                    console.log('应用上传头像到新创建的消息列表元素');
                 } else {
                     // 默认头像
                     avatarDiv.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
@@ -11699,6 +11725,7 @@
                     avatarDiv.style.fontWeight = 'bold';
                     avatarDiv.style.fontSize = '18px';
                     avatarDiv.textContent = '群';
+                    console.log('应用默认头像');
                 }
                 
                 // 创建信息容器
