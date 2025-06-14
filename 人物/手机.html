@@ -5069,6 +5069,86 @@
                     QQ_SetNewTips(0);
                     QQ_NewMsg["moment"] = 0;
                     $(".new_tips").hide();
+                } else if (page === "chat") {
+                    // 处理聊天页面切换
+                    console.log('切换到聊天页面');
+                    
+                    // 隐藏底部导航栏
+                    $(".QQ_bottom_nav").hide();
+                    
+                    // 隐藏所有其他页面
+                    $("#QQ_home_page").hide();
+                    $("#QQ_space_page").hide();
+                    $("#QQ_message_list_page").hide();
+                    
+                    // 如果是群聊，创建或显示群聊专用页面
+                    if (window.currentGroupChat) {
+                        console.log('显示群聊页面:', window.currentGroupChat.name);
+                        
+                        // 隐藏所有现有的聊天页面
+                        $(".QQ_chat_page").hide();
+                        
+                        // 查找或创建群聊专用页面
+                        let groupChatPage = $(`.QQ_chat_page[data-group-id="${window.currentGroupChat.id}"]`);
+                        
+                        if (groupChatPage.length === 0) {
+                            console.log('创建群聊专用页面');
+                            // 创建群聊专用页面
+                            groupChatPage = $(`
+                                <div data-group-id="${window.currentGroupChat.id}" class="QQ_chat_page group-chat-page" style="width:100%;height:100%;padding-top:0;background-color:white;position:relative;display:none;">
+                                    <div class="chat-header" style="padding:10px 15px;background-color:white;border-bottom:1px solid #eee;display:flex;align-items:center;">
+                                        <div style="cursor:pointer;margin-right:15px;" onclick="QQ_GoHome()">
+                                            <svg viewBox="0 0 1024 1024" style="height:20px;width:20px;">
+                                                <path d="M724 218.3V141c0-6.7-7.7-10.4-12.9-6.3L260.3 486.8a31.86 31.86 0 0 0 0 50.3l450.8 352.1c5.3 4.1 12.9 0.4 12.9-6.3v-77.3c0-4.9-2.3-9.6-6.1-12.6l-360-281 360-281.1c3.8-3 6.1-7.7 6.1-12.6z" fill="#333"></path>
+                                            </svg>
+                                        </div>
+                                        <div class="group-chat-info" style="flex:1;">
+                                            <div class="group-chat-name" style="font-size:16px;font-weight:bold;color:#333;">${window.currentGroupChat.name}</div>
+                                            <div class="group-chat-members" style="font-size:12px;color:#666;">群聊 · ${window.currentGroupChat.members.length}人</div>
+                                        </div>
+                                        <div style="cursor:pointer;" onclick="showGroupManagementMenu(window.currentGroupChat, this)">
+                                            <svg viewBox="0 0 1024 1024" style="height:20px;width:20px;">
+                                                <path d="M512 256c-35.3 0-64 28.7-64 64s28.7 64 64 64 64-28.7 64-64-28.7-64-64-64zm0 256c-35.3 0-64 28.7-64 64s28.7 64 64 64 64-28.7 64-64-28.7-64-64-64zm0 256c-35.3 0-64 28.7-64 64s28.7 64 64 64 64-28.7 64-64-28.7-64-64-64z" fill="#666"></path>
+                                            </svg>
+                                        </div>
+                                    </div>
+                                    <div class="msgcontent" style="flex:1;overflow-y:auto;padding:10px;background-color:#f5f5f5;height:calc(100vh - 120px);">
+                                        <!-- 群聊消息内容 -->
+                                    </div>
+                                    <div class="chat-input" style="padding:10px;background-color:white;border-top:1px solid #eee;display:flex;align-items:center;">
+                                        <input type="text" placeholder="输入消息..." style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:20px;outline:none;">
+                                        <button style="margin-left:10px;padding:8px 16px;background:#007AFF;color:white;border:none;border-radius:20px;cursor:pointer;">发送</button>
+                                    </div>
+                                </div>
+                            `);
+                            
+                            // 添加到页面
+                            $("#App_QQ").append(groupChatPage);
+                        }
+                        
+                        // 显示群聊页面
+                        groupChatPage.show();
+                        $("#App_QQ").css("background-color", "#ffffff");
+                        
+                        // 加载群聊历史消息
+                        setTimeout(() => {
+                            loadGroupChatHistory(window.currentGroupChat.id);
+                        }, 100);
+                        
+                    } else {
+                        // 普通聊天页面处理
+                        const chatPage = $(".QQ_chat_page").not('.group-chat-page');
+                        if (chatPage.length > 0) {
+                            chatPage.first().show();
+                            $("#App_QQ").css("background-color", "#ffffff");
+                            console.log('聊天页面已显示');
+                        } else {
+                            console.error('未找到聊天页面元素');
+                            // 如果找不到聊天页面，回退到消息页面
+                            QQ_Nav("message");
+                            return;
+                        }
+                    }
                 }
             }
 
@@ -10569,18 +10649,22 @@
                     const messages = JSON.parse(localStorage.getItem(`group_messages_${groupId}`) || '[]');
                     console.log('找到历史消息:', messages.length, '条');
                     
-                    // 清空当前聊天区域
-                    const msgContent = document.querySelector('.msgcontent');
+                    // 查找群聊专用页面的消息容器
+                    const groupChatPage = $(`.QQ_chat_page[data-group-id="${groupId}"]`);
+                    const msgContent = groupChatPage.find('.msgcontent')[0] || document.querySelector('.group-chat-page .msgcontent');
+                    
                     if (msgContent) {
                         msgContent.innerHTML = '';
                         
                         // 如果有历史消息，显示它们
                         messages.forEach(message => {
-                            displayGroupMessage(message);
+                            displayGroupMessage(message, msgContent);
                         });
                         
                         // 滚动到底部
                         msgContent.scrollTop = msgContent.scrollHeight;
+                    } else {
+                        console.error('未找到群聊消息容器');
                     }
                     
                     if (messages.length === 0) {
@@ -10589,9 +10673,9 @@
                             const welcomeMsg = document.createElement('div');
                             welcomeMsg.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px;';
                             welcomeMsg.innerHTML = `
-                                <p>欢迎来到群聊 "${window.currentGroupChat.name}"</p>
-                                <p>群成员: ${window.currentGroupChat.members.join(', ')}</p>
-                                <p>开始聊天吧！</p>
+                                <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${window.currentGroupChat.name}</div>
+                                <div style="font-size: 14px; margin-bottom: 10px;">群成员: ${window.currentGroupChat.members.join(', ')}</div>
+                                <div style="font-size: 12px; color: #999;">群聊已创建，开始聊天吧！</div>
                             `;
                             msgContent.appendChild(welcomeMsg);
                         }
@@ -10604,24 +10688,27 @@
             /**
              * 显示群聊消息
              */
-            function displayGroupMessage(message) {
-                const msgContent = document.querySelector('.msgcontent');
+            function displayGroupMessage(message, msgContent = null) {
+                if (!msgContent) {
+                    msgContent = document.querySelector('.group-chat-page .msgcontent') || document.querySelector('.msgcontent');
+                }
                 if (!msgContent) return;
                 
                 const messageDiv = document.createElement('div');
-                messageDiv.className = 'QQ_chat_msgdiv';
+                messageDiv.className = 'QQ_chat_msgdiv group-message';
                 messageDiv.setAttribute('data-name', message.sender);
-                messageDiv.style.cssText = 'margin: 10px 0; padding: 8px; background: #f5f5f5; border-radius: 8px;';
+                messageDiv.style.cssText = 'margin: 10px 0; padding: 10px; background: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);';
                 
                 const senderSpan = document.createElement('span');
-                senderSpan.style.cssText = 'font-weight: bold; color: #333; margin-right: 8px;';
+                senderSpan.style.cssText = 'font-weight: bold; color: #007AFF; margin-right: 8px; font-size: 14px;';
                 senderSpan.textContent = message.sender + ':';
                 
                 const contentSpan = document.createElement('span');
+                contentSpan.style.cssText = 'color: #333; font-size: 14px; line-height: 1.4;';
                 contentSpan.textContent = message.content;
                 
                 const timeSpan = document.createElement('span');
-                timeSpan.style.cssText = 'font-size: 12px; color: #999; margin-left: 8px;';
+                timeSpan.style.cssText = 'font-size: 12px; color: #999; margin-left: 8px; float: right;';
                 timeSpan.textContent = message.timestamp || new Date().toLocaleTimeString();
                 
                 messageDiv.appendChild(senderSpan);
