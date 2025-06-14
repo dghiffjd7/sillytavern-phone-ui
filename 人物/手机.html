@@ -5045,7 +5045,17 @@
                     }
                     // 确保群聊在联系人列表中正确显示
                     setTimeout(() => {
+                        console.log('切换到联系人页面，开始恢复群聊');
                         ensureGroupsInContactList();
+                        // 再次确保群聊头像正确显示
+                        const groups = loadGroupsFromStorage();
+                        groups.forEach(groupData => {
+                            const contactGroupElement = document.querySelector(`#QQ_home_chars [data-name="${groupData.name}"][data-group-type="true"]`);
+                            if (contactGroupElement) {
+                                console.log('更新联系人界面中的群聊头像:', groupData.name);
+                                updateGroupAvatarInElement(contactGroupElement, groupData);
+                            }
+                        });
                     }, 100);
                     // 初始化联系人分组功能
                     if (typeof initContactGroups === 'function') {
@@ -7014,6 +7024,7 @@
                     const $newMsgBadge = $contact.find('.QQ_home_usermsg_new');
                     const hasNewMessages = $newMsgBadge.is(':visible') && parseInt($newMsgBadge.text()) > 0;
                     const lastMsg = $contact.find('.QQ_home_lastmsg').text().trim();
+                    const isGroup = $contact.attr('data-group-type') === 'true';
                     
                     if (!firstContact) {
                         firstContact = $contact.clone(true);
@@ -7046,9 +7057,19 @@
                                               lastMsg.length > 0 &&
                                               !lastMsg.match(/^\.+$/); // 排除只有点的情况
                     
-                    // 只有真正有消息记录或未读消息才显示（不再依赖lastMsg）
-                    if (hasRealMessageRecord || hasUnreadCount) {
-                        contactedUsers.push($contact.clone(true));
+                    // 群聊特殊处理：如果是群聊且存在于存储中，则显示
+                    if (isGroup) {
+                        const groups = loadGroupsFromStorage();
+                        const groupExists = groups.some(g => g.name === name);
+                        if (groupExists) {
+                            console.log('添加群聊到消息列表:', name);
+                            contactedUsers.push($contact.clone(true));
+                        }
+                    } else {
+                        // 只有真正有消息记录或未读消息才显示（不再依赖lastMsg）
+                        if (hasRealMessageRecord || hasUnreadCount) {
+                            contactedUsers.push($contact.clone(true));
+                        }
                     }
                 });
                 
@@ -7060,6 +7081,18 @@
                         $messageChars.append($contact);
                     });
                 }
+                
+                // 确保群聊头像在消息列表中正确显示
+                setTimeout(() => {
+                    const groups = loadGroupsFromStorage();
+                    groups.forEach(groupData => {
+                        const messageGroupElement = $messageChars.find(`[data-name="${groupData.name}"][data-group-type="true"]`);
+                        if (messageGroupElement.length > 0) {
+                            console.log('更新消息列表中的群聊头像:', groupData.name);
+                            updateGroupAvatarInElement(messageGroupElement[0], groupData);
+                        }
+                    });
+                }, 50);
                 
                 // 确保消息页面的联系人也能点击
                 console.log("消息列表更新完成，重新绑定点击事件");
@@ -10704,33 +10737,57 @@
                 }
                 
                 console.log('检查联系人列表中的群聊，共', groups.length, '个群聊需要恢复');
+                console.log('群聊数据:', groups.map(g => ({name: g.name, id: g.id, avatar: g.avatar})));
                 
                 // 先清理重复的群聊元素，但保留一个
                 const existingGroups = contactsContainer.querySelectorAll('[data-group-type="true"]');
                 const groupMap = new Map();
+                const groupNameMap = new Map(); // 按名称索引
+                
+                console.log('现有群聊元素数量:', existingGroups.length);
                 
                 existingGroups.forEach(element => {
                     const groupId = element.getAttribute('data-group-id');
+                    const groupName = element.getAttribute('data-name');
+                    
+                    console.log('检查现有群聊元素:', {groupId, groupName});
+                    
                     if (groupId) {
                         if (groupMap.has(groupId)) {
-                            console.log('移除重复的群聊元素:', groupId);
+                            console.log('移除重复的群聊元素(按ID):', groupId);
                             element.remove();
                         } else {
                             groupMap.set(groupId, element);
+                            if (groupName) {
+                                groupNameMap.set(groupName, element);
+                            }
+                        }
+                    } else if (groupName) {
+                        // 如果没有ID但有名称，也记录下来
+                        if (groupNameMap.has(groupName)) {
+                            console.log('移除重复的群聊元素(按名称):', groupName);
+                            element.remove();
+                        } else {
+                            groupNameMap.set(groupName, element);
                         }
                     }
                 });
                 
                 // 然后添加缺失的群聊
                 groups.forEach(groupData => {
-                    if (!groupMap.has(groupData.id)) {
-                        console.log('恢复群聊到联系人列表:', groupData.name);
+                    const existsByID = groupMap.has(groupData.id);
+                    const existsByName = groupNameMap.has(groupData.name);
+                    
+                    if (!existsByID && !existsByName) {
+                        console.log('恢复群聊到联系人列表:', groupData.name, 'ID:', groupData.id);
                         addGroupToContactList(groupData);
                     } else {
                         console.log('群聊已存在于联系人列表:', groupData.name);
                         // 确保现有群聊的头像正确显示
-                        const existingElement = groupMap.get(groupData.id);
-                        updateGroupAvatarInElement(existingElement, groupData);
+                        const existingElement = existsByID ? groupMap.get(groupData.id) : groupNameMap.get(groupData.name);
+                        if (existingElement) {
+                            updateGroupAvatarInElement(existingElement, groupData);
+                        }
                     }
                 });
                 
