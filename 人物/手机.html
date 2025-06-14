@@ -8757,12 +8757,18 @@
                     if (stored) {
                         contactGroups = JSON.parse(stored);
                         console.log('加载分组数据:', contactGroups.length, '个分组');
+                    } else {
+                        contactGroups = [];
+                        console.log('没有找到存储的分组数据，初始化为空数组');
                     }
                 } catch (error) {
                     console.error('加载分组数据失败:', error);
                     contactGroups = [];
                 }
             }
+            
+            // 立即初始化contactGroups
+            loadGroupsFromStorage();
             
             /**
              * 保存分组到本地存储
@@ -8866,10 +8872,25 @@
                 alert('分组"' + groupName + '"创建成功！');
             }
             
+            /**
+             * 处理新建分组输入框的按键事件
+             */
+            function handleNewGroupKeydown(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    createNewGroup();
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeNewGroupModal();
+                }
+            }
+            
             // 确保函数全局可用
             window.createNewGroup = createNewGroup;
             window.closeNewGroupModal = closeNewGroupModal;
             window.showNewGroupModal = showNewGroupModal;
+            window.handleNewGroupKeydown = handleNewGroupKeydown;
+            window.openContactGroupModal = openContactGroupModal;
             
             /**
              * 渲染分组界面
@@ -10021,7 +10042,47 @@
             
             // 监听私聊切换，清除群聊状态
             const originalQQNav = window.QQ_Nav;
-            if (originalQQNav) {
+            // 确保QQ_Nav函数正常工作
+            if (typeof window.QQ_Nav !== 'function') {
+                // 如果QQ_Nav不存在，创建一个基本的实现
+                window.QQ_Nav = function(page) {
+                    console.log('QQ_Nav called with page:', page);
+                    
+                    // 隐藏所有页面
+                    $("#QQ_home_page").hide();
+                    $("#QQ_message_list_page").hide();
+                    $("#QQ_space_page").hide();
+                    
+                    // 重置所有导航按钮颜色
+                    $("#QQ_message_svg").css("fill", "#191919");
+                    $("#QQ_people_svg").css("fill", "#191919");
+                    $("#QQ_moment_svg").css("fill", "#191919");
+                    
+                    // 根据页面参数显示对应页面
+                    if (page === "message") {
+                        $("#QQ_message_svg").css("fill", "#019aff");
+                        $("#QQ_message_list_page").show();
+                        $("#App_QQ").css("background-color", "#eff3ff");
+                        window.QQ_currentPage = "message";
+                    } else if (page === "people") {
+                        $("#QQ_people_svg").css("fill", "#019aff");
+                        $("#QQ_home_page").css('display','flex');
+                        $("#App_QQ").css("background-color", "#eff3ff");
+                        window.QQ_currentPage = "people";
+                        
+                        // 初始化联系人分组功能
+                        if (typeof initContactGroups === 'function') {
+                            setTimeout(initContactGroups, 150);
+                        }
+                    } else if (page === "moment") {
+                        $("#QQ_moment_svg").css("fill", "#019aff");
+                        $("#QQ_space_page").show();
+                        $("#App_QQ").css("background-color", "#ffffff");
+                        window.QQ_currentPage = "moment";
+                    }
+                };
+            } else if (originalQQNav) {
+                // 如果QQ_Nav存在且有原始版本，增强它
                 window.QQ_Nav = function(page) {
                     // 如果切换到聊天页面但不是群聊，清除群聊状态
                     if (page === 'chat' && !event?.target?.closest('[data-group-type]')) {
