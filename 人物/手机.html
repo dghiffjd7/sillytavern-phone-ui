@@ -4793,11 +4793,13 @@
                         if (QQ_CacheSendMsg) {
                             value = `${QQ_CacheSendMsg}`;
                             if (content) {
-                                value += `\n在群聊${name}中发送:${content}`;
+                                value += `\n在群聊"${name}"中发送:${content}`;
                             }
                         } else {
-                            value = `在群聊${name}中发送:${content}`;
+                            value = `在群聊"${name}"中发送:${content}`;
                         }
+                        // 添加明确的群聊上下文指示
+                        value += `\n<Context:当前用户正在群聊"${name}"中，请确保所有回复都在此群聊中进行>`;
                     } else {
                         if (QQ_CacheSendMsg) {
                             value = `${QQ_CacheSendMsg}`;
@@ -4856,7 +4858,8 @@
                     value = SendValue;
                     name = SendName || "未知用户";
                     if (QQ_Groups.includes(name)) {
-                        value = `在群聊${name}中发送:${SendValue}`;
+                        value = `在群聊"${name}"中发送:${SendValue}`;
+                        value += `\n<Context:当前用户正在群聊"${name}"中，请确保所有回复都在此群聊中进行>`;
                         User_LastMsgMap.群聊[name] =
                             `${UserName}--${SendValue}`;
                     } else {
@@ -7621,11 +7624,53 @@
                                 json.群聊[name]["members"];
                             QQ_msgjson.群聊[name]["msgs"] = [];
                         }
-                        if (
-                            !$(`.QQ_home_usermsg[data-name='${name}']`).length
-                        ) {
-                            console.log(`${name}的主页不存在,开始创建`);
-                            AddNewChar(name, "http://");
+                        // 检查是否是已存在的群聊
+                        let existingGroupElement = $(`.QQ_home_usermsg[data-name='${name}']`);
+                        let isExistingGroup = false;
+                        
+                        // 检查是否在存储的群聊列表中
+                        const storedGroups = loadGroupsFromStorage();
+                        const storedGroup = storedGroups.find(g => g.name === name);
+                        
+                        if (existingGroupElement.length > 0) {
+                            // 群聊元素已存在
+                            isExistingGroup = true;
+                            console.log(`群聊 ${name} 已存在，使用现有群聊`);
+                        } else if (storedGroup) {
+                            // 群聊在存储中存在，但界面元素不存在，重新创建
+                            console.log(`群聊 ${name} 在存储中存在，重新创建界面元素`);
+                            addGroupToContactList(storedGroup);
+                            isExistingGroup = true;
+                        } else {
+                            // 这是一个全新的群聊，可能是AI错误创建的
+                            console.warn(`检测到AI尝试创建新群聊: ${name}，这可能是消息路由错误`);
+                            
+                            // 检查当前用户是否在某个群聊页面
+                            const currentChatPage = $('.QQ_chat_page:visible');
+                            if (currentChatPage.length > 0) {
+                                const currentChatName = currentChatPage.attr('data-name');
+                                const currentIsGroup = QQ_Groups.includes(currentChatName);
+                                
+                                if (currentIsGroup) {
+                                    console.log(`用户当前在群聊 ${currentChatName} 中，将消息重定向到此群聊`);
+                                    // 将消息重定向到当前群聊
+                                    name = currentChatName;
+                                    json.群聊[currentChatName] = json.群聊[name];
+                                    delete json.群聊[name];
+                                    isExistingGroup = true;
+                                } else {
+                                    console.log(`用户当前在私聊 ${currentChatName} 中，跳过群聊消息创建`);
+                                    continue; // 跳过这个群聊消息
+                                }
+                            } else {
+                                console.log(`无法确定当前聊天上下文，跳过群聊消息创建`);
+                                continue; // 跳过这个群聊消息
+                            }
+                        }
+                        
+                        // 只有确认是现有群聊时才继续处理
+                        if (!isExistingGroup) {
+                            continue;
                         }
                         if (!QQ_Groups.includes(name)) {
                             QQ_Groups.push(name);
