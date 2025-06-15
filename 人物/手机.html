@@ -7756,73 +7756,135 @@
                             
                             let redirected = false;
                             
-                            // 首先检查是否有当前活跃的群聊
-                            if (window.currentGroupChat) {
-                                console.log(`用户当前在群聊 ${window.currentGroupChat.name} 中，将消息重定向到此群聊`);
-                                const originalName = name;
-                                name = window.currentGroupChat.name;
-                                json.群聊[name] = json.群聊[originalName];
-                                delete json.群聊[originalName];
-                                isExistingGroup = true;
-                                redirected = true;
+                            // 智能消息路由：检查消息中是否包含用户发送的内容
+                            const hasUserMessage = json.群聊[name]["msgs"].some(msg => {
+                                const parts = msg.split("--");
+                                return parts.length >= 2 && parts[0] === `${UserName}`;
+                            });
+                            
+                            // 如果包含用户消息，说明这是用户发起的对话，需要找到正确的目标群聊
+                            if (hasUserMessage) {
+                                console.log(`检测到用户在群聊 ${name} 中发送了消息，开始智能路由`);
+                                
+                                // 检查用户最后发送消息的群聊
+                                let targetGroupName = null;
+                                
+                                // 方法1：检查User_LastMsgMap中最近的群聊消息
+                                if (User_LastMsgMap.群聊) {
+                                    const recentGroupChats = Object.keys(User_LastMsgMap.群聊);
+                                    if (recentGroupChats.length > 0) {
+                                        // 找到最近发送消息的群聊
+                                        targetGroupName = recentGroupChats[recentGroupChats.length - 1];
+                                        console.log(`从User_LastMsgMap找到目标群聊: ${targetGroupName}`);
+                                    }
+                                }
+                                
+                                // 方法2：检查当前可见的群聊页面
+                                if (!targetGroupName) {
+                                    const currentChatPage = $('.QQ_chat_page:visible, .group-chat-page:visible');
+                                    if (currentChatPage.length > 0) {
+                                        const currentChatName = currentChatPage.attr('data-name');
+                                        const currentGroupId = currentChatPage.attr('data-group-id');
+                                        
+                                        if (currentGroupId) {
+                                            // 从群聊ID找到群聊名称
+                                            const groups = loadGroupsFromStorage();
+                                            const currentGroup = groups.find(g => g.id === currentGroupId);
+                                            if (currentGroup) {
+                                                targetGroupName = currentGroup.name;
+                                                console.log(`从可见群聊页面找到目标群聊: ${targetGroupName}`);
+                                            }
+                                        } else if (QQ_Groups.includes(currentChatName)) {
+                                            targetGroupName = currentChatName;
+                                            console.log(`从可见聊天页面找到目标群聊: ${targetGroupName}`);
+                                        }
+                                    }
+                                }
+                                
+                                // 方法3：检查window.currentGroupChat
+                                if (!targetGroupName && window.currentGroupChat) {
+                                    targetGroupName = window.currentGroupChat.name;
+                                    console.log(`从window.currentGroupChat找到目标群聊: ${targetGroupName}`);
+                                }
+                                
+                                // 如果找到了目标群聊且与AI回复的群聊不同，进行重定向
+                                if (targetGroupName && targetGroupName !== name) {
+                                    console.log(`消息路由重定向: ${name} -> ${targetGroupName}`);
+                                    const originalName = name;
+                                    name = targetGroupName;
+                                    json.群聊[name] = json.群聊[originalName];
+                                    delete json.群聊[originalName];
+                                    isExistingGroup = true;
+                                    redirected = true;
+                                } else if (targetGroupName === name) {
+                                    // 群聊名称匹配，直接使用
+                                    console.log(`群聊名称匹配，直接使用: ${name}`);
+                                    isExistingGroup = true;
+                                    redirected = true;
+                                } else {
+                                    console.log(`无法确定目标群聊，跳过处理避免创建错误群聊`);
+                                    toastr.warning(`无法确定消息发送的目标群聊，请重新发送`, '消息发送失败');
+                                    continue;
+                                }
                             } else {
-                                // 检查可见的聊天页面
-                                const currentChatPage = $('.QQ_chat_page:visible, .group-chat-page:visible');
-                                if (currentChatPage.length > 0) {
-                                    const currentChatName = currentChatPage.attr('data-name');
-                                    const currentGroupId = currentChatPage.attr('data-group-id');
-                                    
-                                    // 如果是群聊页面
-                                    if (currentGroupId || QQ_Groups.includes(currentChatName)) {
-                                        console.log(`用户当前在群聊页面 ${currentChatName} 中，将消息重定向到此群聊`);
-                                        const originalName = name;
-                                        name = currentChatName;
-                                        json.群聊[name] = json.群聊[originalName];
-                                        delete json.群聊[originalName];
-                                        isExistingGroup = true;
-                                        redirected = true;
+                                // 没有用户消息，可能是AI主动创建的群聊
+                                console.log(`AI创建新群聊: ${name}，检查是否应该重定向到当前群聊`);
+                                
+                                // 检查当前活跃的群聊
+                                if (window.currentGroupChat) {
+                                    console.log(`用户当前在群聊 ${window.currentGroupChat.name} 中，将AI消息重定向到此群聊`);
+                                    const originalName = name;
+                                    name = window.currentGroupChat.name;
+                                    json.群聊[name] = json.群聊[originalName];
+                                    delete json.群聊[originalName];
+                                    isExistingGroup = true;
+                                    redirected = true;
+                                } else {
+                                    // 检查可见的聊天页面
+                                    const currentChatPage = $('.QQ_chat_page:visible, .group-chat-page:visible');
+                                    if (currentChatPage.length > 0) {
+                                        const currentChatName = currentChatPage.attr('data-name');
+                                        const currentGroupId = currentChatPage.attr('data-group-id');
+                                        
+                                        // 如果是群聊页面
+                                        if (currentGroupId || QQ_Groups.includes(currentChatName)) {
+                                            console.log(`用户当前在群聊页面 ${currentChatName} 中，将AI消息重定向到此群聊`);
+                                            const originalName = name;
+                                            name = currentChatName;
+                                            json.群聊[name] = json.群聊[originalName];
+                                            delete json.群聊[originalName];
+                                            isExistingGroup = true;
+                                            redirected = true;
+                                        }
                                     }
                                 }
                             }
                             
-                            // 如果没有成功重定向，检查是否应该创建新群聊
+                            // 如果没有成功重定向，说明这是一个新的AI创建的群聊
                             if (!redirected) {
-                                const hasUserMessage = json.群聊[name]["msgs"].some(msg => {
-                                    const parts = msg.split("--");
-                                    return parts.length >= 2 && parts[0] === `${UserName}`;
-                                });
+                                console.log(`AI创建新群聊: ${name}，参考私聊逻辑进行处理`);
                                 
-                                // 如果包含用户消息，说明这是用户发起的对话，应该创建群聊
-                                if (hasUserMessage) {
-                                    console.log(`消息包含用户发送的内容，但无法确定目标群聊，跳过处理避免创建错误群聊`);
-                                    toastr.warning(`无法确定消息发送的目标群聊，请重新发送`, '消息发送失败');
-                                    continue;
-                                } else {
-                                    // 这是AI主动创建的群聊，参考私聊逻辑进行处理
-                                    console.log(`AI创建新群聊: ${name}，参考私聊逻辑进行处理`);
-                                    
-                                    // 创建群聊数据结构
-                                    const newGroupData = {
-                                        id: `group_${Date.now()}`,
-                                        name: name,
-                                        members: json.群聊[name]["members"] || [],
-                                        avatar: {
-                                            type: 'preset',
-                                            gradient: {
-                                                start: '#199AFF',
-                                                end: '#0066CC'
-                                            },
-                                            text: '群'
+                                // 创建群聊数据结构
+                                const newGroupData = {
+                                    id: `group_${Date.now()}`,
+                                    name: name,
+                                    members: json.群聊[name]["members"] || [],
+                                    avatar: {
+                                        type: 'preset',
+                                        gradient: {
+                                            start: '#199AFF',
+                                            end: '#0066CC'
                                         },
-                                        lastMessage: '群聊已创建',
-                                        lastTime: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
-                                        timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)
-                                    };
-                                    
-                                    // 调用AddNewGroup函数（类似AddNewChar）
-                                    AddNewGroup(newGroupData);
-                                    isExistingGroup = true;
-                                }
+                                        text: '群'
+                                    },
+                                    lastMessage: '群聊已创建',
+                                    lastTime: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
+                                    timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)
+                                };
+                                
+                                // 调用AddNewGroup函数（类似AddNewChar）
+                                AddNewGroup(newGroupData);
+                                isExistingGroup = true;
                             }
                         }
                         
