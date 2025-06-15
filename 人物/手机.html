@@ -4831,9 +4831,24 @@
                                     QQ_msgjson.群聊[localname].msgs.push(
                                         `${UserName}--${localmsg}`,
                                     );
-                                    //console.log(`加入自己发的群聊消息: ${UserName}--${localmsg}`);
+                                    console.log(`加入自己发的群聊消息: ${UserName}--${localmsg}`);
                                     User_LastMsgMap.群聊[localname] =
                                         `${UserName}--${localmsg}`;
+                                    
+                                    // 同步保存到群聊专用存储（确保消息持久化）
+                                    const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                                    const groupsForSync = loadGroupsFromStorage();
+                                    const targetGroup = groupsForSync.find(g => g.name === localname);
+                                    if (targetGroup) {
+                                        const messageObj = {
+                                            sender: UserName,
+                                            content: localmsg,
+                                            timestamp: currentTime
+                                        };
+                                        saveGroupMessage(targetGroup.id, messageObj);
+                                        updateGroupLastMessage(targetGroup.id, localmsg);
+                                        console.log(`群聊消息已同步保存到专用存储: ${localname}`);
+                                    }
                                 } else {
                                     const key = `${UserName}和${localname}的聊天`;
                                     QQ_msgjson.私聊[key] =
@@ -5005,6 +5020,10 @@
              * 导航到指定页面
              */
             function QQ_Nav(page) {
+                // 在页面切换时首先恢复群聊数据
+                console.log(`导航到页面: ${page}，先恢复群聊数据`);
+                restoreGroupDataToMsgjson();
+                
                 const $message_svg = $("#QQ_message_svg");
                 const $people_svg = $("#QQ_people_svg");
                 const $moment_svg = $("#QQ_moment_svg");
@@ -5274,6 +5293,9 @@
                 await LoadChars();
                 await MiPhone_Merge();
 
+                // 初始化时恢复群聊数据
+                console.log('页面初始化，恢复群聊数据');
+                restoreGroupDataToMsgjson();
                 
                 // 为聊天元素绑定点击事件
                 $(document).on("click", "#QQ_message_nav", () => {
@@ -7091,7 +7113,11 @@
                 const $messageChars = $("#QQ_message_list_chars");
                 const $homeChars = $("#QQ_home_chars");
                 
-                // 在清空之前，先确保联系人页面的群聊已经恢复
+                // 在清空之前，先恢复群聊数据到QQ_msgjson
+                console.log('更新消息列表前，先恢复群聊数据');
+                restoreGroupDataToMsgjson();
+                
+                // 然后确保联系人页面的群聊已经恢复
                 console.log('更新消息列表前，先确保联系人页面群聊完整');
                 ensureGroupsInContactList();
                 
@@ -10984,6 +11010,52 @@
                 } catch (error) {
                     console.error('保存群聊消息失败:', error);
                 }
+            }
+            
+            /**
+             * 恢复群聊数据到QQ_msgjson（类似私聊的恢复机制）
+             */
+            function restoreGroupDataToMsgjson() {
+                console.log('开始恢复群聊数据到QQ_msgjson');
+                const groups = loadGroupsFromStorage();
+                
+                groups.forEach(groupData => {
+                    // 确保QQ_msgjson中有该群聊的数据结构
+                    if (!QQ_msgjson.群聊[groupData.name]) {
+                        QQ_msgjson.群聊[groupData.name] = {
+                            members: groupData.members || [],
+                            msgs: []
+                        };
+                    }
+                    
+                    // 从专用存储恢复消息
+                    const storageKey = `group_messages_${groupData.id}`;
+                    const storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
+                    
+                    // 将存储的消息格式转换为QQ_msgjson格式
+                    const convertedMessages = storedMessages.map(msg => {
+                        return `${msg.sender}--${msg.content}--${msg.timestamp}`;
+                    });
+                    
+                    // 合并消息（避免重复）
+                    const existingMessages = QQ_msgjson.群聊[groupData.name].msgs || [];
+                    const allMessages = [...existingMessages];
+                    
+                    convertedMessages.forEach(newMsg => {
+                        if (!allMessages.includes(newMsg)) {
+                            allMessages.push(newMsg);
+                        }
+                    });
+                    
+                    QQ_msgjson.群聊[groupData.name].msgs = allMessages;
+                    
+                    // 确保群聊在QQ_Groups数组中
+                    if (!QQ_Groups.includes(groupData.name)) {
+                        QQ_Groups.push(groupData.name);
+                    }
+                    
+                    console.log(`恢复群聊数据: ${groupData.name}, 消息数量: ${allMessages.length}`);
+                });
             }
             
             /**
