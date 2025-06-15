@@ -6864,6 +6864,9 @@
              *
              */
             async function LoadChars() {
+                // 检查世界书中的群聊内容
+                checkWorldbookGroups();
+                
                 let content;
                 // for (let entry of entries) {
                 //   if (entry.comment == "手机-角色" || entry.comment == "手机界面-角色") {
@@ -6926,29 +6929,53 @@
                                     "成员",
                                 ).split(/[,，]/g);
                             
-                            // 创建群聊数据结构
-                            const groupData = {
-                                id: 'worldbook_group_' + Date.now() + '_' + section,
-                                name: section,
-                                members: QQ_msgjson.群聊[section].members,
-                                avatar: {
-                                    type: 'upload',
-                                    imageData: headurl
-                                },
-                                type: 'group',
-                                lastMessage: '群聊',
-                                timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
-                                unread: 0
-                            };
+                            // 检查是否已存在同名群聊
+                            const existingGroups = loadGroupsFromStorage();
+                            const existingGroup = existingGroups.find(g => g.name === section);
                             
-                            // 保存到本地存储
-                            saveGroupToStorage(groupData);
+                            // 检查界面中是否已存在同名群聊
+                            const contactsContainer = document.getElementById('QQ_home_chars');
+                            let existingContactElement = null;
+                            if (contactsContainer) {
+                                const groupElements = contactsContainer.querySelectorAll('[data-group-type="true"]');
+                                existingContactElement = Array.from(groupElements).find(element => {
+                                    const nameElement = element.querySelector('.QQ_home_name');
+                                    return nameElement && nameElement.textContent.trim() === section;
+                                });
+                            }
                             
-                            // 添加到界面
-                            addGroupToContactList(groupData);
-                            addGroupToMessageList(groupData);
-                            
-                            console.log(`从世界书加载群聊: ${section}`, groupData);
+                            if (!existingGroup && !existingContactElement) {
+                                // 只有在确认不存在时才创建新的群聊
+                                const groupData = {
+                                    id: 'worldbook_group_' + section.replace(/[^a-zA-Z0-9]/g, '_'),
+                                    name: section,
+                                    members: QQ_msgjson.群聊[section].members,
+                                    avatar: {
+                                        type: 'upload',
+                                        imageData: headurl
+                                    },
+                                    type: 'group',
+                                    lastMessage: '群聊',
+                                    timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
+                                    unread: 0
+                                };
+                                
+                                // 保存到本地存储
+                                saveGroupToStorage(groupData);
+                                
+                                // 添加到界面
+                                addGroupToContactList(groupData);
+                                addGroupToMessageList(groupData);
+                                
+                                console.log(`从世界书加载新群聊: ${section}`, groupData);
+                            } else {
+                                console.log(`群聊 ${section} 已存在，跳过创建`);
+                                
+                                // 如果群聊已存在，确保QQ_msgjson中有对应数据
+                                if (existingGroup && !QQ_msgjson.群聊[section].msgs) {
+                                    QQ_msgjson.群聊[section].msgs = [];
+                                }
+                            }
                         } else {
                             // 处理私聊角色
                             AddNewChar(section, headurl);
@@ -7039,6 +7066,11 @@
                     .replace(/\$\{head\}/g, userAvatarPath);
                 style.text(cssRule);
                 $("head").append(style);
+                
+                // 清理重复的群聊
+                setTimeout(() => {
+                    cleanupDuplicateGroups();
+                }, 500);
             }
             function SetCssVariable(name, variable, value) {
                 let cssvalue = $(`style[data-name='${name}']`).text();
@@ -10695,6 +10727,101 @@
                 }
             }
             
+            /**
+             * 检查世界书中的群聊内容
+             */
+            function checkWorldbookGroups() {
+                console.log('=== 检查世界书中的群聊 ===');
+                let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
+                if (entry && entry.content) {
+                    console.log('世界书角色内容:', entry.content);
+                    
+                    // 解析群聊
+                    const lines = entry.content.split('\n');
+                    let currentSection = '';
+                    let isGroup = false;
+                    
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                            currentSection = trimmed.slice(1, -1);
+                            isGroup = false;
+                        } else if (trimmed.includes('类型=群聊')) {
+                            isGroup = true;
+                            console.log(`发现群聊: ${currentSection}`);
+                        }
+                    }
+                } else {
+                    console.log('未找到世界书角色条目');
+                }
+            }
+
+            /**
+             * 清理重复的群聊
+             */
+            function cleanupDuplicateGroups() {
+                console.log('开始清理重复群聊');
+                
+                // 清理本地存储中的重复群聊
+                const groups = loadGroupsFromStorage();
+                const uniqueGroups = [];
+                const seenNames = new Set();
+                
+                for (const group of groups) {
+                    if (!seenNames.has(group.name)) {
+                        seenNames.add(group.name);
+                        uniqueGroups.push(group);
+                    } else {
+                        console.log(`删除重复群聊: ${group.name} (ID: ${group.id})`);
+                    }
+                }
+                
+                if (uniqueGroups.length !== groups.length) {
+                    localStorage.setItem('QQ_Groups', JSON.stringify(uniqueGroups));
+                    console.log(`清理完成，从 ${groups.length} 个群聊减少到 ${uniqueGroups.length} 个`);
+                }
+                
+                // 清理界面中的重复群聊元素
+                const contactsContainer = document.getElementById('QQ_home_chars');
+                if (contactsContainer) {
+                    const groupElements = contactsContainer.querySelectorAll('[data-group-type="true"]');
+                    const seenGroupNames = new Set();
+                    
+                    groupElements.forEach(element => {
+                        const nameElement = element.querySelector('.QQ_home_name');
+                        if (nameElement) {
+                            const groupName = nameElement.textContent.trim();
+                            if (seenGroupNames.has(groupName)) {
+                                console.log(`删除重复的群聊界面元素: ${groupName}`);
+                                element.remove();
+                            } else {
+                                seenGroupNames.add(groupName);
+                            }
+                        }
+                    });
+                }
+                
+                // 清理消息列表中的重复群聊元素
+                const messagesContainer = document.getElementById('QQ_message_list_chars');
+                if (messagesContainer) {
+                    const groupElements = messagesContainer.querySelectorAll('[data-group-type="true"]');
+                    const seenGroupNames = new Set();
+                    
+                    groupElements.forEach(element => {
+                        const nameElement = element.querySelector('.QQ_home_name');
+                        if (nameElement) {
+                            const groupName = nameElement.textContent.trim();
+                            if (seenGroupNames.has(groupName)) {
+                                console.log(`删除重复的群聊消息元素: ${groupName}`);
+                                element.remove();
+                            } else {
+                                seenGroupNames.add(groupName);
+                            }
+                        }
+                    });
+                }
+            }
+
             /**
              * 将群聊添加到世界书
              */
