@@ -11110,7 +11110,7 @@
                         </div>
                         <div class="QQ_chat_input_area" style="padding: 10px; background: white; border-top: 1px solid #eee;">
                             <div style="display: flex; align-items: center;">
-                                <input type="text" class="group-chat-input" placeholder="输入消息..." style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; outline: none;">
+                                <input type="text" class="group-chat-input userInput" placeholder="输入消息..." style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; outline: none;">
                                 <button class="group-chat-send-btn" style="margin-left: 10px; padding: 8px 16px; background: #007AFF; color: white; border: none; border-radius: 20px; cursor: pointer;">发送</button>
                             </div>
                         </div>
@@ -11143,60 +11143,21 @@
                 const $input = $page.find('.group-chat-input');
                 const $sendBtn = $page.find('.group-chat-send-btn');
                 
-                function sendGroupMessage() {
-                    const message = $input.val().trim();
-                    if (message) {
-                        console.log('发送群聊消息:', message, '到群聊:', groupData.name);
-                        
-                        // 创建用户消息对象
-                        const userMessage = {
-                            sender: '{{user}}',
-                            content: message,
-                            timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
-                        };
-                        
-                        // 保存到群聊历史
-                        saveGroupMessage(groupData.id, userMessage);
-                        
-                        // 显示在界面上
-                        const msgContent = $page.find('.msgcontent')[0];
-                        displayGroupMessage(userMessage, msgContent);
-                        
-                        // 滚动到底部
-                        msgContent.scrollTop = msgContent.scrollHeight;
-                        
-                        // 清空输入框
-                        $input.val('');
-                        
-                        // 更新群聊的最后消息时间
-                        updateGroupLastMessage(groupData.id, message);
-                        
-                        // 发送到AI（使用群聊格式）
-                        const groupChatMessage = {
-                            群聊: {
-                                [groupData.name]: {
-                                    members: groupData.members,
-                                    msgs: [`{{user}}--${message}--${userMessage.timestamp}`]
-                                }
-                            }
-                        };
-                        
-                        // 添加上下文信息确保AI知道当前在哪个群聊
-                        const contextMessage = `<Context:当前用户正在群聊"${groupData.name}"中，请确保所有回复都在此群聊中进行>`;
-                        
-                        // 发送消息
-                        if (typeof QQ_Msg_Parse === 'function') {
-                            QQ_Msg_Parse(JSON.stringify(groupChatMessage));
-                        }
-                    }
-                }
+
                 
-                $sendBtn.on('click', sendGroupMessage);
-                $input.on('keypress', function(e) {
-                    if (e.which === 13) { // Enter键
-                        sendGroupMessage();
-                    }
+                // 修改为两阶段发送机制：Enter键缓存消息，点击发送按钮才真正发送
+                $sendBtn.on('click', function() {
+                    // 点击发送按钮时，使用QQ_SendMsg发送缓存的消息
+                    const fakeEvent = { target: $page[0] };
+                    QQ_SendMsg(fakeEvent);
                 });
+                
+                // 使用统一的Enter键处理机制
+                $input.on('keydown', function(e) {
+                    QQ_EnterPress(e, this);
+                });
+                
+
                 
                 return $page;
             }
