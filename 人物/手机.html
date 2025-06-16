@@ -4247,6 +4247,73 @@
 
             // 世界书
 
+            /**
+             * 压缩图片到指定大小，确保兼容localStorage存储
+             * @param {File} file - 图片文件
+             * @param {number} maxSizeKB - 最大大小（KB），默认1024KB
+             * @param {number} quality - 初始质量，默认0.8
+             * @returns {Promise<string>} - 压缩后的base64字符串
+             */
+            function compressImage(file, maxSizeKB = 1024, quality = 0.8) {
+                return new Promise((resolve, reject) => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    
+                    img.onload = function() {
+                        // 计算缩放比例，确保图片不过大
+                        const maxDimension = 800; // 最大尺寸
+                        let { width, height } = img;
+                        
+                        if (width > height) {
+                            if (width > maxDimension) {
+                                height = (height * maxDimension) / width;
+                                width = maxDimension;
+                            }
+                        } else {
+                            if (height > maxDimension) {
+                                width = (width * maxDimension) / height;
+                                height = maxDimension;
+                            }
+                        }
+                        
+                        canvas.width = width;
+                        canvas.height = height;
+                        
+                        // 绘制图片
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        // 压缩函数
+                        function tryCompress(currentQuality) {
+                            const compressedDataUrl = canvas.toDataURL('image/jpeg', currentQuality);
+                            const sizeKB = (compressedDataUrl.length * 3/4) / 1024; // 粗略估算大小
+                            
+                            console.log(`压缩质量: ${currentQuality}, 大小: ${sizeKB.toFixed(2)}KB`);
+                            
+                            if (sizeKB <= maxSizeKB || currentQuality <= 0.1) {
+                                console.log(`压缩完成，最终大小: ${sizeKB.toFixed(2)}KB`);
+                                resolve(compressedDataUrl);
+                            } else {
+                                // 递归降低质量
+                                tryCompress(currentQuality - 0.1);
+                            }
+                        }
+                        
+                        tryCompress(quality);
+                    };
+                    
+                    img.onerror = () => {
+                        reject(new Error('图片加载失败'));
+                    };
+                    
+                    // 读取文件
+                    const reader = new FileReader();
+                    reader.onload = e => img.src = e.target.result;
+                    reader.onerror = () => reject(new Error('文件读取失败'));
+                    reader.readAsDataURL(file);
+                });
+            }
+
             class MyINI {
                 sections;
                 autoSave;
@@ -10974,35 +11041,35 @@
                 
                 const reader = new FileReader();
                 reader.onload = async function(e) {
-                    // 生成唯一的头像ID
-                    const avatarId = 'avatar_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    console.log('生成头像ID:', avatarId);
+                    console.log('原始图片大小:', e.target.result.length);
                     
-                    // 将图片数据保存到localStorage
+                    // 压缩图片以避免localStorage配额问题
+                    let imageData;
                     try {
-                        localStorage.setItem('avatarData_' + avatarId, e.target.result);
-                        console.log('头像数据已保存到localStorage:', avatarId);
+                        imageData = await compressImage(e.target.result, 512, 0.8);
+                        console.log('图片压缩完成，压缩后大小:', imageData.length);
                     } catch (error) {
-                        console.error('保存头像数据失败:', error);
-                        alert('图片太大，无法保存。请选择较小的图片文件。');
-                        event.target.value = '';
-                        return;
+                        console.warn('图片压缩失败，使用原图:', error);
+                        imageData = e.target.result;
                     }
+                    
+                    // 直接使用压缩后的base64数据，避免localStorage存储
+                    console.log('使用压缩后的base64数据，跳过localStorage存储');
                     
                     // 检查是否是群聊设置中的头像上传
                     if (window.isSelectingGroupAvatar && window.currentAvatarGroup) {
-                        // 群聊设置中的头像上传
-                        window.currentAvatarGroup.avatar = avatarId;
+                        // 群聊设置中的头像上传，直接使用压缩后的数据
+                        window.currentAvatarGroup.avatar = imageData;
                         
                         // 更新到世界书
-                        await updateGroupAvatarInWorldbook(window.currentAvatarGroup.name, avatarId);
+                        await updateGroupAvatarInWorldbook(window.currentAvatarGroup.name, imageData);
                         
                         // 更新群聊设置界面的头像预览
                         const avatarPreview = document.getElementById('group_settings_avatar_preview');
                         if (avatarPreview) {
                             avatarPreview.innerHTML = '';
                             const img = document.createElement('img');
-                            img.src = e.target.result;
+                            img.src = imageData;
                             img.alt = '群聊头像';
                             avatarPreview.appendChild(img);
                         }
@@ -11010,7 +11077,7 @@
                         // 更新所有界面中的群聊头像
                         updateGroupInAllLists(window.currentAvatarGroup);
                         
-                        console.log('群聊头像上传成功:', avatarId);
+                        console.log('群聊头像上传成功，数据大小:', imageData.length);
                         alert('✅ 群聊头像上传成功');
                         
                         // 关闭头像选择器
@@ -11028,27 +11095,26 @@
                     if (uploadZone) {
                         uploadZone.innerHTML = `
                             <div class="uploaded-preview">
-                                <img src="${e.target.result}" alt="预览" style="width: 120px; height: 120px; border-radius: 12px; object-fit: cover;">
-                                <div class="upload-text" style="margin-top: 10px; color: #28a745;">✅ 图片已上传成功</div>
+                                <img src="${imageData}" alt="预览" style="width: 120px; height: 120px; border-radius: 12px; object-fit: cover;">
+                                <div class="upload-text" style="margin-top: 10px; color: #28a745;">✅ 图片已上传成功（已压缩）</div>
                                 <button class="change-image-btn" onclick="triggerFileUpload()" style="margin-top: 8px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; background: white; cursor: pointer;">更换图片</button>
                                 <div style="margin-top: 8px; font-size: 12px; color: #666; text-align: center;">
-                                    图片将自动保存，无需手动设置链接
+                                    图片已压缩并将直接保存到世界书中
                                 </div>
                             </div>
                         `;
                     }
                     
-                    // 保存选中的头像数据
+                    // 保存选中的头像数据（使用压缩后的数据）
                     window.selectedAvatarData = {
                         type: 'upload',
-                        avatarId: avatarId,  // 保存头像ID而不是完整数据
-                        imageData: e.target.result  // 临时保存用于预览
+                        imageData: imageData  // 直接保存压缩后的完整数据
                     };
                     
                     console.log('上传头像数据已保存:', {
                         type: window.selectedAvatarData.type,
-                        avatarId: window.selectedAvatarData.avatarId,
-                        hasImageData: !!window.selectedAvatarData.imageData
+                        hasImageData: !!window.selectedAvatarData.imageData,
+                        dataSize: window.selectedAvatarData.imageData.length
                     });
                     
                     updateAvatarConfirmButton();
