@@ -9813,8 +9813,7 @@
              * 从本地存储加载群聊数据
              */
             function loadGroupChatsFromWorldbook() {
-                // 新版本：从世界书加载群聊数据，不再使用localStorage
-                console.log('=== loadGroupChatsFromWorldbook被调用 ===');
+                console.log('=== loadGroupChatsFromWorldbook被调用（从独立群聊条目） ===');
                 console.log('当前entries:', typeof entries, entries ? entries.length : 'undefined');
                 
                 const groups = [];
@@ -9824,88 +9823,92 @@
                         return groups;
                     }
                     
-                    // 查找所有群聊条目
-                    const groupEntries = entries.filter(e => e.comment === "手机-群聊");
-                    console.log('找到的群聊条目数量:', groupEntries.length);
+                    // 查找所有群聊条目（使用新的独立格式）
+                    const groupEntries = entries.filter(e => e.comment === "手机-群聊" || (e.key && e.key.startsWith("手机-群聊-")));
+                    console.log('找到的独立群聊条目数量:', groupEntries.length);
                     
                     groupEntries.forEach(entry => {
                         if (entry && entry.content) {
-                            console.log('处理群聊条目内容长度:', entry.content.length);
-                            const sections = entry.content.split(/\n\[([^\]]+)\]/);
-                            for (let i = 1; i < sections.length; i += 2) {
-                                const name = sections[i];
-                                const content = sections[i + 1];
-                                if (content && content.includes('类型=群聊')) {
-                                    const lines = content.split('\n');
-                                    const groupData = { 
+                            console.log('处理群聊条目:', entry.key, '内容长度:', entry.content.length);
+                            
+                            // 直接解析条目内容，因为每个条目只包含一个群聊
+                            const lines = entry.content.split('\n');
+                            let groupData = null;
+                            
+                            for (const line of lines) {
+                                const trimmed = line.trim();
+                                if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                                    // 发现群聊名称
+                                    const name = trimmed.slice(1, -1);
+                                    groupData = { 
                                         name, 
                                         type: 'group',
                                         id: `group_${name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`
                                     };
-                                    
-                                    lines.forEach(line => {
-                                        if (line.startsWith('成员=')) {
-                                            groupData.members = line.substring(3).split(/[,，]/).map(m => m.trim()).filter(m => m);
-                                        } else if (line.startsWith('头像=')) {
-                                            const avatarReference = line.substring(3);
-                                            if (avatarReference.startsWith('avatar_')) {
-                                                // 这是一个头像ID引用，需要从localStorage加载实际数据
-                                                const avatarData = localStorage.getItem(`avatarData_${avatarReference.replace('avatar_', '')}`);
-                                                if (avatarData) {
-                                                    groupData.avatar = avatarReference;
-                                                    groupData.avatarData = avatarData;
-                                                    console.log('从localStorage加载头像数据:', avatarReference);
-                                                } else {
-                                                    console.warn('头像数据丢失，使用默认头像:', avatarReference);
-                                                    groupData.avatar = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
-                                                }
-                                            } else if (avatarReference.startsWith('data:')) {
-                                                // 兼容旧的base64格式
-                                                groupData.avatar = avatarReference;
-                                            } else {
-                                                // 网络链接
-                                                groupData.avatar = avatarReference;
-                                            }
-                                        }
-                                    });
-                                    
-                                    if (groupData.members && groupData.members.length > 0) {
-                                        groups.push(groupData);
-                                        
-                                        // 将群聊名称添加到QQ_Groups数组中，用于消息发送判断
-                                        if (!QQ_Groups.includes(groupData.name)) {
-                                            QQ_Groups.push(groupData.name);
-                                        }
-                                        
-                                        // 检查是否已存在，避免重复添加
-                                        const contactsList = document.getElementById('QQ_home_chars');
-                                        const messagesList = document.getElementById('QQ_message_list_chars');
-                                        
-                                        const existsInContacts = contactsList && contactsList.querySelector(`[data-name="${groupData.name}"]`);
-                                        const existsInMessages = messagesList && messagesList.querySelector(`[data-name="${groupData.name}"]`);
-                                        
-                                        if (!existsInContacts) {
-                                            console.log('将群聊添加到联系人列表:', groupData.name);
-                                            addGroupToContactList(groupData);
+                                } else if (groupData && trimmed.includes('类型=群聊')) {
+                                    // 确认这是群聊类型
+                                    continue;
+                                } else if (groupData && trimmed.startsWith('成员=')) {
+                                    groupData.members = trimmed.substring(3).split(/[,，]/).map(m => m.trim()).filter(m => m);
+                                } else if (groupData && trimmed.startsWith('头像=')) {
+                                    const avatarReference = trimmed.substring(3);
+                                    if (avatarReference.startsWith('avatar_')) {
+                                        // 这是一个头像ID引用，需要从localStorage加载实际数据
+                                        const avatarData = localStorage.getItem(`avatarData_${avatarReference.replace('avatar_', '')}`);
+                                        if (avatarData) {
+                                            groupData.avatar = avatarReference;
+                                            groupData.avatarData = avatarData;
+                                            console.log('从localStorage加载头像数据:', avatarReference);
                                         } else {
-                                            console.log('群聊已存在于联系人列表:', groupData.name);
+                                            console.warn('头像数据丢失，使用默认头像:', avatarReference);
+                                            groupData.avatar = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
                                         }
-                                        
-                                        if (!existsInMessages) {
-                                            console.log('将群聊添加到消息列表:', groupData.name);
-                                            addGroupToMessageList(groupData);
-                                        } else {
-                                            console.log('群聊已存在于消息列表:', groupData.name);
-                                        }
+                                    } else if (avatarReference.startsWith('data:')) {
+                                        // 兼容旧的base64格式
+                                        groupData.avatar = avatarReference;
+                                    } else {
+                                        // 网络链接
+                                        groupData.avatar = avatarReference;
                                     }
+                                }
+                            }
+                            
+                            // 如果找到了完整的群聊数据，添加到列表
+                            if (groupData && groupData.members && groupData.members.length > 0) {
+                                groups.push(groupData);
+                                
+                                // 将群聊名称添加到QQ_Groups数组中，用于消息发送判断
+                                if (!QQ_Groups.includes(groupData.name)) {
+                                    QQ_Groups.push(groupData.name);
+                                }
+                                
+                                // 检查是否已存在，避免重复添加
+                                const contactsList = document.getElementById('QQ_home_chars');
+                                const messagesList = document.getElementById('QQ_message_list_chars');
+                                
+                                const existsInContacts = contactsList && contactsList.querySelector(`[data-name="${groupData.name}"]`);
+                                const existsInMessages = messagesList && messagesList.querySelector(`[data-name="${groupData.name}"]`);
+                                
+                                if (!existsInContacts) {
+                                    console.log('将群聊添加到联系人列表:', groupData.name);
+                                    addGroupToContactList(groupData);
+                                } else {
+                                    console.log('群聊已存在于联系人列表:', groupData.name);
+                                }
+                                
+                                if (!existsInMessages) {
+                                    console.log('将群聊添加到消息列表:', groupData.name);
+                                    addGroupToMessageList(groupData);
+                                } else {
+                                    console.log('群聊已存在于消息列表:', groupData.name);
                                 }
                             }
                         }
                     });
                 } catch (error) {
-                    console.error('从世界书加载群聊数据失败:', error);
+                    console.error('从独立世界书条目加载群聊数据失败:', error);
                 }
-                console.log('从世界书加载群聊数据:', groups.length, '个群聊');
+                console.log('从独立世界书条目加载群聊数据:', groups.length, '个群聊');
                 console.log(`当前QQ_Groups列表:`, QQ_Groups);
                 return groups;
             }
@@ -11114,102 +11117,7 @@
             /**
              * 改进的群聊创建功能（带头像支持）
              */
-            async function createGroupChat() {
-                console.log('=== 开始创建群聊 ===');
-                
-                const nameInput = document.getElementById('group_name_input');
-                if (!nameInput) {
-                    console.error('找不到群聊名称输入框');
-                    alert('系统错误：找不到群聊名称输入框');
-                    return;
-                }
-                
-                const groupName = nameInput.value.trim();
-                console.log('群聊名称:', groupName);
-                
-                if (!groupName) {
-                    alert('请输入群聊名称');
-                    return;
-                }
-                
-                // 获取选中的成员
-                const selectedContacts = Array.from(document.querySelectorAll('#contact_list_for_group .contact-item.selected'));
-                
-                // 添加调试信息
-                console.log('=== 群聊创建调试信息 ===');
-                console.log('所有联系人项目:', document.querySelectorAll('#contact_list_for_group .contact-item'));
-                console.log('选中的联系人项目:', selectedContacts);
-                console.log('选中的联系人数量:', selectedContacts.length);
-                console.log('当前选中的头像数据:', window.selectedAvatarData);
-                
-                if (selectedContacts.length === 0) {
-                    // 更详细的错误信息
-                    const allItems = document.querySelectorAll('#contact_list_for_group .contact-item');
-                    console.log('调试：所有项目数量:', allItems.length);
-                    
-                    allItems.forEach((item, index) => {
-                        const isSelected = item.classList.contains('selected');
-                        const contactName = item.getAttribute('data-contact-name');
-                        console.log(`项目 ${index}: ${contactName}, 选中状态: ${isSelected}`);
-                    });
-                    
-                    alert('请至少选择一个群成员');
-                    return;
-                }
-                
-                // 禁用创建按钮防止重复点击
-                const confirmBtn = document.getElementById('group_confirm_btn');
-                if (confirmBtn) {
-                    confirmBtn.disabled = true;
-                    confirmBtn.textContent = '创建中...';
-                }
-                
-                // 获取选中的联系人
-                const members = selectedContacts.map(contact => {
-                    const nameElement = contact.querySelector('.contact-name');
-                    return nameElement ? nameElement.textContent.trim() : '';
-                }).filter(name => name);
-                
-                // 获取头像URL
-                let avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
-                if (window.selectedAvatarData && window.selectedAvatarData.type === 'upload' && window.selectedAvatarData.imageData) {
-                    avatarUrl = window.selectedAvatarData.imageData;
-                }
-                
-                // 使用新的createNewGroup函数
-                const success = await createNewGroup(groupName, members, avatarUrl);
-                if (!success) {
-                    // 恢复创建按钮状态
-                    if (confirmBtn) {
-                        confirmBtn.disabled = false;
-                        confirmBtn.textContent = '创建群聊';
-                    }
-                    return;
-                }
-                
-                // 关闭弹窗
-                closeGroupCreateModal();
-                
-                // 重置表单
-                nameInput.value = '';
-                window.selectedAvatarData = null;
-                const preview = document.getElementById('group_avatar_preview');
-                const text = document.querySelector('.group-avatar-text');
-                if (preview && text) {
-                    preview.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
-                    preview.innerHTML = '<div class="default-group-avatar">+</div>';
-                    text.textContent = '点击设置头像';
-                }
-                
-                console.log('群聊创建成功:', groupName);
-                alert(`群聊"${groupName}"创建成功！`);
-                
-                // 恢复创建按钮状态
-                if (confirmBtn) {
-                    confirmBtn.disabled = false;
-                    confirmBtn.textContent = '创建群聊';
-                }
-            }
+            // 旧的createGroupChat函数已移除，现在使用window.createGroupChat（世界书逻辑）
             
             /**
              * 检查世界书中的群聊内容
@@ -11311,23 +11219,19 @@
              */
             async function addGroupToWorldbook(groupData) {
                 try {
-                    console.log('=== 开始将群聊添加到世界书 ===');
+                    console.log('=== 开始将群聊添加到独立的世界书条目 ===');
                     console.log('群聊数据:', groupData);
                     console.log('当前entries:', typeof entries, entries ? entries.length : 'undefined');
                     
-                    // 获取当前世界书中的角色条目
-                    let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
-                    console.log('找到的世界书条目:', entry);
+                    // 查找现有的群聊条目
+                    let groupEntry = null;
+                    const groupEntryKey = `手机-群聊-${groupData.name}`;
                     
-                    if (!entry || !entry.content) {
-                        console.error('未找到手机-角色世界书条目');
-                        return false;
+                    if (entries) {
+                        groupEntry = entries.find(e => e.key === groupEntryKey || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)));
                     }
                     
-                    // 解析现有内容
-                    let content = entry.content;
-                    
-                    // 构建群聊条目 - 智能处理头像存储
+                    // 构建群聊条目内容 - 智能处理头像存储
                     let avatarReference = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
                     
                     if (groupData.avatar) {
@@ -11352,30 +11256,63 @@
                     
                     console.log('最终头像引用:', avatarReference);
                     
-                    const groupEntry = `[${groupData.name}]
+                    const groupContent = `[${groupData.name}]
 类型=群聊
 成员=${groupData.members.join(',')}
 头像=${avatarReference}`;
                     
-                    // 检查是否已存在该群聊
-                    const groupPattern = new RegExp(`\\[${groupData.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][\\s\\S]*?(?=\\[|$)`, 'g');
-                    if (groupPattern.test(content)) {
-                        console.log('群聊已存在于世界书中，更新内容');
-                        content = content.replace(groupPattern, groupEntry);
+                    if (groupEntry) {
+                        // 更新现有条目
+                        console.log('更新现有群聊条目:', groupEntry.uid);
+                        await setLorebookEntries(worldbook, [
+                            {
+                                uid: groupEntry.uid,
+                                content: groupContent,
+                            }
+                        ]);
                     } else {
-                        console.log('群聊不存在，添加到世界书');
-                        content += '\n' + groupEntry;
+                        // 创建新的独立群聊条目
+                        console.log('创建新的独立群聊条目');
+                        
+                        // 生成新的UID
+                        const newUid = Date.now() + Math.random();
+                        
+                        const newEntry = {
+                            uid: newUid,
+                            key: groupEntryKey,
+                            comment: "手机-群聊",
+                            content: groupContent,
+                            constant: false,
+                            selective: false,
+                            order: 100,
+                            position: 0,
+                            disable: false,
+                            addMemo: true,
+                            excludeRecursion: false,
+                            delayUntilRecursion: false,
+                            displayIndex: 0,
+                            probability: 100,
+                            useProbability: false,
+                            depth: 4,
+                            selectiveLogic: 0,
+                            keys: [groupEntryKey],
+                            secondaryKeys: [],
+                            selectiveKeys: [],
+                            selectiveValues: [],
+                            customTriggers: [],
+                            extensions: {}
+                        };
+                        
+                        // 添加到世界书
+                        await setLorebookEntries(worldbook, [newEntry]);
+                        
+                        // 更新本地entries数组
+                        if (entries) {
+                            entries.push(newEntry);
+                        }
                     }
                     
-                    // 更新世界书
-                    await setLorebookEntries(worldbook, [
-                        {
-                            uid: entry.uid,
-                            content: content,
-                        }
-                    ]);
-                    
-                    console.log('群聊已成功添加到世界书');
+                    console.log('群聊已成功添加到独立的世界书条目');
                     return true;
                 } catch (error) {
                     console.error('添加群聊到世界书失败:', error);
@@ -11388,58 +11325,52 @@
              */
             async function updateGroupMembersInWorldbook(groupName, members) {
                 try {
-                    console.log('更新群聊成员到世界书:', groupName, members);
+                    console.log('更新群聊成员到独立世界书条目:', groupName, members);
                     
-                    // 获取当前世界书中的角色条目
-                    let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
-                    if (!entry || !entry.content) {
-                        console.error('未找到手机-角色世界书条目');
+                    // 查找对应的群聊条目
+                    let groupEntry = null;
+                    const groupEntryKey = `手机-群聊-${groupName}`;
+                    
+                    if (entries) {
+                        groupEntry = entries.find(e => e.key === groupEntryKey || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)));
+                    }
+                    
+                    if (!groupEntry) {
+                        console.error('在世界书中未找到群聊条目:', groupName);
                         return false;
                     }
                     
                     // 解析现有内容
-                    let content = entry.content;
+                    let content = groupEntry.content;
+                    const lines = content.split('\n');
+                    let updatedContent = '';
                     
-                    // 查找并更新群聊条目
-                    const groupPattern = new RegExp(`\\[${groupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]([\\s\\S]*?)(?=\\[|$)`, 'g');
-                    const match = groupPattern.exec(content);
-                    
-                    if (match) {
-                        const groupContent = match[1];
-                        const lines = groupContent.split('\n');
-                        let updatedGroupContent = `[${groupName}]\n`;
-                        
-                        // 保留其他属性，更新成员列表
-                        lines.forEach(line => {
-                            if (line.startsWith('成员=')) {
-                                updatedGroupContent += `成员=${members.join(',')}\n`;
-                            } else if (line.trim() && !line.startsWith('成员=')) {
-                                updatedGroupContent += line + '\n';
-                            }
-                        });
-                        
-                        // 如果没有成员行，添加一个
-                        if (!groupContent.includes('成员=')) {
-                            updatedGroupContent += `成员=${members.join(',')}\n`;
+                    // 保留其他属性，更新成员列表
+                    let hasMembersLine = false;
+                    for (const line of lines) {
+                        if (line.startsWith('成员=')) {
+                            updatedContent += `成员=${members.join(',')}\n`;
+                            hasMembersLine = true;
+                        } else if (line.trim()) {
+                            updatedContent += line + '\n';
                         }
-                        
-                        // 替换内容
-                        content = content.replace(groupPattern, updatedGroupContent);
-                        
-                        // 更新世界书
-                        await setLorebookEntries(worldbook, [
-                            {
-                                uid: entry.uid,
-                                content: content,
-                            }
-                        ]);
-                        
-                        console.log('群聊成员已更新到世界书');
-                        return true;
-                    } else {
-                        console.error('在世界书中未找到群聊:', groupName);
-                        return false;
                     }
+                    
+                    // 如果没有成员行，添加一个
+                    if (!hasMembersLine) {
+                        updatedContent += `成员=${members.join(',')}\n`;
+                    }
+                    
+                    // 更新世界书
+                    await setLorebookEntries(worldbook, [
+                        {
+                            uid: groupEntry.uid,
+                            content: updatedContent.trim(),
+                        }
+                    ]);
+                    
+                    console.log('群聊成员已更新到独立世界书条目');
+                    return true;
                 } catch (error) {
                     console.error('更新群聊成员到世界书失败:', error);
                     return false;
@@ -11451,29 +11382,45 @@
              */
             async function updateGroupNameInWorldbook(oldName, newName) {
                 try {
-                    console.log('更新群聊名称到世界书:', oldName, '->', newName);
+                    console.log('更新群聊名称到独立世界书条目:', oldName, '->', newName);
                     
-                    // 获取当前世界书中的角色条目
-                    let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
-                    if (!entry || !entry.content) {
-                        console.error('未找到手机-角色世界书条目');
+                    // 查找对应的旧群聊条目
+                    let oldGroupEntry = null;
+                    const oldGroupEntryKey = `手机-群聊-${oldName}`;
+                    
+                    if (entries) {
+                        oldGroupEntry = entries.find(e => e.key === oldGroupEntryKey || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${oldName}]`)));
+                    }
+                    
+                    if (!oldGroupEntry) {
+                        console.error('在世界书中未找到群聊条目:', oldName);
                         return false;
                     }
                     
-                    // 解析现有内容并更新群聊名称
-                    let content = entry.content;
-                    const oldGroupPattern = new RegExp(`\\[${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'g');
-                    content = content.replace(oldGroupPattern, `[${newName}]`);
+                    // 更新条目内容和key
+                    let content = oldGroupEntry.content;
+                    const oldNamePattern = new RegExp(`\\[${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'g');
+                    content = content.replace(oldNamePattern, `[${newName}]`);
                     
-                    // 更新世界书
+                    const newGroupEntryKey = `手机-群聊-${newName}`;
+                    
+                    // 更新世界书条目
                     await setLorebookEntries(worldbook, [
                         {
-                            uid: entry.uid,
+                            uid: oldGroupEntry.uid,
+                            key: newGroupEntryKey,
                             content: content,
                         }
                     ]);
                     
-                    console.log('群聊名称已更新到世界书');
+                    // 更新本地条目信息
+                    if (oldGroupEntry.keys) {
+                        oldGroupEntry.keys = [newGroupEntryKey];
+                    }
+                    oldGroupEntry.key = newGroupEntryKey;
+                    oldGroupEntry.content = content;
+                    
+                    console.log('群聊名称已更新到独立世界书条目');
                     return true;
                 } catch (error) {
                     console.error('更新群聊名称到世界书失败:', error);
@@ -11486,32 +11433,37 @@
              */
             async function removeGroupFromWorldbook(groupName) {
                 try {
-                    console.log('开始从世界书中删除群聊:', groupName);
+                    console.log('开始从独立世界书条目中删除群聊:', groupName);
                     
-                    // 获取当前世界书中的角色条目
-                    let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
-                    if (!entry || !entry.content) {
-                        console.error('未找到手机-角色世界书条目');
+                    // 查找对应的群聊条目
+                    let groupEntry = null;
+                    let groupIndex = -1;
+                    const groupEntryKey = `手机-群聊-${groupName}`;
+                    
+                    if (entries) {
+                        groupIndex = entries.findIndex(e => e.key === groupEntryKey || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)));
+                        if (groupIndex >= 0) {
+                            groupEntry = entries[groupIndex];
+                        }
+                    }
+                    
+                    if (!groupEntry) {
+                        console.error('在世界书中未找到群聊条目:', groupName);
                         return false;
                     }
                     
-                    // 解析现有内容并删除指定群聊
-                    let content = entry.content;
-                    const groupPattern = new RegExp(`\\[${groupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][\\s\\S]*?(?=\\[|$)`, 'g');
-                    content = content.replace(groupPattern, '').replace(/\n\n+/g, '\n').trim();
+                    // 删除世界书条目
+                    await deleteLorebookEntry(worldbook, groupEntry.uid);
                     
-                    // 更新世界书
-                    await setLorebookEntries(worldbook, [
-                        {
-                            uid: entry.uid,
-                            content: content,
-                        }
-                    ]);
+                    // 从本地entries数组中移除
+                    if (groupIndex >= 0 && entries) {
+                        entries.splice(groupIndex, 1);
+                    }
                     
-                    console.log('群聊已从世界书中删除');
+                    console.log('群聊已从独立世界书条目中删除');
                     return true;
                 } catch (error) {
-                    console.error('从世界书删除群聊失败:', error);
+                    console.error('从世界书中删除群聊失败:', error);
                     return false;
                 }
             }
