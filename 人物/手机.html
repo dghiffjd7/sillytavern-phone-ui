@@ -9877,24 +9877,29 @@
                 
                 const groups = [];
                 
-                // 先清理现有的群聊项，避免重复
-                const contactsList = document.getElementById('QQ_home_chars');
-                const messagesList = document.getElementById('QQ_message_list_chars');
-                
-                if (contactsList) {
-                    const existingGroups = contactsList.querySelectorAll('[data-group-type="true"]');
-                    existingGroups.forEach(group => {
-                        console.log('清理联系人列表中的现有群聊:', group.getAttribute('data-group-name'));
-                        group.remove();
-                    });
-                }
-                
-                if (messagesList) {
-                    const existingGroups = messagesList.querySelectorAll('[data-group-type="true"]');
-                    existingGroups.forEach(group => {
-                        console.log('清理消息列表中的现有群聊:', group.getAttribute('data-group-name'));
-                        group.remove();
-                    });
+                // 只在第一次清理现有的群聊项，避免重复
+                if (!groupChatCleanupDone) {
+                    const contactsList = document.getElementById('QQ_home_chars');
+                    const messagesList = document.getElementById('QQ_message_list_chars');
+                    
+                    if (contactsList) {
+                        const existingGroups = contactsList.querySelectorAll('[data-group-type="true"]');
+                        existingGroups.forEach(group => {
+                            console.log('清理联系人列表中的现有群聊:', group.getAttribute('data-group-name'));
+                            group.remove();
+                        });
+                    }
+                    
+                    if (messagesList) {
+                        const existingGroups = messagesList.querySelectorAll('[data-group-type="true"]');
+                        existingGroups.forEach(group => {
+                            console.log('清理消息列表中的现有群聊:', group.getAttribute('data-group-name'));
+                            group.remove();
+                        });
+                    }
+                    
+                    groupChatCleanupDone = true;
+                    console.log('群聊清理完成，设置清理标志');
                 }
                 
                 try {
@@ -9913,7 +9918,7 @@
                         }
                     }
                     
-                    // 查找所有群聊条目（使用标准的comment格式）
+                    // 查找所有群聊条目（使用与手机-角色相同的逻辑）
                     const groupEntries = entries.filter(e => e.comment === "手机-群聊");
                     console.log('找到的独立群聊条目数量:', groupEntries.length);
                     
@@ -9944,13 +9949,17 @@
                                     const avatarReference = trimmed.substring(3);
                                     if (avatarReference.startsWith('avatar_')) {
                                         // 这是一个头像ID引用，需要从localStorage加载实际数据
+                                        console.log('尝试加载头像ID:', avatarReference);
+                                        console.log('localStorage中所有avatar相关的key:', Object.keys(localStorage).filter(k => k.startsWith('avatarData_')));
+                                        
                                         const avatarData = localStorage.getItem(`avatarData_${avatarReference}`);
                                         if (avatarData) {
                                             groupData.avatar = avatarReference;
                                             groupData.avatarData = avatarData;
-                                            console.log('从localStorage加载头像数据:', avatarReference, '数据长度:', avatarData.length);
+                                            console.log('从localStorage加载头像数据成功:', avatarReference, '数据长度:', avatarData.length);
                                         } else {
-                                            console.warn('头像数据丢失，使用默认头像:', avatarReference);
+                                            console.warn('头像数据丢失，localStorage中未找到:', `avatarData_${avatarReference}`);
+                                            console.warn('使用默认头像:', avatarReference);
                                             groupData.avatar = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
                                         }
                                     } else if (avatarReference.startsWith('data:')) {
@@ -9970,6 +9979,15 @@
                                 // 将群聊名称添加到QQ_Groups数组中，用于消息发送判断
                                 if (!QQ_Groups.includes(groupData.name)) {
                                     QQ_Groups.push(groupData.name);
+                                }
+                                
+                                // 确保QQ_msgjson中有该群聊的数据结构
+                                if (!QQ_msgjson.群聊[groupData.name]) {
+                                    QQ_msgjson.群聊[groupData.name] = {
+                                        members: groupData.members || [],
+                                        msgs: []
+                                    };
+                                    console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupData.name);
                                 }
                                 
                                 // 直接添加（已在函数开头清理过重复项）
@@ -10037,6 +10055,7 @@
             
             // 防止重复加载的标志
             let groupChatInitialized = false;
+            let groupChatCleanupDone = false;
             
             // 统一的初始化函数
             async function initGroupChatOnce() {
@@ -10055,6 +10074,13 @@
                 groupChatInitialized = true;
                 console.log('群聊功能初始化完成');
             }
+            
+            // 重置群聊初始化状态（用于调试）
+            window.resetGroupChatState = function() {
+                groupChatInitialized = false;
+                groupChatCleanupDone = false;
+                console.log('群聊状态已重置');
+            };
             
             // 单一的初始化调用点
             if (document.readyState === 'loading') {
