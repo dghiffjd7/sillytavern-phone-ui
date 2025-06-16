@@ -9575,31 +9575,9 @@
              * 保存群聊数据到本地存储
              */
             function saveGroupToStorage(groupData) {
-                try {
-                    // 获取现有的群聊数据
-                    const existingGroups = JSON.parse(localStorage.getItem('qq_groups') || '[]');
-                    
-                    // 检查是否已存在
-                    const existingIndex = existingGroups.findIndex(group => group.id === groupData.id);
-                    if (existingIndex >= 0) {
-                        existingGroups[existingIndex] = groupData;
-                    } else {
-                        existingGroups.push(groupData);
-                    }
-                    
-                    // 保存到本地存储
-                    localStorage.setItem('qq_groups', JSON.stringify(existingGroups));
-                    
-                    // 将群聊名称添加到QQ_Groups数组中，用于消息发送判断
-                    if (!QQ_Groups.includes(groupData.name)) {
-                        QQ_Groups.push(groupData.name);
-                        console.log(`群聊 "${groupData.name}" 已添加到QQ_Groups列表`);
-                    }
-                    
-                    console.log('群聊数据已保存到本地存储');
-                } catch (error) {
-                    console.error('保存群聊数据失败:', error);
-                }
+                // 新版本：保存到世界书而不是localStorage
+                console.log('saveGroupToStorage被调用，转发到世界书保存');
+                return addGroupToWorldbook(groupData);
             }
             
             /**
@@ -10364,15 +10342,31 @@
              * 获取群成员数据
              */
             function getGroupMembers(groupName) {
-                // 从localStorage获取群成员数据
-                const groupData = JSON.parse(localStorage.getItem(`group_members_${groupName}`) || '[]');
-                
-                // 如果没有数据，生成一些示例成员
-                if (groupData.length === 0) {
-                    return generateSampleMembers(groupName);
+                // 新版本：从世界书获取群成员数据
+                try {
+                    const entry = entries.find(e => e.key === "手机-角色");
+                    if (entry && entry.content) {
+                        const sections = entry.content.split(/\n\[([^\]]+)\]/);
+                        for (let i = 1; i < sections.length; i += 2) {
+                            const name = sections[i];
+                            const content = sections[i + 1];
+                            if (name === groupName && content && content.includes('类型=群聊')) {
+                                const lines = content.split('\n');
+                                for (const line of lines) {
+                                    if (line.startsWith('成员=')) {
+                                        const memberNames = line.substring(3).split(',').filter(m => m.trim());
+                                        return memberNames.map(name => ({ name: name.trim(), avatar: 'http://sharkpan.xyz/f/EJeUD/Image_1737026320652.jpg' }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('从世界书获取群成员失败:', error);
                 }
                 
-                return groupData;
+                // 如果没有数据，生成一些示例成员
+                return generateSampleMembers(groupName);
             }
             
             /**
@@ -10387,8 +10381,8 @@
                     { name: '成员C', avatar: 'http://sharkpan.xyz/f/W8lhW/Image_1737026313246.jpg' }
                 ];
                 
-                // 保存到localStorage
-                localStorage.setItem(`group_members_${groupName}`, JSON.stringify(sampleMembers));
+                // 新版本：不再使用localStorage保存群成员数据
+                console.log('生成示例群成员（仅内存）:', sampleMembers);
                 
                 return sampleMembers;
             }
@@ -10842,7 +10836,7 @@
                 }
                 
                 if (uniqueGroups.length !== groups.length) {
-                    localStorage.setItem('QQ_Groups', JSON.stringify(uniqueGroups));
+                    // 新版本：不再使用localStorage，群聊数据在世界书中管理
                     console.log(`清理完成，从 ${groups.length} 个群聊减少到 ${uniqueGroups.length} 个`);
                 }
                 
@@ -10939,6 +10933,104 @@
                 }
             }
             
+            /**
+             * 更新群聊成员到世界书
+             */
+            async function updateGroupMembersInWorldbook(groupName, members) {
+                try {
+                    console.log('更新群聊成员到世界书:', groupName, members);
+                    
+                    // 获取当前世界书中的角色条目
+                    let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
+                    if (!entry || !entry.content) {
+                        console.error('未找到手机-角色世界书条目');
+                        return false;
+                    }
+                    
+                    // 解析现有内容
+                    let content = entry.content;
+                    
+                    // 查找并更新群聊条目
+                    const groupPattern = new RegExp(`\\[${groupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]([\\s\\S]*?)(?=\\[|$)`, 'g');
+                    const match = groupPattern.exec(content);
+                    
+                    if (match) {
+                        const groupContent = match[1];
+                        const lines = groupContent.split('\n');
+                        let updatedGroupContent = `[${groupName}]\n`;
+                        
+                        // 保留其他属性，更新成员列表
+                        lines.forEach(line => {
+                            if (line.startsWith('成员=')) {
+                                updatedGroupContent += `成员=${members.join(',')}\n`;
+                            } else if (line.trim() && !line.startsWith('成员=')) {
+                                updatedGroupContent += line + '\n';
+                            }
+                        });
+                        
+                        // 如果没有成员行，添加一个
+                        if (!groupContent.includes('成员=')) {
+                            updatedGroupContent += `成员=${members.join(',')}\n`;
+                        }
+                        
+                        // 替换内容
+                        content = content.replace(groupPattern, updatedGroupContent);
+                        
+                        // 更新世界书
+                        await setLorebookEntries(worldbook, [
+                            {
+                                uid: entry.uid,
+                                content: content,
+                            }
+                        ]);
+                        
+                        console.log('群聊成员已更新到世界书');
+                        return true;
+                    } else {
+                        console.error('在世界书中未找到群聊:', groupName);
+                        return false;
+                    }
+                } catch (error) {
+                    console.error('更新群聊成员到世界书失败:', error);
+                    return false;
+                }
+            }
+
+            /**
+             * 更新群聊名称到世界书
+             */
+            async function updateGroupNameInWorldbook(oldName, newName) {
+                try {
+                    console.log('更新群聊名称到世界书:', oldName, '->', newName);
+                    
+                    // 获取当前世界书中的角色条目
+                    let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
+                    if (!entry || !entry.content) {
+                        console.error('未找到手机-角色世界书条目');
+                        return false;
+                    }
+                    
+                    // 解析现有内容并更新群聊名称
+                    let content = entry.content;
+                    const oldGroupPattern = new RegExp(`\\[${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'g');
+                    content = content.replace(oldGroupPattern, `[${newName}]`);
+                    
+                    // 更新世界书
+                    await setLorebookEntries(worldbook, [
+                        {
+                            uid: entry.uid,
+                            content: content,
+                        }
+                    ]);
+                    
+                    console.log('群聊名称已更新到世界书');
+                    return true;
+                } catch (error) {
+                    console.error('更新群聊名称到世界书失败:', error);
+                    return false;
+                }
+            }
+
             /**
              * 从世界书中删除群聊
              */
@@ -11319,15 +11411,9 @@
              * 保存群聊消息到本地存储
              */
             function saveGroupMessage(groupId, message) {
-                try {
-                    const storageKey = `group_messages_${groupId}`;
-                    const messages = JSON.parse(localStorage.getItem(storageKey) || '[]');
-                    messages.push(message);
-                    localStorage.setItem(storageKey, JSON.stringify(messages));
-                    console.log('群聊消息已保存:', message);
-                } catch (error) {
-                    console.error('保存群聊消息失败:', error);
-                }
+                // 新版本：群聊消息暂时不持久化，仅在内存中保存
+                console.log('群聊消息（内存）:', message);
+                // 可以在这里添加到QQ_msgjson.群聊中，但暂时简化处理
             }
             
             /**
@@ -11346,9 +11432,8 @@
                         };
                     }
                     
-                    // 从专用存储恢复消息
-                    const storageKey = `group_messages_${groupData.id}`;
-                    const storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
+                    // 新版本：不再从localStorage恢复消息，使用空消息列表
+                    const storedMessages = [];
                     
                     // 将存储的消息格式转换为QQ_msgjson格式
                     const convertedMessages = storedMessages.map(msg => {
@@ -11390,8 +11475,8 @@
                         groups[groupIndex].lastTime = currentTime.toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5);
                         groups[groupIndex].timestamp = groups[groupIndex].lastTime;
                         
-                        // 保存到存储
-                        localStorage.setItem('QQ_Groups', JSON.stringify(groups));
+                        // 新版本：不再使用localStorage保存群聊数据
+                        console.log('群聊最后消息已更新（仅内存）');
                         
                         // 更新界面显示
                         const messageElement = $(`.QQ_home_usermsg[data-group-id="${groupId}"]`)[0];
@@ -11418,9 +11503,9 @@
                 console.log('加载群聊消息历史:', groupId);
                 
                 try {
-                    // 从本地存储加载消息历史
-                    const messages = JSON.parse(localStorage.getItem(`group_messages_${groupId}`) || '[]');
-                    console.log('找到历史消息:', messages.length, '条');
+                    // 新版本：群聊消息历史暂时不持久化，每次重新开始
+                    const messages = [];
+                    console.log('群聊消息历史（新会话）:', messages.length, '条');
                     
                     // 查找群聊专用页面的消息容器
                     const groupChatPage = $(`.QQ_chat_page[data-group-id="${groupId}"]`);
@@ -12822,7 +12907,7 @@
             /**
              * 从群聊中移除成员
              */
-            function removeMemberFromGroup(memberName) {
+            async function removeMemberFromGroup(memberName) {
                 if (!currentManagingGroup) return;
                 
                 if (confirm(`确定要将 ${memberName} 移出群聊吗？`)) {
@@ -12830,6 +12915,9 @@
                     if (index > -1) {
                         currentManagingGroup.members.splice(index, 1);
                         console.log(`已从群聊中移除成员: ${memberName}`);
+                        
+                        // 更新到世界书
+                        await updateGroupMembersInWorldbook(currentManagingGroup.name, currentManagingGroup.members);
                         
                         // 重新生成成员列表
                         showGroupSettings();
@@ -12840,7 +12928,7 @@
             /**
              * 保存群聊设置
              */
-            function saveGroupSettings() {
+            async function saveGroupSettings() {
                 if (!currentManagingGroup) return;
                 
                 const nameInput = document.getElementById('group_name_edit');
@@ -12855,8 +12943,10 @@
                 const oldName = currentManagingGroup.name;
                 currentManagingGroup.name = newName;
                 
-                // 保存到本地存储
-                saveGroupToStorage(currentManagingGroup);
+                // 更新到世界书
+                if (oldName !== newName) {
+                    await updateGroupNameInWorldbook(oldName, newName);
+                }
                 
                 // 更新界面显示
                 updateGroupInAllLists(currentManagingGroup);
@@ -12884,10 +12974,8 @@
                     // 从世界书中删除
                     await removeGroupFromWorldbook(currentManagingGroup.name);
                     
-                    // 从本地存储中删除
-                    let groups = JSON.parse(localStorage.getItem('QQ_Groups') || '[]');
-                    groups = groups.filter(g => g.id !== currentManagingGroup.id);
-                    localStorage.setItem('QQ_Groups', JSON.stringify(groups));
+                    // 新版本：群聊数据已从世界书中删除，不需要操作localStorage
+                    console.log('群聊已从世界书中删除');
                     
                     // 从界面中移除
                     removeGroupFromAllLists(currentManagingGroup.id);
