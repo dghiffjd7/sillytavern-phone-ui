@@ -7725,16 +7725,35 @@
                     if (!$page) return; 
                 }
 
-                // --- 核心修复逻辑 ---
-                // 1. 定位到消息内容的容器
-                const $msgContent = $page.find(".msg_content");
+                // --- 核心修复逻辑 V2 ---
+                // 1. 定位到消息内容的容器 (使用正确的 class)
+                const $msgContent = $page.find(".msgcontent");
+                if ($msgContent.length === 0) {
+                    console.error("错误：在聊天页面中未找到 .msgcontent 容器！");
+                    // 尝试备用选择器以提高兼容性
+                    $msgContent = $page.find(".msg_content"); 
+                    if($msgContent.length === 0) return;
+                }
+
                 // 2. 清空旧消息
                 $msgContent.empty();
-                // 3. 从 QQ_msgjson 重新加载并渲染所有消息
-                const messages = QQ_msgjson[name];
-                if (messages && messages.length > 0) {
+
+                // 3. 从 QQ_msgjson 重新加载并渲染所有消息 (使用正确的读取逻辑)
+                let messages = [];
+                if (isGroup) {
+                    if (QQ_msgjson.群聊 && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
+                        messages = QQ_msgjson.群聊[name].msgs;
+                    }
+                } else {
+                    const privateChatKey = `${UserName}和${name}的聊天`;
+                    if (QQ_msgjson.私聊 && QQ_msgjson.私聊[privateChatKey]) {
+                        messages = QQ_msgjson.私聊[privateChatKey];
+                    }
+                }
+
+                if (messages.length > 0) {
                     messages.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg.msg, name, false);
+                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
                     });
                 }
                 // --- 修复结束 ---
