@@ -7237,6 +7237,91 @@
                 //     await cleanupDuplicateGroups();
                 // }, 500);
             }
+            
+            /**
+             * 从手机-角色中随机选择一个聊天壁纸
+             */
+            function getRandomChatBackground() {
+                try {
+                    // 获取世界书条目
+                    const entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
+                    if (!entry || !entry.content) {
+                        console.log('无法获取角色配置，使用默认壁纸');
+                        return 'http://sharkpan.xyz/f/mM2SW/Screenshot_20250317_001012.jpg';
+                    }
+                    
+                    // 解析配置
+                    const settings = new QQ_Settings();
+                    settings.loadText(entry.content);
+                    const allSections = settings.getAllSections();
+                    
+                    // 收集所有有聊天壁纸的非群聊角色
+                    const availableBackgrounds = [];
+                    
+                    for (const section of allSections) {
+                        const type = settings.readValue(section, "类型");
+                        // 排除群聊、路人、NPC类型
+                        if (!type || (type.trim() !== '群聊' && type.trim() !== '路人' && !type.match(/npc/i))) {
+                            const backgroundImg = settings.readValue(section, "聊天壁纸");
+                            if (backgroundImg && backgroundImg.trim()) {
+                                availableBackgrounds.push({
+                                    character: section,
+                                    url: backgroundImg.trim()
+                                });
+                            }
+                        }
+                    }
+                    
+                    // 如果找到了壁纸，随机选择一个
+                    if (availableBackgrounds.length > 0) {
+                        const randomChoice = availableBackgrounds[Math.floor(Math.random() * availableBackgrounds.length)];
+                        console.log(`为群聊随机选择了来自角色 "${randomChoice.character}" 的聊天壁纸: ${randomChoice.url}`);
+                        return randomChoice.url;
+                    }
+                    
+                } catch (error) {
+                    console.error('随机选择聊天壁纸时出错:', error);
+                }
+                
+                // 如果没有找到或出错，返回默认壁纸
+                console.log('没有找到可用的聊天壁纸，使用默认壁纸');
+                return 'http://sharkpan.xyz/f/mM2SW/Screenshot_20250317_001012.jpg';
+            }
+            
+            /**
+             * 为群聊添加初始欢迎消息
+             */
+            function addGroupWelcomeMessages(groupName, members) {
+                if (!QQ_msgjson.群聊[groupName]) {
+                    QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
+                }
+                
+                const groupData = QQ_msgjson.群聊[groupName];
+                const currentTime = new Date().toLocaleTimeString('zh-CN', { 
+                    hour12: false, 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+                
+                // 清空现有消息（如果有的话）
+                groupData.msgs = [];
+                
+                // 添加系统消息：群聊创建成功
+                groupData.msgs.push(`系统消息--${currentTime}--群聊"${groupName}"创建成功，开始聊天吧！`);
+                
+                // 添加成员加入消息
+                if (members && members.length > 0) {
+                    members.forEach(member => {
+                        groupData.msgs.push(`系统消息--${currentTime}--${member} 加入了群聊`);
+                    });
+                }
+                
+                // 添加欢迎消息
+                groupData.msgs.push(`${UserName}--${currentTime}--欢迎大家加入${groupName}！让我们开始愉快的聊天吧~`);
+                
+                console.log(`为群聊 ${groupName} 添加了 ${groupData.msgs.length} 条初始消息`);
+            }
+            
             function SetCssVariable(name, variable, value) {
                 let cssvalue = $(`style[data-name='${name}']`).text();
                 if (!cssvalue) {
@@ -7351,14 +7436,32 @@
                     QQ_Groups.push(name);
                 }
 
+                // 初始化群聊数据结构
                 if (!QQ_msgjson.群聊[name]) {
                     QQ_msgjson.群聊[name] = { msgs: [], members: members || [] };
                 } else {
                     QQ_msgjson.群聊[name].members = members || QQ_msgjson.群聊[name].members || [];
                 }
 
+                // 添加初始欢迎消息
+                addGroupWelcomeMessages(name, members);
+
+                // 获取随机聊天壁纸并应用
+                const randomBackground = getRandomChatBackground();
+                let cssRule = chat_headraw_namespaceObject.replace(/\$\{name\}/g, name).replace(/\$\{head\}/g, head);
+                
+                // 如果获得了随机壁纸，添加壁纸CSS
+                if (randomBackground) {
+                    const backgroundCSS = `
+.QQ_chat_page[data-name='${name}'] {
+    --BackGroundImg: url('${randomBackground}');
+    background-image: var(--BackGroundImg) !important;
+}`;
+                    cssRule += backgroundCSS;
+                    console.log(`为群聊 ${name} 设置了随机聊天壁纸: ${randomBackground}`);
+                }
+
                 const style = $("<style></style>").prop("type", "text/css");
-                const cssRule = chat_headraw_namespaceObject.replace(/\$\{name\}/g, name).replace(/\$\{head\}/g, head);
                 style.text(cssRule);
                 $("head").append(style);
 
