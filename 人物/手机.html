@@ -5226,7 +5226,10 @@
                     const userName = $("#QQ_home_UserName").text();
                     $("#QQ_message_list_UserName").text(userName);
                     // 每次切换到消息页面时都更新列表
-                    QQ_UpdateMessageList();
+                    // 使用setTimeout避免async问题
+                    setTimeout(async () => {
+                        await QQ_UpdateMessageList();
+                    }, 100);
                     // 消息页面只需要显示已加载的群聊，不需要重新初始化
                     // 消息页面只需要更新列表显示，不需要重新加载数据
                     console.log('消息页面显示，更新消息列表');
@@ -7389,7 +7392,20 @@
                 });
             }
             
-            function QQ_UpdateMessageList() {
+            async function QQ_UpdateMessageList() {
+                console.log("开始更新消息列表");
+                
+                // 如果QQ_Groups为空且群聊已初始化，尝试从世界书重新加载群聊
+                if (QQ_Groups.length === 0 && groupChatInitialized) {
+                    console.warn('QQ_Groups为空，尝试从世界书重新加载群聊');
+                    try {
+                        await loadGroupChatsFromWorldbook();
+                        console.log('群聊重新加载完成，QQ_Groups:', QQ_Groups);
+                    } catch (error) {
+                        console.error('重新加载群聊失败:', error);
+                    }
+                }
+                
                 const $messageChars = $("#QQ_message_list_chars");
                 const $homeChars = $("#QQ_home_chars");
                 
@@ -9968,6 +9984,16 @@
                 }
                 console.log('从独立世界书条目加载群聊数据:', groups.length, '个群聊');
                 console.log(`当前QQ_Groups列表:`, QQ_Groups);
+                
+                // 最后验证：确保所有加载的群聊都在QQ_Groups中
+                groups.forEach(group => {
+                    if (!QQ_Groups.includes(group.name)) {
+                        QQ_Groups.push(group.name);
+                        console.warn(`补充遗漏的群聊到QQ_Groups: ${group.name}`);
+                    }
+                });
+                console.log(`验证后的QQ_Groups列表:`, QQ_Groups);
+                
                 return groups;
             }
             
@@ -10019,6 +10045,34 @@
             
             // 防止重复加载的标志
             let groupChatInitialized = false;
+            
+            // QQ_Groups数组保护机制
+            function protectQQGroups() {
+                if (!Array.isArray(QQ_Groups)) {
+                    console.warn('QQ_Groups不是数组，重新初始化');
+                    QQ_Groups = [];
+                }
+                
+                // 定期检查QQ_Groups的完整性
+                setInterval(() => {
+                    if (groupChatInitialized && Array.isArray(QQ_Groups)) {
+                        // 从世界书重新验证群聊列表
+                        loadGroupChatsFromWorldbook().then(groups => {
+                            groups.forEach(group => {
+                                if (!QQ_Groups.includes(group.name)) {
+                                    console.warn(`发现遗漏的群聊，重新添加到QQ_Groups: ${group.name}`);
+                                    QQ_Groups.push(group.name);
+                                }
+                            });
+                        }).catch(error => {
+                            console.error('QQ_Groups保护机制检查失败:', error);
+                        });
+                    }
+                }, 30000); // 每30秒检查一次
+            }
+            
+            // 启动保护机制
+            protectQQGroups();
             
             // 统一的初始化函数
             async function initGroupChatOnce() {
@@ -11807,11 +11861,27 @@
                         console.warn('刷新entries失败，但群聊已创建:', e);
                     }
                     
-                    // 2. 立即重新加载群聊以确保显示在界面上
+                    // 2. 确保群聊立即加入QQ_Groups数组
+                    if (!QQ_Groups.includes(groupName)) {
+                        QQ_Groups.push(groupName);
+                        console.log(`群聊 "${groupName}" 已立即加入QQ_Groups数组`);
+                    }
+                    
+                    // 3. 确保QQ_msgjson中有该群聊的数据结构
+                    if (!QQ_msgjson.群聊[groupName]) {
+                        QQ_msgjson.群聊[groupName] = {
+                            members: members || [],
+                            msgs: []
+                        };
+                        console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupName);
+                    }
+                    
+                    // 4. 立即重新加载群聊以确保显示在界面上
                     console.log('立即重新加载群聊数据以显示新创建的群聊');
                     await loadGroupChatsFromWorldbook();
                     
                     console.log('群聊创建成功:', groupName);
+                    console.log('当前QQ_Groups数组:', QQ_Groups);
                     return true;
                 } catch (error) {
                     console.error('创建群聊失败:', error);
@@ -11851,7 +11921,9 @@
                     $(`.QQ_chat_page[data-name='${groupName}']`).remove();
                     
                     // 5. 更新消息列表
-                    QQ_UpdateMessageList();
+                    setTimeout(async () => {
+                        await QQ_UpdateMessageList();
+                    }, 100);
                     
                     console.log('群聊删除成功:', groupName);
                     return true;
