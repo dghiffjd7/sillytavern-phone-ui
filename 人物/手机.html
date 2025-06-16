@@ -7712,17 +7712,29 @@
                 
                 let $page = $(`.QQ_chat_page[data-name='${name}']`);
                 
-                // 核心逻辑：无论页面是否存在，都重新渲染消息
                 if ($page.length === 0) {
                     console.log(`页面不存在，创建新页面: ${name}`);
-                    $page = QQ_CreatChatPage(name); // QQ_CreatChatPage 会返回创建的jQuery对象
+                    $page = QQ_CreatChatPage(name); 
                 } else {
                     console.log(`页面已存在，刷新消息: ${name}`);
                     const $msgContent = $page.find(".msgcontent");
-                    $msgContent.empty(); // 清空旧消息
+                    $msgContent.empty(); 
 
-                    // 重新加载所有消息
-                    const messages = isGroup ? (QQ_msgjson.群聊[name]?.msgs || []) : (QQ_msgjson.私聊[`${UserName}和${name}的聊天`] || []);
+                    // --- 健壮的消息加载逻辑 ---
+                    let messages = [];
+                    if (isGroup) {
+                        messages = QQ_msgjson.群聊[name]?.msgs || [];
+                    } else {
+                        const key1 = `${UserName}和${name}的聊天`;
+                        const key2 = `${name}和${UserName}的聊天`;
+                        if (QQ_msgjson.私聊[key1]) {
+                            messages = QQ_msgjson.私聊[key1];
+                        } else if (QQ_msgjson.私聊[key2]) {
+                            messages = QQ_msgjson.私聊[key2];
+                        }
+                    }
+                    console.log(`为 ${name} 加载了 ${messages.length} 条消息`);
+                    
                     messages.forEach(msg => {
                         QQ_Chat_AddMsg($msgContent[0], msg, name, false);
                     });
@@ -7761,9 +7773,22 @@
                 $("#App_QQ").append($page);
                 
                 const $msgContent = $page.find(".msgcontent");
-                const messages = isGroup ? (QQ_msgjson.群聊[name]?.msgs || []) : (QQ_msgjson.私聊[`${UserName}和${name}的聊天`] || []);
                 
-                console.log(`为新页面 ${name} 加载 ${messages.length} 条消息`);
+                // --- 健壮的消息加载逻辑 ---
+                let messages = [];
+                if (isGroup) {
+                    messages = QQ_msgjson.群聊[name]?.msgs || [];
+                } else {
+                    const key1 = `${UserName}和${name}的聊天`;
+                    const key2 = `${name}和${UserName}的聊天`;
+                    if (QQ_msgjson.私聊[key1]) {
+                        messages = QQ_msgjson.私聊[key1];
+                    } else if (QQ_msgjson.私聊[key2]) {
+                        messages = QQ_msgjson.私聊[key2];
+                    }
+                }
+                console.log(`为新页面 ${name} 加载了 ${messages.length} 条消息`);
+
                 messages.forEach(msg => {
                     QQ_Chat_AddMsg($msgContent[0], msg, name, false);
                 });
