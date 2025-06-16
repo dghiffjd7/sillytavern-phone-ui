@@ -7472,82 +7472,51 @@
             /**
              * 添加新群聊（完全基于私聊逻辑）
              */
-            function AddNewGroup(name, head, members, description) {
-                console.log(`添加新群聊:${name}  ${head}  成员:${members}  描述:${description}`);
+             function AddNewGroup(name, head, members, description) {
+                console.log(`添加/更新群聊:${name}  |  成员:${members.length}人  |  描述:${description}`);
 
-                // 如果已存在，先移除旧的再添加新的
                 const existingElements = $(`.QQ_home_usermsg[data-name='${name}'][data-group-type='true']`);
                 if (existingElements.length > 0) {
-                    console.log(`找到 ${existingElements.length} 个同名群聊，替换为新的`);
+                    console.log(`找到同名群聊，执行更新操作`);
                     existingElements.remove();
                 }
 
-                // 创建群聊HTML（使用与私聊相同的模板）
-                let html = _.template(chat_list_item)({
-                    name: name,
-                    head: head.trim(),
-                });
-
-                // 修改HTML以标识为群聊
+                let html = _.template(chat_list_item)({ name: name, head: head.trim() });
                 const $html = $(html);
-                $html.attr('data-group-type', 'true');
-                $html.attr('data-group-name', name); // 添加群聊名称属性
-                $html.attr('draggable', 'true'); // 确保可以拖拽
+                $html.attr('data-group-type', 'true').attr('data-group-name', name).attr('draggable', 'true');
                 
-                // 显示群聊描述信息，如果没有描述则显示"群聊"
                 const displayMsg = description || '群聊';
                 $html.find('.QQ_home_lastmsg').text(displayMsg);
 
-                // 添加群聊成员数显示
                 const memberCount = members ? members.length : 0;
                 $html.find('.QQ_home_lasttime').text(`${memberCount}人`);
 
-                // 绑定点击事件
                 $html.on('click', function() {
                     console.log('群聊被点击:', name);
                     QQ_ChangeChatPage(null, name);
                 });
 
-                // --- 渲染到正确位置 ---
                 const $contactsContainer = $("#QQ_home_chars");
                 let $ungroupedSection = $contactsContainer.find('.ungrouped-contacts');
-
-                // 如果“未分组”区域不存在，则创建它
                 if ($ungroupedSection.length === 0) {
-                    console.log('未找到“未分组联系人”区域，正在创建...');
-                    $ungroupedSection = $(`
-                        <div class="ungrouped-contacts">
-                            <div class="ungrouped-header">未分组联系人</div>
-                            <div class="drop-zone ungrouped-drop-zone" data-group-id="ungrouped"></div>
-                        </div>
-                    `);
-                    // 确保它在所有分组之前
+                    $ungroupedSection = $(`<div class="ungrouped-contacts"><div class="ungrouped-header">未分组联系人</div><div class="drop-zone ungrouped-drop-zone" data-group-id="ungrouped"></div></div>`);
                     $contactsContainer.prepend($ungroupedSection);
                 }
-
-                // 将群聊添加到“未分组”区域的拖放区
                 $ungroupedSection.append($html);
-                console.log(`群聊 "${name}" 已添加到“未分组联系人”区域。`);
-
-                // --- 后续逻辑 ---
+                
                 QQ_pages.push(name);
-
                 if (!QQ_Groups.includes(name)) {
                     QQ_Groups.push(name);
                 }
 
-                // 初始化群聊数据结构
                 if (!QQ_msgjson.群聊[name]) {
-                    QQ_msgjson.群聊[name] = { msgs: [], members: members || [] };
-                } else {
-                    QQ_msgjson.群聊[name].members = members || QQ_msgjson.群聊[name].members || [];
+                    QQ_msgjson.群聊[name] = { msgs: [], members: [] };
                 }
+                QQ_msgjson.群聊[name].members = members || [];
 
-                // 获取随机聊天壁纸并应用
                 const randomBackground = getRandomChatBackground();
                 let cssRule = chat_headraw_namespaceObject.replace(/\$\{name\}/g, name).replace(/\$\{head\}/g, head);
                 
-                // 如果获得了随机壁纸，添加壁纸CSS
                 if (randomBackground) {
                     const backgroundCSS = `
 .QQ_chat_page[data-name='${name}'] {
@@ -7555,18 +7524,58 @@
     background-image: var(--BackGroundImg) !important;
 }`;
                     cssRule += backgroundCSS;
-                    console.log(`为群聊 ${name} 设置了随机聊天壁纸: ${randomBackground}`);
                 }
 
                 const style = $("<style></style>").prop("type", "text/css");
                 style.text(cssRule);
                 $("head").append(style);
+                
+                // *** 核心改动：直接在此处生成欢迎消息 ***
+                addGroupWelcomeMessages(name, members);
 
                 setTimeout(() => {
                     QQ_UpdateMessageList();
                 }, 100);
 
-                console.log(`群聊 ${name} 创建流程完成`);
+                console.log(`群聊 ${name} 创建/更新流程完成`);
+            }
+
+            /**
+             * 为群聊添加初始欢迎消息 (强制覆盖版)
+             */
+            function addGroupWelcomeMessages(groupName, members) {
+                console.log(`addGroupWelcomeMessages (强制覆盖) 被调用: ${groupName}`);
+                
+                if (!QQ_msgjson.群聊[groupName]) {
+                    QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
+                }
+                
+                const groupData = QQ_msgjson.群聊[groupName];
+                
+                // *** 核心改动：强制清空消息列表，确保初始消息不被覆盖 ***
+                console.log(`强制清空群聊 ${groupName} 的旧消息...`);
+                groupData.msgs = [];
+
+                const currentTime = new Date().toLocaleTimeString('zh-CN', { 
+                    hour12: false, 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+                
+                const systemMsg = `系统消息--${currentTime}--群聊"${groupName}"创建成功，开始聊天吧！`;
+                groupData.msgs.push(systemMsg);
+                
+                if (members && members.length > 0) {
+                    members.forEach(member => {
+                        const joinMsg = `系统消息--${currentTime}--${member} 加入了群聊`;
+                        groupData.msgs.push(joinMsg);
+                    });
+                }
+                
+                const welcomeMsg = `${UserName}--${currentTime}--欢迎大家加入${groupName}！让我们开始愉快的聊天吧~`;
+                groupData.msgs.push(welcomeMsg);
+                
+                console.log(`为群聊 ${groupName} 生成了 ${groupData.msgs.length} 条新的初始消息。`);
             }
             function getFilenameWithoutExtension(path) {
                 // 解码URI组件（处理特殊字符）
@@ -10063,10 +10072,7 @@
                                 console.log('准备调用AddNewGroup函数添加群聊:', groupData.name);
                                 AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members, groupData.description);
                                 
-                                setTimeout(() => {
-                                    console.log(`延迟任务：为 ${groupData.name} 添加欢迎消息`);
-                                    addGroupWelcomeMessages(groupData.name, groupData.members);
-                                }, 100);
+                               
 
                             } else {
                                 console.log('群聊数据不完整，跳过。解析到的数据:', groupData);
