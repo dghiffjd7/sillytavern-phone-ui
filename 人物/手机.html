@@ -7693,134 +7693,81 @@
                 $(`.QQ_chat_page`).hide();
             }
             function QQ_ChangeChatPage(event, directName = null) {
-                console.log("开始切换聊天页面...");
-                try {
-                    const $QQpage = $("#App_QQ");
-                    if ($QQpage.length === 0) {
-                        console.error("错误: 找不到 #App_QQ 容器。");
-                        return;
-                    }
-                    
-                    let name;
-                    if (directName) {
-                        name = directName;
-                        console.log(`通过直接传入名称切换: ${name}`);
-                    } else if (event && event.currentTarget) {
-                        const $target = $(event.currentTarget);
-                        // 优先使用 data-name 属性，更可靠
-                        name = $target.attr('data-name');
-                        // 如果没有 data-name，尝试寻找内部的 .QQ_friend_name 元素
-                        if (!name) {
-                            const $nameElement = $target.find(".QQ_friend_name");
-                            if ($nameElement.length > 0) {
-                                name = $nameElement.text().trim();
-                            }
-                        }
-                        console.log(`通过点击事件切换: ${name}`);
-                    }
-
-                    if (!name) {
-                        console.error("错误: 无法确定聊天名称，操作中止。");
-                        return;
-                    }
-
-                    const isGroup = QQ_Groups && QQ_Groups[name] !== undefined;
-                    console.log(`目标: '${name}', 是否为群聊: ${isGroup}`);
-
-                    let pageId = isGroup ? `#App_QQ_Chat_${QQ_Groups[name].id}` : `#App_QQ_Chat_${name}`;
-                    let $page = $(pageId);
-
-                    if ($page.length === 0) {
-                        console.log(`页面 ${pageId} 不存在，创建新页面。`);
-                        $page = QQ_CreatChatPage(name);
-                        if (!$page || $page.length === 0) {
-                            console.error("错误: QQ_CreatChatPage 未能成功创建页面。");
-                            return;
-                        }
-                    }
-
-                    // --- 核心修复：刷新消息视图 ---
-                    console.log(`准备为 ${name} 渲染消息...`);
-                    const $msgContent = $page.find(".msgcontent");
-                    if ($msgContent.length > 0) {
-                        $msgContent.empty(); // 1. 清空旧消息
-
-                        let messages = []; // 2. 准备获取新消息
-                        if (isGroup) {
-                            if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
-                                messages = QQ_msgjson.群聊[name].msgs;
-                            }
-                        } else {
-                            const privateChatKey = `${UserName}和${name}的聊天`;
-                            if (QQ_msgjson && QQ_msgjson.私聊 && QQ_msgjson.私聊[privateChatKey]) {
-                                messages = QQ_msgjson.私聊[privateChatKey];
-                            }
-                        }
-                        console.log(`找到 ${messages.length} 条消息。`);
-
-                        if (messages.length > 0) { // 3. 渲染新消息
-                            messages.forEach(msg => {
-                                QQ_Chat_AddMsg($msgContent[0], msg, name, false);
-                            });
-                        }
-                    } else {
-                        console.error(`错误: 在 ${pageId} 中找不到 .msgcontent 容器。`);
-                    }
-                    // --- 修复结束 ---
-
-                    console.log("显示聊天页面，并隐藏其他页面。");
-                    $(".QQ_Homepage").hide();
-                    $('.QQ_bottom_nav').hide();
-                    $page.show();
-
-                    const msgBody = $page.find(".msg_body")[0] || $page.find(".msgcontent")[0];
-                    if (msgBody) {
-                        msgBody.scrollTop = msgBody.scrollHeight;
-                    }
-
-                    window.currentGroup_chat = isGroup ? name : null;
-                    window.currentPrivate_chat = isGroup ? null : name;
-                    console.log("聊天页面切换成功。");
-
-                } catch (error) {
-                    console.error("切换聊天页面时发生严重错误:", error);
+                const $QQpage = $("#App_QQ");
+                if ($QQpage.length === 0) {
+                    console.log("获取QQpage失败");
+                    return;
                 }
+                
+                let name;
+                if (directName) {
+                    name = directName;
+                } else {
+                    let element = event.currentTarget;
+                    name = element.getAttribute("data-name") ?? "";
+                }
+                
+                const isGroup = QQ_Groups.includes(name);
+                console.log(`开始切换页面: ${name}, 是否群聊: ${isGroup}`);
+                
+                let $page = $(`.QQ_chat_page[data-name='${name}']`);
+                
+                // 核心逻辑：无论页面是否存在，都重新渲染消息
+                if ($page.length === 0) {
+                    console.log(`页面不存在，创建新页面: ${name}`);
+                    $page = QQ_CreatChatPage(name); // QQ_CreatChatPage 会返回创建的jQuery对象
+                } else {
+                    console.log(`页面已存在，刷新消息: ${name}`);
+                    const $msgContent = $page.find(".msgcontent");
+                    $msgContent.empty(); // 清空旧消息
+
+                    // 重新加载所有消息
+                    const messages = isGroup ? (QQ_msgjson.群聊[name]?.msgs || []) : (QQ_msgjson.私聊[`${UserName}和${name}的聊天`] || []);
+                    messages.forEach(msg => {
+                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                    });
+                }
+
+                if (isGroup) {
+                    const groupData = QQ_msgjson.群聊[name];
+                    const memberCount = groupData && groupData.members ? groupData.members.length : 0;
+                    $page.find('#QQ_chat_username').html(`${name} <span style="font-size: 12px; color: #999; font-weight: normal;">(${memberCount}人)</span>`);
+                }
+
+                QQ_SetHomeTips(name, "0");
+                QQ_HideAllChat();
+                $("#QQ_home_page, #QQ_message_list_page, #QQ_space_page").hide();
+                $(".QQ_bottom_nav").hide();
+                $page.show();
+                
+                const $msgContent = $page.find(".msgcontent");
+                $msgContent.scrollTop($msgContent[0].scrollHeight);
+                
+                const TipsCount = QQ_GetChatShowTipsCount(name);
+                const $Tips = $page.find(`.new_tips`);
+                $Tips.text(TipsCount).toggle(TipsCount > 0);
             }
-            /**
-             * 创建聊天页
-             * @param name 聊天页名称
-             * @returns 聊天页HTML
-             */
-             function QQ_CreatChatPage(name) {
-                console.log(`创建聊天页: ${name}`);
+
+            function QQ_CreatChatPage(name) {
+                console.log(`创建聊天页框架: ${name}`);
                 const isGroup = QQ_Groups.includes(name);
                 
-                // 使用模板创建页面
                 let $page = $(_.template(chat_page)({
                     name: name,
                     isGroup: isGroup,
                     members: isGroup ? (QQ_msgjson.群聊[name]?.members || []).join(', ') : ''
                 }));
 
-                // 将新创建的页面添加到DOM中
                 $("#App_QQ").append($page);
                 
-                // *** 核心修复：创建页面后，立即加载并显示已有消息 ***
                 const $msgContent = $page.find(".msgcontent");
-                if (isGroup && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
-                    console.log(`为新创建的群聊 ${name} 加载 ${QQ_msgjson.群聊[name].msgs.length} 条已有消息`);
-                    QQ_msgjson.群聊[name].msgs.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg, name, false); // false表示非新消息，不触发红点
-                    });
-                } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
-                    const privateMsgs = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
-                    console.log(`为新创建的私聊 ${name} 加载 ${privateMsgs.length} 条已有消息`);
-                    privateMsgs.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
-                    });
-                }
+                const messages = isGroup ? (QQ_msgjson.群聊[name]?.msgs || []) : (QQ_msgjson.私聊[`${UserName}和${name}的聊天`] || []);
                 
-                // 滚动到底部
+                console.log(`为新页面 ${name} 加载 ${messages.length} 条消息`);
+                messages.forEach(msg => {
+                    QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                });
+
                 $msgContent.scrollTop($msgContent[0].scrollHeight);
 
                 return $page;
