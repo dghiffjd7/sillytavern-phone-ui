@@ -9579,14 +9579,31 @@
                     return;
                 }
                 
+                // 获取头像显示内容
+                let avatarDisplay = '';
+                if (groupData.avatar) {
+                    if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                        // 使用上传的图片
+                        avatarDisplay = `<img src="${groupData.avatar.imageData}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    } else if (groupData.avatar.type === 'url' && groupData.avatar.url) {
+                        // 使用网络链接图片
+                        avatarDisplay = `<img src="${groupData.avatar.url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    } else {
+                        // 默认显示"群"字
+                        avatarDisplay = '群';
+                    }
+                } else {
+                    avatarDisplay = '群';
+                }
+                
                 // 创建群聊联系人项
                 const groupContactHtml = `
                     <div class="QQ_home_usermsg" style="cursor: pointer;" 
                          data-group-id="${groupData.id}" 
                          data-group-name="${groupData.name}" 
                          data-group-type="group">
-                        <div class="QQ_home_head" style="background: ${groupData.avatar}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">
-                            群
+                        <div class="QQ_home_head" style="background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; overflow: hidden;">
+                            ${avatarDisplay}
                         </div>
                         <div style="display: flex; align-items: start; justify-content: center; flex-direction: column; margin-left: 3px; gap: 3px; width: 100%;">
                             <div style="display: flex; align-items: center; width: 100%;">
@@ -9623,14 +9640,31 @@
                     return;
                 }
                 
+                // 获取头像显示内容
+                let avatarDisplay = '';
+                if (groupData.avatar) {
+                    if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                        // 使用上传的图片
+                        avatarDisplay = `<img src="${groupData.avatar.imageData}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    } else if (groupData.avatar.type === 'url' && groupData.avatar.url) {
+                        // 使用网络链接图片
+                        avatarDisplay = `<img src="${groupData.avatar.url}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    } else {
+                        // 默认显示"群"字
+                        avatarDisplay = '群';
+                    }
+                } else {
+                    avatarDisplay = '群';
+                }
+                
                 // 创建群聊消息项
                 const groupMessageHtml = `
                     <div class="QQ_home_usermsg" style="cursor: pointer;" 
                          data-group-id="${groupData.id}" 
                          data-group-name="${groupData.name}" 
                          data-group-type="group">
-                        <div class="QQ_home_head" style="background: ${groupData.avatar}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">
-                            群
+                        <div class="QQ_home_head" style="background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; overflow: hidden;">
+                            ${avatarDisplay}
                         </div>
                         <div style="display: flex; align-items: start; justify-content: center; flex-direction: column; margin-left: 3px; gap: 3px; width: 100%;">
                             <div style="display: flex; align-items: center; width: 100%;">
@@ -9711,11 +9745,30 @@
                                     if (line.startsWith('成员=')) {
                                         groupData.members = line.substring(3).split(',').filter(m => m.trim());
                                     } else if (line.startsWith('头像=')) {
-                                        const avatarUrl = line.substring(3);
-                                        if (avatarUrl.startsWith('data:')) {
-                                            groupData.avatar = { type: 'upload', imageData: avatarUrl };
+                                        const avatarReference = line.substring(3);
+                                        if (avatarReference.startsWith('avatar_')) {
+                                            // 这是一个头像ID引用，需要从localStorage加载实际数据
+                                            const avatarData = localStorage.getItem('avatarData_' + avatarReference);
+                                            if (avatarData) {
+                                                groupData.avatar = { 
+                                                    type: 'upload', 
+                                                    avatarId: avatarReference,
+                                                    imageData: avatarData 
+                                                };
+                                                console.log('从localStorage加载头像数据:', avatarReference);
+                                            } else {
+                                                console.warn('头像数据丢失，使用默认头像:', avatarReference);
+                                                groupData.avatar = { 
+                                                    type: 'url', 
+                                                    url: 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif' 
+                                                };
+                                            }
+                                        } else if (avatarReference.startsWith('data:')) {
+                                            // 兼容旧的base64格式
+                                            groupData.avatar = { type: 'upload', imageData: avatarReference };
                                         } else {
-                                            groupData.avatar = { type: 'url', url: avatarUrl };
+                                            // 网络链接
+                                            groupData.avatar = { type: 'url', url: avatarReference };
                                         }
                                     }
                                 });
@@ -10792,50 +10845,47 @@
                 
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    // 显示警告提示
-                    const shouldContinue = confirm(
-                        '⚠️ 重要提示：\n\n' +
-                        '本地上传的图片无法保存为真实的网络链接。\n' +
-                        '为了确保头像能正常显示，建议：\n\n' +
-                        '1. 将图片上传到 catbox.moe 等图床\n' +
-                        '2. 复制获得的链接地址\n' +
-                        '3. 在世界书中手动设置头像链接\n\n' +
-                        '如果继续使用本地图片，系统将使用默认头像。\n\n' +
-                        '是否继续？'
-                    );
-                    
-                    if (!shouldContinue) {
-                        // 用户选择不继续，重置文件输入
-                        event.target.value = '';
-                        return;
-                    }
+                    // 生成唯一的头像ID
+                    const avatarId = 'avatar_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    console.log('生成头像ID:', avatarId);
                     
                     // 更新上传区域显示
                     const uploadZone = document.querySelector('.upload-zone');
                     const originalHTML = uploadZone.innerHTML;
                     
+                    // 将图片数据保存到localStorage
+                    try {
+                        localStorage.setItem('avatarData_' + avatarId, e.target.result);
+                        console.log('头像数据已保存到localStorage:', avatarId);
+                    } catch (error) {
+                        console.error('保存头像数据失败:', error);
+                        alert('图片太大，无法保存。请选择较小的图片文件。');
+                        event.target.value = '';
+                        return;
+                    }
+                    
                     uploadZone.innerHTML = `
                         <div class="uploaded-preview">
                             <img src="${e.target.result}" alt="预览" style="width: 120px; height: 120px; border-radius: 12px; object-fit: cover;">
-                            <div class="upload-text" style="margin-top: 10px; color: #ff6b6b;">⚠️ 本地图片（将使用默认头像）</div>
+                            <div class="upload-text" style="margin-top: 10px; color: #28a745;">✅ 图片已上传成功</div>
                             <button class="change-image-btn" onclick="triggerFileUpload()" style="margin-top: 8px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; background: white; cursor: pointer;">更换图片</button>
                             <div style="margin-top: 8px; font-size: 12px; color: #666; text-align: center;">
-                                建议使用 <a href="https://catbox.moe" target="_blank" style="color: #199AFF;">catbox.moe</a> 上传图片获取链接
+                                图片将自动保存，无需手动设置链接
                             </div>
                         </div>
                     `;
                     
-                    // 保存选中的头像数据，但标记为本地上传
+                    // 保存选中的头像数据
                     window.selectedAvatarData = {
                         type: 'upload',
-                        imageData: e.target.result,
-                        isLocal: true  // 标记为本地上传
+                        avatarId: avatarId,  // 保存头像ID而不是完整数据
+                        imageData: e.target.result  // 临时保存用于预览
                     };
                     
-                    console.log('上传头像数据已保存（本地图片）:', {
+                    console.log('上传头像数据已保存:', {
                         type: window.selectedAvatarData.type,
-                        hasImageData: !!window.selectedAvatarData.imageData,
-                        isLocal: window.selectedAvatarData.isLocal
+                        avatarId: window.selectedAvatarData.avatarId,
+                        hasImageData: !!window.selectedAvatarData.imageData
                     });
                     
                     updateAvatarConfirmButton();
@@ -11123,35 +11173,35 @@
                     // 解析现有内容
                     let content = entry.content;
                     
-                    // 构建群聊条目 - 智能处理头像URL
-                    let avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                    // 构建群聊条目 - 智能处理头像存储
+                    let avatarReference = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
                     
                     if (groupData.avatar) {
                         if (groupData.avatar.type === 'url' && groupData.avatar.url) {
                             // 真实的网络链接，直接使用
-                            avatarUrl = groupData.avatar.url;
-                            console.log('使用网络链接头像:', avatarUrl);
-                        } else if (groupData.avatar.type === 'upload' && groupData.avatar.isLocal) {
-                            // 本地上传的图片，使用默认头像
-                            console.log('检测到本地上传图片，使用默认头像');
-                            avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                            avatarReference = groupData.avatar.url;
+                            console.log('使用网络链接头像:', avatarReference);
+                        } else if (groupData.avatar.type === 'upload' && groupData.avatar.avatarId) {
+                            // 本地上传的图片，保存头像ID引用
+                            avatarReference = groupData.avatar.avatarId;
+                            console.log('使用头像ID引用:', avatarReference);
                         } else if (groupData.avatar.type === 'upload' && groupData.avatar.imageData && !groupData.avatar.imageData.startsWith('data:')) {
                             // 如果是真实的网络链接（不是base64），使用它
-                            avatarUrl = groupData.avatar.imageData;
-                            console.log('使用上传的网络链接头像:', avatarUrl);
+                            avatarReference = groupData.avatar.imageData;
+                            console.log('使用上传的网络链接头像:', avatarReference);
                         } else {
-                            // 其他情况（包括base64数据），使用默认头像
-                            console.log('使用默认头像，避免保存base64数据');
-                            avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                            // 其他情况，使用默认头像
+                            console.log('使用默认头像');
+                            avatarReference = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
                         }
                     }
                     
-                    console.log('最终头像URL:', avatarUrl);
+                    console.log('最终头像引用:', avatarReference);
                     
                     const groupEntry = `[${groupData.name}]
 类型=群聊
 成员=${groupData.members.join(',')}
-头像=${avatarUrl}`;
+头像=${avatarReference}`;
                     
                     // 检查是否已存在该群聊
                     const groupPattern = new RegExp(`\\[${groupData.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][\\s\\S]*?(?=\\[|$)`, 'g');
@@ -13550,6 +13600,92 @@
                 showGroupSettings();
             }
 
+            /**
+             * 清理localStorage中的过期头像数据
+             */
+            function cleanupAvatarData() {
+                try {
+                    // 获取所有localStorage中的头像数据
+                    const avatarKeys = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key && key.startsWith('avatarData_')) {
+                            avatarKeys.push(key);
+                        }
+                    }
+                    
+                    console.log('找到头像数据:', avatarKeys.length, '个');
+                    
+                    // 获取世界书中正在使用的头像ID
+                    const usedAvatarIds = new Set();
+                    if (entries) {
+                        const entry = entries.find(e => e.key === "手机-角色");
+                        if (entry && entry.content) {
+                            const lines = entry.content.split('\n');
+                            lines.forEach(line => {
+                                if (line.startsWith('头像=avatar_')) {
+                                    const avatarId = line.substring(3);
+                                    usedAvatarIds.add('avatarData_' + avatarId);
+                                }
+                            });
+                        }
+                    }
+                    
+                    console.log('正在使用的头像ID:', usedAvatarIds.size, '个');
+                    
+                    // 删除未使用的头像数据
+                    let deletedCount = 0;
+                    avatarKeys.forEach(key => {
+                        if (!usedAvatarIds.has(key)) {
+                            localStorage.removeItem(key);
+                            deletedCount++;
+                            console.log('删除未使用的头像数据:', key);
+                        }
+                    });
+                    
+                    console.log('清理完成，删除了', deletedCount, '个未使用的头像数据');
+                } catch (error) {
+                    console.error('清理头像数据失败:', error);
+                }
+            }
+            
+            /**
+             * 获取localStorage使用情况
+             */
+            function getStorageUsage() {
+                try {
+                    let totalSize = 0;
+                    let avatarSize = 0;
+                    let avatarCount = 0;
+                    
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        const value = localStorage.getItem(key);
+                        const size = (key.length + value.length) * 2; // 估算字节数
+                        totalSize += size;
+                        
+                        if (key.startsWith('avatarData_')) {
+                            avatarSize += size;
+                            avatarCount++;
+                        }
+                    }
+                    
+                    console.log('localStorage使用情况:');
+                    console.log('- 总大小:', (totalSize / 1024 / 1024).toFixed(2), 'MB');
+                    console.log('- 头像数据大小:', (avatarSize / 1024 / 1024).toFixed(2), 'MB');
+                    console.log('- 头像数量:', avatarCount, '个');
+                    
+                    return {
+                        totalSize,
+                        avatarSize,
+                        avatarCount
+                    };
+                } catch (error) {
+                    console.error('获取存储使用情况失败:', error);
+                    return null;
+                }
+            }
+
             // 将函数添加到全局作用域
             window.showGroupManagementMenu = showGroupManagementMenu;
             window.closeGroupManagementMenu = closeGroupManagementMenu;
@@ -13563,6 +13699,8 @@
             window.confirmAddMembers = confirmAddMembers;
             window.testGroupNameClick = testGroupNameClick;
             window.debugGroupData = debugGroupData;
+            window.cleanupAvatarData = cleanupAvatarData;
+            window.getStorageUsage = getStorageUsage;
             
             // 调试：检查函数是否正确定义
             console.log('🔧 全局函数检查:');
