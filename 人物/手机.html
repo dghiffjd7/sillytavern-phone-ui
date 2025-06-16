@@ -9715,7 +9715,7 @@
                 if (groupData.avatar) {
                     if (groupData.avatar.startsWith('avatar_')) {
                         // 头像ID引用，从localStorage获取数据
-                        const avatarData = groupData.avatarData || localStorage.getItem(`avatarData_${groupData.avatar.replace('avatar_', '')}`);
+                        const avatarData = groupData.avatarData || localStorage.getItem(`avatarData_${groupData.avatar}`);
                         if (avatarData) {
                             avatarDisplay = `<img src="${avatarData}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
                         } else {
@@ -9794,7 +9794,7 @@
                 if (groupData.avatar) {
                     if (groupData.avatar.startsWith('avatar_')) {
                         // 头像ID引用，从localStorage获取数据
-                        const avatarData = groupData.avatarData || localStorage.getItem(`avatarData_${groupData.avatar.replace('avatar_', '')}`);
+                        const avatarData = groupData.avatarData || localStorage.getItem(`avatarData_${groupData.avatar}`);
                         if (avatarData) {
                             avatarDisplay = `<img src="${avatarData}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
                         } else {
@@ -9876,6 +9876,27 @@
                 console.log('当前entries:', typeof entries, entries ? entries.length : 'undefined');
                 
                 const groups = [];
+                
+                // 先清理现有的群聊项，避免重复
+                const contactsList = document.getElementById('QQ_home_chars');
+                const messagesList = document.getElementById('QQ_message_list_chars');
+                
+                if (contactsList) {
+                    const existingGroups = contactsList.querySelectorAll('[data-group-type="true"]');
+                    existingGroups.forEach(group => {
+                        console.log('清理联系人列表中的现有群聊:', group.getAttribute('data-group-name'));
+                        group.remove();
+                    });
+                }
+                
+                if (messagesList) {
+                    const existingGroups = messagesList.querySelectorAll('[data-group-type="true"]');
+                    existingGroups.forEach(group => {
+                        console.log('清理消息列表中的现有群聊:', group.getAttribute('data-group-name'));
+                        group.remove();
+                    });
+                }
+                
                 try {
                     // 如果entries未定义，先初始化它
                     if (!entries) {
@@ -9892,8 +9913,8 @@
                         }
                     }
                     
-                    // 查找所有群聊条目（使用新的独立格式）
-                    const groupEntries = entries.filter(e => e.comment === "手机-群聊" || (e.key && typeof e.key === 'string' && e.key.startsWith("手机-群聊-")));
+                    // 查找所有群聊条目（使用标准的comment格式）
+                    const groupEntries = entries.filter(e => e.comment === "手机-群聊");
                     console.log('找到的独立群聊条目数量:', groupEntries.length);
                     
                     groupEntries.forEach(entry => {
@@ -9923,11 +9944,11 @@
                                     const avatarReference = trimmed.substring(3);
                                     if (avatarReference.startsWith('avatar_')) {
                                         // 这是一个头像ID引用，需要从localStorage加载实际数据
-                                        const avatarData = localStorage.getItem(`avatarData_${avatarReference.replace('avatar_', '')}`);
+                                        const avatarData = localStorage.getItem(`avatarData_${avatarReference}`);
                                         if (avatarData) {
                                             groupData.avatar = avatarReference;
                                             groupData.avatarData = avatarData;
-                                            console.log('从localStorage加载头像数据:', avatarReference);
+                                            console.log('从localStorage加载头像数据:', avatarReference, '数据长度:', avatarData.length);
                                         } else {
                                             console.warn('头像数据丢失，使用默认头像:', avatarReference);
                                             groupData.avatar = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
@@ -9951,26 +9972,12 @@
                                     QQ_Groups.push(groupData.name);
                                 }
                                 
-                                // 检查是否已存在，避免重复添加
-                                const contactsList = document.getElementById('QQ_home_chars');
-                                const messagesList = document.getElementById('QQ_message_list_chars');
+                                // 直接添加（已在函数开头清理过重复项）
+                                console.log('将群聊添加到联系人列表:', groupData.name);
+                                addGroupToContactList(groupData);
                                 
-                                const existsInContacts = contactsList && contactsList.querySelector(`[data-name="${groupData.name}"]`);
-                                const existsInMessages = messagesList && messagesList.querySelector(`[data-name="${groupData.name}"]`);
-                                
-                                if (!existsInContacts) {
-                                    console.log('将群聊添加到联系人列表:', groupData.name);
-                                    addGroupToContactList(groupData);
-                                } else {
-                                    console.log('群聊已存在于联系人列表:', groupData.name);
-                                }
-                                
-                                if (!existsInMessages) {
-                                    console.log('将群聊添加到消息列表:', groupData.name);
-                                    addGroupToMessageList(groupData);
-                                } else {
-                                    console.log('群聊已存在于消息列表:', groupData.name);
-                                }
+                                console.log('将群聊添加到消息列表:', groupData.name);
+                                addGroupToMessageList(groupData);
                             }
                         }
                     });
@@ -10028,39 +10035,33 @@
                 console.log('群聊功能初始化完成');
             }
             
-            // 多种方式确保事件绑定成功
-            // 方式1: DOMContentLoaded
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', async function() {
-                    initGroupChatFeature();
-                    if (worldbook) {
-                        await loadGroupChatsFromWorldbook(); // 加载保存的群聊
-                    }
-                });
-            } else {
-                // 方式2: 如果DOM已经加载完成，直接执行
-                initGroupChatFeature();
-                if (worldbook) {
-                    loadGroupChatsFromWorldbook(); // 加载保存的群聊（异步执行）
-                }
-            }
+            // 防止重复加载的标志
+            let groupChatInitialized = false;
             
-            // 方式3: 延迟执行，确保页面完全加载
-            setTimeout(async function() {
+            // 统一的初始化函数
+            async function initGroupChatOnce() {
+                if (groupChatInitialized) {
+                    console.log('群聊功能已初始化，跳过重复初始化');
+                    return;
+                }
+                
+                console.log('开始初始化群聊功能...');
                 initGroupChatFeature();
-                if (worldbook) {
+                
+                if (worldbook && entries) {
                     await loadGroupChatsFromWorldbook(); // 加载保存的群聊
                 }
-            }, 1000);
+                
+                groupChatInitialized = true;
+                console.log('群聊功能初始化完成');
+            }
             
-            // 方式4: 在页面显示时重新绑定事件
-            function reinitGroupChat() {
-                setTimeout(async function() {
-                    initGroupChatFeature();
-                    if (worldbook) {
-                        await loadGroupChatsFromWorldbook(); // 加载保存的群聊
-                    }
-                }, 500);
+            // 单一的初始化调用点
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initGroupChatOnce);
+            } else {
+                // 延迟执行，确保worldbook和entries都已准备好
+                setTimeout(initGroupChatOnce, 1000);
             }
             
             // 添加全局测试函数，便于调试
@@ -11344,8 +11345,7 @@
                     const groupEntryKey = `手机-群聊-${groupData.name}`;
                     
                     groupEntry = entries.find(e => 
-                        (e.keys && e.keys.includes(groupEntryKey)) || 
-                        (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`))
+                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)
                     );
                     
                     // 构建群聊条目内容 - 智能头像混合存储方案
@@ -11450,7 +11450,7 @@
                         console.log('准备调用createLorebookEntry，参数:', { worldbook, groupEntryKey, groupContent });
                         const createResult = await createLorebookEntry(worldbook, {
                             comment: "手机-群聊",
-                            key: [groupEntryKey], // 关键词为群聊的唯一标识
+                            key: ["此世界书永不触发"], // 使用标准的永不触发关键词，与手机-角色保持一致
                             content: groupContent,
                             position: "at_depth_as_system",
                             type: "selective", // 绿灯：选择性触发
@@ -11475,7 +11475,7 @@
                     // 验证条目是否真的被添加了
                     console.log('验证：重新获取世界书条目...');
                     const updatedEntries = await getLorebookEntries(worldbook);
-                    const verifyEntry = updatedEntries.find(e => e.keys && e.keys.includes(groupEntryKey));
+                    const verifyEntry = updatedEntries.find(e => e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`));
                     console.log('验证结果 - 找到新条目:', !!verifyEntry);
                     if (verifyEntry) {
                         console.log('新条目内容:', verifyEntry.content);
@@ -11509,8 +11509,7 @@
                     
                     if (entries) {
                         groupEntry = entries.find(e => 
-                            (e.keys && e.keys.includes(groupEntryKey)) || 
-                            (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`))
+                            e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)
                         );
                     }
                     
@@ -11569,8 +11568,7 @@
                     
                     if (entries) {
                         oldGroupEntry = entries.find(e => 
-                            (e.keys && e.keys.includes(oldGroupEntryKey)) || 
-                            (e.comment === "手机-群聊" && e.content && e.content.includes(`[${oldName}]`))
+                            e.comment === "手机-群聊" && e.content && e.content.includes(`[${oldName}]`)
                         );
                     }
                     
