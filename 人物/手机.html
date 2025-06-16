@@ -5199,13 +5199,8 @@
              * 导航到指定页面
              */
             function QQ_Nav(page) {
-                // 页面切换时检查并恢复QQ_Groups完整性
+                // 页面切换时不自动检查QQ_Groups（避免重复加载）
                 console.log(`导航到页面: ${page}`);
-                
-                // 在每次页面切换时都检查QQ_Groups完整性
-                setTimeout(() => {
-                    ensureQQGroupsIntegrity();
-                }, 50);
                 
                 const $message_svg = $("#QQ_message_svg");
                 const $people_svg = $("#QQ_people_svg");
@@ -7400,16 +7395,8 @@
             async function QQ_UpdateMessageList() {
                 console.log("开始更新消息列表");
                 
-                // 如果QQ_Groups为空且群聊已初始化，尝试从世界书重新加载群聊
-                if (QQ_Groups.length === 0 && groupChatInitialized) {
-                    console.warn('QQ_Groups为空，尝试从世界书重新加载群聊');
-                    try {
-                        await loadGroupChatsFromWorldbook();
-                        console.log('群聊重新加载完成，QQ_Groups:', QQ_Groups);
-                    } catch (error) {
-                        console.error('重新加载群聊失败:', error);
-                    }
-                }
+                // 不再自动重新加载群聊，避免重复循环
+                console.log('当前QQ_Groups状态:', QQ_Groups.length, '个群聊');
                 
                 const $messageChars = $("#QQ_message_list_chars");
                 const $homeChars = $("#QQ_home_chars");
@@ -7508,6 +7495,11 @@
                 // 检查是否为群聊
                 const isGroup = QQ_Groups.includes(name);
                 console.log(`切换到聊天页: ${name}, 是否为群聊: ${isGroup}`);
+                
+                // 在群聊被点击时确保QQ_Groups完整性
+                if (isGroup) {
+                    ensureQQGroupsIntegrityOnClick(name);
+                }
                 
                 let $page = $(`.QQ_chat_page[data-name='${name}']`);
                 if ($page.length === 0) {
@@ -9745,23 +9737,21 @@
                     return;
                 }
                 
-                // 检查是否已经存在（使用群聊名称检查，因为ID可能不同）
-                const existingGroup = contactsList.querySelector(`[data-group-name="${groupData.name}"]`);
-                if (existingGroup) {
-                    console.log('群聊已存在于联系人列表中，跳过添加:', groupData.name);
-                    return;
-                }
+                // 删除重复检查逻辑，允许同名群聊存在（内容不同）
+                console.log('直接添加群聊到联系人列表（不检查重复）:', groupData.name);
                 
                 // 使用统一的头像处理函数
                 const avatarDisplay = processGroupAvatar(groupData);
                 
-                // 创建群聊联系人项
+                // 创建群聊联系人项，使用唯一的ID来区分同名群聊
+                const uniqueId = `${groupData.id}_${Date.now()}`;
                 const groupContactHtml = `
                     <div class="QQ_home_usermsg" style="cursor: pointer;" 
                          data-name="${groupData.name}"
                          data-group-id="${groupData.id}" 
                          data-group-name="${groupData.name}" 
-                         data-group-type="true">
+                         data-group-type="true"
+                         data-unique-id="${uniqueId}">
                         <div class="QQ_home_head" style="background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; overflow: hidden;">
                             ${avatarDisplay}
                         </div>
@@ -9782,7 +9772,7 @@
                 contactsList.insertAdjacentHTML('afterbegin', groupContactHtml);
                 
                 // 绑定点击事件
-                const addedElement = contactsList.querySelector(`[data-group-name="${groupData.name}"]`);
+                const addedElement = contactsList.querySelector(`[data-unique-id="${uniqueId}"]`);
                 if (addedElement) {
                     addedElement.addEventListener('click', function() {
                         console.log('联系人界面群聊被点击:', groupData.name);
@@ -9805,23 +9795,21 @@
                     return;
                 }
                 
-                // 检查是否已经存在（使用群聊名称检查，因为ID可能不同）
-                const existingGroup = messagesList.querySelector(`[data-group-name="${groupData.name}"]`);
-                if (existingGroup) {
-                    console.log('群聊已存在于消息列表中，跳过添加:', groupData.name);
-                    return;
-                }
+                // 删除重复检查逻辑，允许同名群聊存在（内容不同）
+                console.log('直接添加群聊到消息列表（不检查重复）:', groupData.name);
                 
                 // 使用统一的头像处理函数
                 const avatarDisplay = processGroupAvatar(groupData);
                 
-                // 创建群聊消息项
+                // 创建群聊消息项，使用唯一的ID来区分同名群聊
+                const uniqueId = `${groupData.id}_${Date.now()}`;
                 const groupMessageHtml = `
                     <div class="QQ_home_usermsg" style="cursor: pointer;" 
                          data-name="${groupData.name}"
                          data-group-id="${groupData.id}" 
                          data-group-name="${groupData.name}" 
-                         data-group-type="true">
+                         data-group-type="true"
+                         data-unique-id="${uniqueId}">
                         <div class="QQ_home_head" style="background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; overflow: hidden;">
                             ${avatarDisplay}
                         </div>
@@ -9842,7 +9830,7 @@
                 messagesList.insertAdjacentHTML('afterbegin', groupMessageHtml);
                 
                 // 绑定点击事件
-                const addedElement = messagesList.querySelector(`[data-group-name="${groupData.name}"]`);
+                const addedElement = messagesList.querySelector(`[data-unique-id="${uniqueId}"]`);
                 if (addedElement) {
                     addedElement.addEventListener('click', function() {
                         console.log('消息界面群聊被点击:', groupData.name);
@@ -10063,25 +10051,59 @@
             // 启动保护机制
             protectQQGroups();
             
-            // 添加即时恢复机制 - 在任何页面切换时检查QQ_Groups
+            // 简化的QQ_Groups完整性检查（不重新加载群聊到界面）
             function ensureQQGroupsIntegrity() {
                 if (groupChatInitialized && QQ_Groups.length === 0) {
-                    console.warn('检测到QQ_Groups为空，立即恢复');
-                    loadGroupChatsFromWorldbook().then(groups => {
-                        groups.forEach(group => {
-                            if (!QQ_Groups.includes(group.name)) {
-                                console.log(`立即恢复群聊到QQ_Groups: ${group.name}`);
-                                QQ_Groups.push(group.name);
-                            }
-                        });
-                        // 恢复后立即更新消息列表
-                        if (QQ_currentPage === 'message') {
-                            setTimeout(() => QQ_UpdateMessageList(), 100);
+                    console.warn('检测到QQ_Groups为空，但不自动重新加载（避免重复）');
+                    console.log('当前页面群聊应该保持可见，问题可能在其他地方');
+                    
+                    // 仅检查现有界面元素并恢复QQ_Groups
+                    const contactsGroups = document.querySelectorAll('#QQ_home_chars [data-group-type="true"]');
+                    const messageGroups = document.querySelectorAll('#QQ_message_list_chars [data-group-type="true"]');
+                    
+                    contactsGroups.forEach(element => {
+                        const groupName = element.getAttribute('data-group-name');
+                        if (groupName && !QQ_Groups.includes(groupName)) {
+                            QQ_Groups.push(groupName);
+                            console.log(`从联系人界面恢复群聊到QQ_Groups: ${groupName}`);
                         }
-                    }).catch(error => {
-                        console.error('立即恢复QQ_Groups失败:', error);
                     });
+                    
+                    messageGroups.forEach(element => {
+                        const groupName = element.getAttribute('data-group-name');
+                        if (groupName && !QQ_Groups.includes(groupName)) {
+                            QQ_Groups.push(groupName);
+                            console.log(`从消息界面恢复群聊到QQ_Groups: ${groupName}`);
+                        }
+                    });
+                    
+                    console.log('QQ_Groups恢复后:', QQ_Groups);
                 }
+            }
+            
+            // 点击群聊时的完整性检查
+            function ensureQQGroupsIntegrityOnClick(groupName) {
+                console.log(`群聊 ${groupName} 被点击，检查QQ_Groups完整性`);
+                
+                // 确保点击的群聊在QQ_Groups中
+                if (!QQ_Groups.includes(groupName)) {
+                    console.warn(`群聊 ${groupName} 不在QQ_Groups中，添加中...`);
+                    QQ_Groups.push(groupName);
+                }
+                
+                // 确保QQ_msgjson中有该群聊的数据结构
+                if (!QQ_msgjson.群聊) {
+                    QQ_msgjson.群聊 = {};
+                }
+                if (!QQ_msgjson.群聊[groupName]) {
+                    console.log(`在QQ_msgjson.群聊中初始化群聊数据: ${groupName}`);
+                    QQ_msgjson.群聊[groupName] = {
+                        members: [],
+                        msgs: []
+                    };
+                }
+                
+                console.log(`群聊 ${groupName} 完整性检查完成`);
             }
             
             // 统一的头像处理函数
@@ -10725,21 +10747,14 @@
             }
             
             /**
-             * 检查是否为群聊
+             * 检查是否为群聊（统一使用QQ_Groups数组）
              */
             function checkIfGroupChat(chatName) {
-                // 检查当前分组中是否有此群聊
-                const groupsData = JSON.parse(localStorage.getItem('contact_groups') || '[]');
+                // 移除标题中的人数信息，只保留群名
+                const cleanChatName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
                 
-                for (const group of groupsData) {
-                    const foundContact = group.contacts.find(contact => contact.name === chatName);
-                    if (foundContact && foundContact.isGroup) {
-                        return true;
-                    }
-                }
-                
-                // 也可以根据聊天名称的特征判断
-                return chatName.includes('群聊') || chatName.includes('讨论组') || chatName.includes('工作群');
+                // 使用QQ_Groups数组检查，确保与其他地方的逻辑一致
+                return QQ_Groups.includes(cleanChatName);
             }
             
             /**
@@ -10770,40 +10785,43 @@
             }
             
             /**
-             * 获取群成员数据
+             * 获取群成员数据（从QQ_msgjson.群聊中获取）
              */
             function getGroupMembers(groupName) {
-                // 新版本：从世界书获取群成员数据
+                // 移除可能的人数标识
+                const cleanGroupName = groupName.replace(/\s*\(\d+人\)\s*$/, '').trim();
+                
                 try {
-                    // 检查entries是否已初始化
-                    if (!entries) {
-                        console.warn('getGroupMembers: entries未初始化，使用示例成员');
-                        return generateSampleMembers(groupName);
-                    }
-                    
-                    const entry = entries.find(e => e.key === "手机-角色");
-                    if (entry && entry.content) {
-                        const sections = entry.content.split(/\n\[([^\]]+)\]/);
-                        for (let i = 1; i < sections.length; i += 2) {
-                            const name = sections[i];
-                            const content = sections[i + 1];
-                            if (name === groupName && content && content.includes('类型=群聊')) {
-                                const lines = content.split('\n');
-                                for (const line of lines) {
-                                    if (line.startsWith('成员=')) {
-                                        const memberNames = line.substring(3).split(',').filter(m => m.trim());
-                                        return memberNames.map(name => ({ name: name.trim(), avatar: 'http://sharkpan.xyz/f/EJeUD/Image_1737026320652.jpg' }));
-                                    }
-                                }
-                            }
+                    // 直接从QQ_msgjson.群聊中获取群聊数据
+                    if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[cleanGroupName]) {
+                        const groupData = QQ_msgjson.群聊[cleanGroupName];
+                        
+                        if (groupData.members && Array.isArray(groupData.members)) {
+                            console.log(`从QQ_msgjson获取群成员: ${cleanGroupName}`, groupData.members);
+                            
+                            // 获取随机头像列表
+                            const avatarList = QQ_RandomHeadList || [
+                                'http://sharkpan.xyz/f/EJeUD/Image_1737026320652.jpg',
+                                'http://sharkpan.xyz/f/Y8pt1/Image_1737026296736.jpg',
+                                'http://sharkpan.xyz/f/QWWc6/Image_1737026308451.jpg',
+                                'http://sharkpan.xyz/f/Z8LIW/Image_1737026306601.jpg',
+                                'http://sharkpan.xyz/f/W8lhW/Image_1737026313246.jpg'
+                            ];
+                            
+                            return groupData.members.map((memberName, index) => ({
+                                name: memberName,
+                                avatar: avatarList[index % avatarList.length]
+                            }));
                         }
                     }
+                    
+                    console.warn(`群聊 ${cleanGroupName} 的成员信息未找到，使用示例成员`);
                 } catch (error) {
-                    console.error('从世界书获取群成员失败:', error);
+                    console.error('从QQ_msgjson获取群成员失败:', error);
                 }
                 
                 // 如果没有数据，生成一些示例成员
-                return generateSampleMembers(groupName);
+                return generateSampleMembers(cleanGroupName);
             }
             
             /**
@@ -11320,9 +11338,12 @@
             }
 
             /**
-             * 清理重复的群聊
+             * 清理重复的群聊（已禁用，允许同名群聊存在）
              */
             async function cleanupDuplicateGroups() {
+                console.log('群聊重复清理功能已禁用，允许同名群聊存在');
+                return; // 禁用此函数，允许同名群聊
+                
                 console.log('开始清理重复群聊');
                 
                 // 从世界书加载群聊数据进行清理
