@@ -5187,21 +5187,31 @@
                     }
                     // 确保群聊在消息列表中正确显示
                     setTimeout(() => {
-                        ensureGroupsInMessageList();
+                        console.log('重新加载群聊到消息列表');
+                        loadGroupChatsFromWorldbook();
+                        QQ_UpdateMessageList();
                     }, 100);
                 } else if (page === "people") {
                     $people_svg.css("fill", "#019aff");
                     $("#QQ_home_page").css('display','flex');
                     $("#App_QQ").css("background-color", "#eff3ff");
+                    
+                    console.log('切换到联系人页面');
+                    
+                    // 确保群聊在联系人列表中正确显示
+                    setTimeout(() => {
+                        console.log('重新加载群聊到联系人列表');
+                        loadGroupChatsFromWorldbook();
+                    }, 100);
+                    
                     // 重新初始化群聊功能
                     if (typeof reinitGroupChat === 'function') {
                         reinitGroupChat();
                     }
-                    // 群聊已在LoadChars中加载到联系人列表
-                    console.log('切换到联系人页面');
+                    
                     // 初始化联系人分组功能
                     if (typeof initContactGroups === 'function') {
-                        setTimeout(initContactGroups, 100);
+                        setTimeout(initContactGroups, 200);
                     }
                 } else if (page === "moment") {
                     $moment_svg.css("fill", "#019aff");
@@ -7033,19 +7043,10 @@
                             }
                         }
                     }
-                    if (!type.match(/npc/i) && type != "路人") {
-                        if (type == "群聊") {
-                            // 处理群聊（使用与私聊相同的逻辑）
-                            const members = QQ_CharSettings.readValue(section, "成员").split(/[,，]/g);
-                            
-                            // 使用AddNewGroup函数（类似AddNewChar）
-                            AddNewGroup(section, headurl, members);
-                        } else {
-                            // 处理私聊角色
-                            AddNewChar(section, headurl);
-                            QQ_msgjson.私聊[`${UserName}和${section}的聊天`] =
-                                [];
-                        }
+                    if (!type.match(/npc/i) && type != "路人" && type != "群聊") {
+                        // 只处理私聊角色，群聊由独立的loadGroupChatsFromWorldbook函数处理
+                        AddNewChar(section, headurl);
+                        QQ_msgjson.私聊[`${UserName}和${section}的聊天`] = [];
                     }
                     console.log(`角色${section}的头像:${headurl}`);
                     let CssValue = new Map();
@@ -9839,7 +9840,7 @@
                                     const groupData = { 
                                         name, 
                                         type: 'group',
-                                        id: `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                                        id: `group_${name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`
                                     };
                                     
                                     lines.forEach(line => {
@@ -9876,10 +9877,26 @@
                                             QQ_Groups.push(groupData.name);
                                         }
                                         
-                                        // 将群聊添加到界面中
-                                        console.log('将群聊添加到界面:', groupData.name);
-                                        addGroupToContactList(groupData);
-                                        addGroupToMessageList(groupData);
+                                        // 检查是否已存在，避免重复添加
+                                        const contactsList = document.getElementById('QQ_home_chars');
+                                        const messagesList = document.getElementById('QQ_message_list_chars');
+                                        
+                                        const existsInContacts = contactsList && contactsList.querySelector(`[data-name="${groupData.name}"]`);
+                                        const existsInMessages = messagesList && messagesList.querySelector(`[data-name="${groupData.name}"]`);
+                                        
+                                        if (!existsInContacts) {
+                                            console.log('将群聊添加到联系人列表:', groupData.name);
+                                            addGroupToContactList(groupData);
+                                        } else {
+                                            console.log('群聊已存在于联系人列表:', groupData.name);
+                                        }
+                                        
+                                        if (!existsInMessages) {
+                                            console.log('将群聊添加到消息列表:', groupData.name);
+                                            addGroupToMessageList(groupData);
+                                        } else {
+                                            console.log('群聊已存在于消息列表:', groupData.name);
+                                        }
                                     }
                                 }
                             }
