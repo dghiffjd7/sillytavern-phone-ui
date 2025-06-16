@@ -5199,8 +5199,13 @@
              * 导航到指定页面
              */
             function QQ_Nav(page) {
-                // 页面切换时群聊数据已在LoadChars中加载，无需额外恢复
+                // 页面切换时检查并恢复QQ_Groups完整性
                 console.log(`导航到页面: ${page}`);
+                
+                // 在每次页面切换时都检查QQ_Groups完整性
+                setTimeout(() => {
+                    ensureQQGroupsIntegrity();
+                }, 50);
                 
                 const $message_svg = $("#QQ_message_svg");
                 const $people_svg = $("#QQ_people_svg");
@@ -9747,19 +9752,8 @@
                     return;
                 }
                 
-                // 获取头像显示内容（简化逻辑，支持多种格式）
-                let avatarDisplay = '';
-                const avatarSrc = groupData.avatarData || groupData.avatar;
-                
-                if (avatarSrc && (avatarSrc.startsWith('data:') || avatarSrc.startsWith('http'))) {
-                    // base64数据或网络链接，直接使用
-                    avatarDisplay = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
-                    console.log('联系人列表使用头像图片，类型:', avatarSrc.startsWith('data:') ? 'base64' : 'URL');
-                } else {
-                    // 默认显示"群"字
-                    avatarDisplay = '群';
-                    console.log('联系人列表使用默认群字头像');
-                }
+                // 使用统一的头像处理函数
+                const avatarDisplay = processGroupAvatar(groupData);
                 
                 // 创建群聊联系人项
                 const groupContactHtml = `
@@ -9777,9 +9771,10 @@
                                 <span class="QQ_home_lasttime" style="margin-left: auto; font-size: 11px; color: #999;">${groupData.lastTime || ''}</span>
                             </div>
                             <span class="QQ_home_lastmsg" style="font-size: 12px; color: #666; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 200px;">
-                                ${groupData.members.length}人群聊
+                                ${groupData.members ? groupData.members.length : 0}人群聊 ${groupData.lastMessage ? '- ' + groupData.lastMessage : ''}
                             </span>
                         </div>
+                        <span class="QQ_home_usermsg_new" style="display: none;">0</span>
                     </div>
                 `;
                 
@@ -9787,10 +9782,12 @@
                 contactsList.insertAdjacentHTML('afterbegin', groupContactHtml);
                 
                 // 绑定点击事件
-                const addedElement = contactsList.querySelector(`[data-group-id="${groupData.id}"]`);
+                const addedElement = contactsList.querySelector(`[data-group-name="${groupData.name}"]`);
                 if (addedElement) {
                     addedElement.addEventListener('click', function() {
-                        console.log('群聊被点击:', groupData.name);
+                        console.log('联系人界面群聊被点击:', groupData.name);
+                        // 确保QQ_Groups完整性
+                        ensureQQGroupsIntegrity();
                         QQ_ChangeChatPage(null, groupData.name);
                     });
                 }
@@ -9815,19 +9812,8 @@
                     return;
                 }
                 
-                // 获取头像显示内容（简化逻辑，支持多种格式）
-                let avatarDisplay = '';
-                const avatarSrc = groupData.avatarData || groupData.avatar;
-                
-                if (avatarSrc && (avatarSrc.startsWith('data:') || avatarSrc.startsWith('http'))) {
-                    // base64数据或网络链接，直接使用
-                    avatarDisplay = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
-                    console.log('消息列表使用头像图片，类型:', avatarSrc.startsWith('data:') ? 'base64' : 'URL');
-                } else {
-                    // 默认显示"群"字
-                    avatarDisplay = '群';
-                    console.log('消息列表使用默认群字头像');
-                }
+                // 使用统一的头像处理函数
+                const avatarDisplay = processGroupAvatar(groupData);
                 
                 // 创建群聊消息项
                 const groupMessageHtml = `
@@ -9845,9 +9831,10 @@
                                 <span class="QQ_home_lasttime" style="margin-left: auto; font-size: 11px; color: #999;">${groupData.lastTime || ''}</span>
                             </div>
                             <span class="QQ_home_lastmsg" style="font-size: 12px; color: #666; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 200px;">
-                                ${groupData.lastMessage || '群聊'}
+                                ${groupData.lastMessage || (groupData.members ? groupData.members.length + '人群聊' : '群聊')}
                             </span>
                         </div>
+                        <span class="QQ_home_usermsg_new" style="display: none;">0</span>
                     </div>
                 `;
                 
@@ -9855,10 +9842,12 @@
                 messagesList.insertAdjacentHTML('afterbegin', groupMessageHtml);
                 
                 // 绑定点击事件
-                const addedElement = messagesList.querySelector(`[data-group-id="${groupData.id}"]`);
+                const addedElement = messagesList.querySelector(`[data-group-name="${groupData.name}"]`);
                 if (addedElement) {
                     addedElement.addEventListener('click', function() {
-                        console.log('群聊被点击:', groupData.name);
+                        console.log('消息界面群聊被点击:', groupData.name);
+                        // 确保QQ_Groups完整性
+                        ensureQQGroupsIntegrity();
                         QQ_ChangeChatPage(null, groupData.name);
                     });
                 }
@@ -10073,6 +10062,48 @@
             
             // 启动保护机制
             protectQQGroups();
+            
+            // 添加即时恢复机制 - 在任何页面切换时检查QQ_Groups
+            function ensureQQGroupsIntegrity() {
+                if (groupChatInitialized && QQ_Groups.length === 0) {
+                    console.warn('检测到QQ_Groups为空，立即恢复');
+                    loadGroupChatsFromWorldbook().then(groups => {
+                        groups.forEach(group => {
+                            if (!QQ_Groups.includes(group.name)) {
+                                console.log(`立即恢复群聊到QQ_Groups: ${group.name}`);
+                                QQ_Groups.push(group.name);
+                            }
+                        });
+                        // 恢复后立即更新消息列表
+                        if (QQ_currentPage === 'message') {
+                            setTimeout(() => QQ_UpdateMessageList(), 100);
+                        }
+                    }).catch(error => {
+                        console.error('立即恢复QQ_Groups失败:', error);
+                    });
+                }
+            }
+            
+            // 统一的头像处理函数
+            function processGroupAvatar(groupData) {
+                console.log('处理群头像:', groupData.name, '头像数据:', groupData.avatar);
+                
+                // 统一的头像数据处理逻辑
+                let avatarDisplay = '';
+                const avatarSrc = groupData.avatarData || groupData.avatar;
+                
+                if (avatarSrc && (avatarSrc.startsWith('data:') || avatarSrc.startsWith('http'))) {
+                    // base64数据或网络链接，直接使用
+                    avatarDisplay = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    console.log('使用头像图片，类型:', avatarSrc.startsWith('data:') ? 'base64' : 'URL');
+                } else {
+                    // 默认显示"群"字
+                    avatarDisplay = '群';
+                    console.log('使用默认群字头像');
+                }
+                
+                return avatarDisplay;
+            }
             
             // 统一的初始化函数
             async function initGroupChatOnce() {
