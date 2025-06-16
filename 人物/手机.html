@@ -7288,10 +7288,14 @@
             function AddNewGroup(name, head, members) {
                 console.log(`添加新群聊:${name}  ${head}  成员:${members}`);
                 
-                // 检查是否已存在
-                if ($(`.QQ_home_usermsg[data-name='${name}']`).length > 0) {
-                    console.log(`群聊 ${name} 已存在，跳过创建`);
-                    return;
+                // 移除重复检查，允许同名群聊存在（与新的加载逻辑保持一致）
+                console.log(`直接添加群聊，不检查重复:${name}`);
+                
+                // 如果已存在，先移除旧的再添加新的
+                const existingElements = $(`.QQ_home_usermsg[data-name='${name}'][data-group-type='true']`);
+                if (existingElements.length > 0) {
+                    console.log(`找到 ${existingElements.length} 个同名群聊，替换为新的`);
+                    existingElements.remove();
                 }
                 
                 // 创建群聊HTML（使用与私聊相同的模板）
@@ -7323,11 +7327,16 @@
                     QQ_Groups.push(name);
                 }
                 
-                // 初始化群聊数据结构（与私聊类似）
-                QQ_msgjson.群聊[name] = {
-                    msgs: [],
-                    members: members || []
-                };
+                // 初始化群聊数据结构（与私聊类似，但不覆盖现有数据）
+                if (!QQ_msgjson.群聊[name]) {
+                    QQ_msgjson.群聊[name] = {
+                        msgs: [],
+                        members: members || []
+                    };
+                } else {
+                    // 更新成员信息，但保留消息
+                    QQ_msgjson.群聊[name].members = members || QQ_msgjson.群聊[name].members || [];
+                }
                 
                 // 添加CSS样式
                 const style = $("<style></style>").prop("type", "text/css");
@@ -9948,12 +9957,9 @@
                                     console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupData.name);
                                 }
                                 
-                                // 直接添加（已在函数开头清理过重复项）
-                                console.log('将群聊添加到联系人列表:', groupData.name);
-                                addGroupToContactList(groupData);
-                                
-                                console.log('将群聊添加到消息列表:', groupData.name);
-                                addGroupToMessageList(groupData);
+                                // 使用标准的AddNewGroup函数（与私聊角色使用相同的逻辑）
+                                console.log('使用AddNewGroup函数添加群聊:', groupData.name);
+                                AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members);
                             }
                         }
                     });
