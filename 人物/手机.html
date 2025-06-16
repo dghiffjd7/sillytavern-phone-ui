@@ -3012,6 +3012,15 @@
             .chat-title.clickable:hover {
                 text-decoration: underline;
             }
+            /* 系统消息样式 */
+            .system-message {
+                text-align: center;
+                font-size: 12px;
+                color: #999;
+                padding: 8px 0;
+                width: 100%;
+                box-sizing: border-box;
+            }
         </style>
     </head>
     <body>
@@ -7369,57 +7378,38 @@
             /**
              * 为群聊添加初始欢迎消息
              */
-            function addGroupWelcomeMessages(groupName, members) {
-                console.log(`addGroupWelcomeMessages被调用: ${groupName}, 成员:`, members);
+             function addGroupWelcomeMessages(groupName, members) {
+                console.log(`addGroupWelcomeMessages (强制覆盖) 被调用: ${groupName}`);
                 
                 if (!QQ_msgjson.群聊[groupName]) {
-                    console.log(`初始化群聊数据结构: ${groupName}`);
                     QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
                 }
                 
                 const groupData = QQ_msgjson.群聊[groupName];
-                console.log(`群聊 ${groupName} 当前消息数量:`, groupData.msgs ? groupData.msgs.length : 'msgs不存在');
                 
-                // 检查是否已经有消息，如果有则不添加欢迎消息（避免重复）
-                if (groupData.msgs && groupData.msgs.length > 0) {
-                    console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条消息，跳过初始欢迎消息`);
-                    console.log('现有消息:', groupData.msgs);
-                    return;
-                }
-                
+                console.log(`强制清空群聊 ${groupName} 的旧消息...`);
+                groupData.msgs = [];
+
                 const currentTime = new Date().toLocaleTimeString('zh-CN', { 
                     hour12: false, 
                     hour: '2-digit', 
                     minute: '2-digit' 
                 });
                 
-                // 确保msgs数组存在
-                if (!groupData.msgs) {
-                    console.log(`创建msgs数组: ${groupName}`);
-                    groupData.msgs = [];
-                }
-                
-                // 添加系统消息：群聊创建成功
-                const systemMsg = `系统消息--${currentTime}--群聊"${groupName}"创建成功，开始聊天吧！`;
-                groupData.msgs.push(systemMsg);
-                console.log('添加系统消息:', systemMsg);
-                
-                // 添加成员加入消息
+                // *** 核心改造：合并欢迎语 ***
+                let welcomeText = `你创建了群聊，并邀请了`;
                 if (members && members.length > 0) {
-                    members.forEach(member => {
-                        const joinMsg = `系统消息--${currentTime}--${member} 加入了群聊`;
-                        groupData.msgs.push(joinMsg);
-                        console.log('添加成员加入消息:', joinMsg);
-                    });
+                    welcomeText += members.join('、'); // 使用顿号连接成员
+                    welcomeText += ' 加入了群聊。';
+                } else {
+                    welcomeText = '你创建了群聊，开始聊天吧！';
                 }
+
+                // 添加合并后的系统消息
+                const systemMsg = `系统消息--${currentTime}--${welcomeText}`;
+                groupData.msgs.push(systemMsg);
                 
-                // 添加欢迎消息
-                const welcomeMsg = `${UserName}--${currentTime}--欢迎大家加入${groupName}！让我们开始愉快的聊天吧~`;
-                groupData.msgs.push(welcomeMsg);
-                console.log('添加欢迎消息:', welcomeMsg);
-                
-                console.log(`为群聊 ${groupName} 添加了 ${groupData.msgs.length} 条初始消息`);
-                console.log('最终消息列表:', groupData.msgs);
+                console.log(`为群聊 ${groupName} 生成了新的初始消息: ${systemMsg}`);
             }
             
             function SetCssVariable(name, variable, value) {
@@ -8625,34 +8615,59 @@
                 name += " " + a.join(" ");
                 return name;
             }
-            function QQ_Chat_AddMsg(element, msg, name, isgroup) {
-                if (!QQ_NewMsg[name]) {
-                    QQ_NewMsg[name] = {};
+             /**
+             * 聊天-添加新消息
+             * @param {*} dom - 消息内容容器的DOM元素
+             * @param {*} content - 消息内容字符串
+             * @param {*} name - 角色/群聊名称
+             * @param {*} isNew - 是否为新消息
+             */
+            function QQ_Chat_AddMsg(dom, content, name, isNew) {
+                // *** 核心改造：判断是否为系统消息 ***
+                if (content.startsWith("系统消息--")) {
+                    const sysMsgText = content.split("--")[2]; // 提取真实的消息内容
+                    const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
+                    $(dom).append(msgDiv);
+                } else {
+                    // --- 原有的普通消息处理逻辑 ---
+                    let head;
+                    let Class;
+                    let sp = content.split("--");
+                    if (sp[0] == `${UserName}`) {
+                        head = GetCharHead(`${UserName}`);
+                        Class = "my_msg";
+                    } else {
+                        head = GetCharHead(sp[0]);
+                        Class = "user_msg";
+                    }
+                    if (head == "") {
+                        if (sp[0] == `${UserName}`) {
+                            head = "https://files.catbox.moe/koydgy.png";
+                        } else {
+                            head = "https://files.catbox.moe/jct0gf.png";
+                        }
+                    }
+                    if (sp.length >= 2) {
+                        const msgDiv = $("<div>", { class: Class });
+                        const headImg = $("<img>", { src: head });
+                        const bubbleDiv = $("<div>");
+                        bubbleDiv.html(sp[1]);
+                        msgDiv.append(headImg);
+                        msgDiv.append(bubbleDiv);
+
+                        if (sp.length >= 3) {
+                            const timeSpan = $("<span>");
+                            timeSpan.text(sp[2]);
+                            bubbleDiv.append(timeSpan);
+                        }
+                        $(dom).append(msgDiv);
+                    }
                 }
-                const match = msg.match(/(.+?)(?:--|:|：)(.+)/);
-                if (!match) {
-                    return;
+                                
+                // 仅当是新消息时才滚动到底部
+                if (isNew) {
+                    $(dom).scrollTop(dom.scrollHeight);
                 }
-                System_AddNpcHead(match[1]);
-                let message = match[2];
-                if (message.split("--").length >= 2) {
-                    message = message.split("--")[0];
-                }
-                if (match[1] == `${UserName}`) {
-                    QQ_NewMsg[name].Count = 0;
-                    return QQ_Chat_AddUserMsg(
-                        element,
-                        `${match[1]}--${message}`,
-                    );
-                }
-                QQ_NewMsg[name].Count += 1;
-                const content = QQ_Chat_SpecialMsg(message, match[1], isgroup);
-                const html = _.template(chat_char_msg)({
-                    name: match[1],
-                    content: content,
-                    isgroup: isgroup || false,
-                });
-                $(element).append(html);
             }
             function QQ_Chat_AddUserMsg(element, msg) {
                 const match = msg.match(/(.+?)--(.+)/);
