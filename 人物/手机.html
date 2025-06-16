@@ -4657,7 +4657,7 @@
                     
                     // 群聊消息需要额外保存到群聊专用存储中
                     const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-                    const groupsForPersist = loadGroupsFromStorage();
+                    const groupsForPersist = loadGroupChatsFromWorldbook();
                     const targetGroup = groupsForPersist.find(g => g.name === name);
                     
                     if (targetGroup) {
@@ -4862,7 +4862,7 @@
                                     
                                     // 同步保存到群聊专用存储（确保消息持久化）
                                     const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-                                    const groupsForSync = loadGroupsFromStorage();
+                                    const groupsForSync = loadGroupChatsFromWorldbook();
                                     const targetGroup = groupsForSync.find(g => g.name === localname);
                                     if (targetGroup) {
                                         const messageObj = {
@@ -9574,21 +9574,48 @@
             /**
              * 保存群聊数据到本地存储
              */
-            function saveGroupToStorage(groupData) {
+            async function saveGroupToStorage(groupData) {
                 // 新版本：保存到世界书而不是localStorage
                 console.log('saveGroupToStorage被调用，转发到世界书保存');
-                return addGroupToWorldbook(groupData);
+                console.log('群聊数据:', groupData);
+                
+                // 修复头像问题：如果是base64数据，使用默认头像URL
+                if (groupData.avatar && groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                    console.log('检测到base64头像，改为使用默认头像URL');
+                    groupData.avatar = {
+                        type: 'url',
+                        url: 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif'
+                    };
+                }
+                
+                const success = await addGroupToWorldbook(groupData);
+                if (success) {
+                    console.log('群聊已成功保存到世界书');
+                } else {
+                    console.error('保存群聊到世界书失败');
+                }
+                return success;
             }
             
             /**
              * 从本地存储加载群聊数据
              */
-            function loadGroupsFromStorage() {
+            function loadGroupChatsFromWorldbook() {
                 // 新版本：从世界书加载群聊数据，不再使用localStorage
+                console.log('=== loadGroupChatsFromWorldbook被调用 ===');
+                console.log('当前entries:', typeof entries, entries ? entries.length : 'undefined');
+                
                 const groups = [];
                 try {
+                    if (!entries) {
+                        console.error('entries未定义，无法加载群聊数据');
+                        return groups;
+                    }
+                    
                     const entry = entries.find(e => e.key === "手机-角色");
+                    console.log('找到的世界书条目:', entry ? '存在' : '不存在');
                     if (entry && entry.content) {
+                        console.log('世界书条目内容长度:', entry.content.length);
                         const sections = entry.content.split(/\n\[([^\]]+)\]/);
                         for (let i = 1; i < sections.length; i += 2) {
                             const name = sections[i];
@@ -9684,25 +9711,25 @@
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', function() {
                     initGroupChatFeature();
-                    loadGroupsFromStorage(); // 加载保存的群聊
+                    loadGroupChatsFromWorldbook(); // 加载保存的群聊
                 });
             } else {
                 // 方式2: 如果DOM已经加载完成，直接执行
                 initGroupChatFeature();
-                loadGroupsFromStorage(); // 加载保存的群聊
+                loadGroupChatsFromWorldbook(); // 加载保存的群聊
             }
             
             // 方式3: 延迟执行，确保页面完全加载
             setTimeout(function() {
                 initGroupChatFeature();
-                loadGroupsFromStorage(); // 加载保存的群聊
+                loadGroupChatsFromWorldbook(); // 加载保存的群聊
             }, 1000);
             
             // 方式4: 在页面显示时重新绑定事件
             function reinitGroupChat() {
                 setTimeout(function() {
                     initGroupChatFeature();
-                    loadGroupsFromStorage(); // 加载保存的群聊
+                    loadGroupChatsFromWorldbook(); // 加载保存的群聊
                 }, 500);
             }
             
@@ -10888,6 +10915,7 @@
                 try {
                     console.log('=== 开始将群聊添加到世界书 ===');
                     console.log('群聊数据:', groupData);
+                    console.log('当前entries:', typeof entries, entries ? entries.length : 'undefined');
                     
                     // 获取当前世界书中的角色条目
                     let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
