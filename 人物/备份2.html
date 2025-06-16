@@ -5199,7 +5199,7 @@
              * 导航到指定页面
              */
             function QQ_Nav(page) {
-                // 页面切换时群聊数据已在LoadChars中加载，无需额外恢复
+                // 页面切换时不自动检查QQ_Groups（避免重复加载）
                 console.log(`导航到页面: ${page}`);
                 
                 const $message_svg = $("#QQ_message_svg");
@@ -5638,6 +5638,7 @@
             //space_init();
             console.log(`4.11`);
             init();
+            
             
             // 确保页面完全加载后更新消息列表
             setTimeout(() => {
@@ -7222,11 +7223,13 @@
                 style.text(cssRule);
                 $("head").append(style);
                 
-                // 加载保存的群聊
+                // 加载保存的群聊数据
+                console.log('LoadChars: 准备加载群聊数据, worldbook状态:', !!worldbook, 'QQ_Groups长度:', QQ_Groups.length);
                 if (worldbook) {
+                    console.log('LoadChars: 开始加载群聊数据');
                     await loadGroupChatsFromWorldbook();
                 } else {
-                    console.log('LoadChars: worldbook未初始化，跳过群聊加载');
+                    console.log('LoadChars: 跳过群聊加载 - worldbook未初始化');
                 }
                 
                 // 注释：清理重复群聊已移除，避免误删新创建的群聊
@@ -7286,62 +7289,81 @@
              */
             function AddNewGroup(name, head, members) {
                 console.log(`添加新群聊:${name}  ${head}  成员:${members}`);
-                
-                // 检查是否已存在
-                if ($(`.QQ_home_usermsg[data-name='${name}']`).length > 0) {
-                    console.log(`群聊 ${name} 已存在，跳过创建`);
-                    return;
+
+                // 如果已存在，先移除旧的再添加新的
+                const existingElements = $(`.QQ_home_usermsg[data-name='${name}'][data-group-type='true']`);
+                if (existingElements.length > 0) {
+                    console.log(`找到 ${existingElements.length} 个同名群聊，替换为新的`);
+                    existingElements.remove();
                 }
-                
+
                 // 创建群聊HTML（使用与私聊相同的模板）
                 let html = _.template(chat_list_item)({
                     name: name,
                     head: head.trim(),
                 });
-                
+
                 // 修改HTML以标识为群聊
                 const $html = $(html);
                 $html.attr('data-group-type', 'true');
+                $html.attr('data-group-name', name); // 添加群聊名称属性
+                $html.attr('draggable', 'true'); // 确保可以拖拽
                 $html.find('.QQ_home_lastmsg').text('群聊');
-                
+
                 // 添加群聊成员数显示
                 const memberCount = members ? members.length : 0;
                 $html.find('.QQ_home_lasttime').text(`${memberCount}人`);
-                
-                // 绑定点击事件（使用标准的QQ_ChangeChatPage）
+
+                // 绑定点击事件
                 $html.on('click', function() {
                     console.log('群聊被点击:', name);
                     QQ_ChangeChatPage(null, name);
                 });
-                
-                $("#QQ_home_chars").append($html);
+
+                // --- 渲染到正确位置 ---
+                const $contactsContainer = $("#QQ_home_chars");
+                let $ungroupedSection = $contactsContainer.find('.ungrouped-contacts');
+
+                // 如果“未分组”区域不存在，则创建它
+                if ($ungroupedSection.length === 0) {
+                    console.log('未找到“未分组联系人”区域，正在创建...');
+                    $ungroupedSection = $(`
+                        <div class="ungrouped-contacts">
+                            <div class="ungrouped-header">未分组联系人</div>
+                            <div class="drop-zone ungrouped-drop-zone" data-group-id="ungrouped"></div>
+                        </div>
+                    `);
+                    // 确保它在所有分组之前
+                    $contactsContainer.prepend($ungroupedSection);
+                }
+
+                // 将群聊添加到“未分组”区域的拖放区
+                $ungroupedSection.append($html);
+                console.log(`群聊 "${name}" 已添加到“未分组联系人”区域。`);
+
+                // --- 后续逻辑 ---
                 QQ_pages.push(name);
-                
-                // 添加到群聊列表
+
                 if (!QQ_Groups.includes(name)) {
                     QQ_Groups.push(name);
                 }
-                
-                // 初始化群聊数据结构（与私聊类似）
-                QQ_msgjson.群聊[name] = {
-                    msgs: [],
-                    members: members || []
-                };
-                
-                // 添加CSS样式
+
+                if (!QQ_msgjson.群聊[name]) {
+                    QQ_msgjson.群聊[name] = { msgs: [], members: members || [] };
+                } else {
+                    QQ_msgjson.群聊[name].members = members || QQ_msgjson.群聊[name].members || [];
+                }
+
                 const style = $("<style></style>").prop("type", "text/css");
-                const cssRule = chat_headraw_namespaceObject
-                    .replace(/\$\{name\}/g, name)
-                    .replace(/\$\{head\}/g, head);
+                const cssRule = chat_headraw_namespaceObject.replace(/\$\{name\}/g, name).replace(/\$\{head\}/g, head);
                 style.text(cssRule);
                 $("head").append(style);
-                
-                // 更新消息列表
+
                 setTimeout(() => {
                     QQ_UpdateMessageList();
                 }, 100);
-                
-                console.log(`群聊 ${name} 创建完成`);
+
+                console.log(`群聊 ${name} 创建流程完成`);
             }
             function getFilenameWithoutExtension(path) {
                 // 解码URI组件（处理特殊字符）
@@ -7395,16 +7417,8 @@
             async function QQ_UpdateMessageList() {
                 console.log("开始更新消息列表");
                 
-                // 如果QQ_Groups为空且群聊已初始化，尝试从世界书重新加载群聊
-                if (QQ_Groups.length === 0 && groupChatInitialized) {
-                    console.warn('QQ_Groups为空，尝试从世界书重新加载群聊');
-                    try {
-                        await loadGroupChatsFromWorldbook();
-                        console.log('群聊重新加载完成，QQ_Groups:', QQ_Groups);
-                    } catch (error) {
-                        console.error('重新加载群聊失败:', error);
-                    }
-                }
+                // 不再自动重新加载群聊，避免重复循环
+                console.log('当前QQ_Groups状态:', QQ_Groups.length, '个群聊');
                 
                 const $messageChars = $("#QQ_message_list_chars");
                 const $homeChars = $("#QQ_home_chars");
@@ -7503,6 +7517,11 @@
                 // 检查是否为群聊
                 const isGroup = QQ_Groups.includes(name);
                 console.log(`切换到聊天页: ${name}, 是否为群聊: ${isGroup}`);
+                
+                // 在群聊被点击时确保QQ_Groups完整性
+                if (isGroup) {
+                    ensureQQGroupsIntegrityOnClick(name);
+                }
                 
                 let $page = $(`.QQ_chat_page[data-name='${name}']`);
                 if ($page.length === 0) {
@@ -7945,7 +7964,7 @@
                         } else if (storedGroup) {
                             // 群聊在存储中存在，但界面元素不存在，重新创建
                             console.log(`群聊 ${name} 在存储中存在，重新创建界面元素`);
-                            addGroupToContactList(storedGroup);
+                            AddNewGroup(storedGroup.name, storedGroup.avatar || 'https://files.catbox.moe/default-group.png', storedGroup.members);
                             isExistingGroup = true;
                         } else {
                             // 这是一个全新的群聊，需要智能处理
@@ -9730,141 +9749,8 @@
                 return `${hours}:${minutes}`;
             }
             
-            /**
-             * 添加群聊到联系人列表
-             */
-            function addGroupToContactList(groupData) {
-                const contactsList = document.getElementById('QQ_home_chars');
-                if (!contactsList) {
-                    console.error('联系人列表容器未找到');
-                    return;
-                }
-                
-                // 检查是否已经存在（使用群聊名称检查，因为ID可能不同）
-                const existingGroup = contactsList.querySelector(`[data-group-name="${groupData.name}"]`);
-                if (existingGroup) {
-                    console.log('群聊已存在于联系人列表中，跳过添加:', groupData.name);
-                    return;
-                }
-                
-                // 获取头像显示内容（简化逻辑，支持多种格式）
-                let avatarDisplay = '';
-                const avatarSrc = groupData.avatarData || groupData.avatar;
-                
-                if (avatarSrc && (avatarSrc.startsWith('data:') || avatarSrc.startsWith('http'))) {
-                    // base64数据或网络链接，直接使用
-                    avatarDisplay = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
-                    console.log('联系人列表使用头像图片，类型:', avatarSrc.startsWith('data:') ? 'base64' : 'URL');
-                } else {
-                    // 默认显示"群"字
-                    avatarDisplay = '群';
-                    console.log('联系人列表使用默认群字头像');
-                }
-                
-                // 创建群聊联系人项
-                const groupContactHtml = `
-                    <div class="QQ_home_usermsg" style="cursor: pointer;" 
-                         data-name="${groupData.name}"
-                         data-group-id="${groupData.id}" 
-                         data-group-name="${groupData.name}" 
-                         data-group-type="true">
-                        <div class="QQ_home_head" style="background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; overflow: hidden;">
-                            ${avatarDisplay}
-                        </div>
-                        <div style="display: flex; align-items: start; justify-content: center; flex-direction: column; margin-left: 3px; gap: 3px; width: 100%;">
-                            <div style="display: flex; align-items: center; width: 100%;">
-                                <span class="QQ_home_name" style="font-size: 15px">${groupData.name}</span>
-                                <span class="QQ_home_lasttime" style="margin-left: auto; font-size: 11px; color: #999;">${groupData.lastTime || ''}</span>
-                            </div>
-                            <span class="QQ_home_lastmsg" style="font-size: 12px; color: #666; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 200px;">
-                                ${groupData.members.length}人群聊
-                            </span>
-                        </div>
-                    </div>
-                `;
-                
-                // 将群聊添加到联系人列表顶部
-                contactsList.insertAdjacentHTML('afterbegin', groupContactHtml);
-                
-                // 绑定点击事件
-                const addedElement = contactsList.querySelector(`[data-group-id="${groupData.id}"]`);
-                if (addedElement) {
-                    addedElement.addEventListener('click', function() {
-                        console.log('群聊被点击:', groupData.name);
-                        QQ_ChangeChatPage(null, groupData.name);
-                    });
-                }
-                
-                console.log('群聊已添加到联系人列表');
-            }
-            
-            /**
-             * 添加群聊到消息列表
-             */
-            function addGroupToMessageList(groupData) {
-                const messagesList = document.getElementById('QQ_message_list_chars');
-                if (!messagesList) {
-                    console.error('消息列表容器未找到');
-                    return;
-                }
-                
-                // 检查是否已经存在（使用群聊名称检查，因为ID可能不同）
-                const existingGroup = messagesList.querySelector(`[data-group-name="${groupData.name}"]`);
-                if (existingGroup) {
-                    console.log('群聊已存在于消息列表中，跳过添加:', groupData.name);
-                    return;
-                }
-                
-                // 获取头像显示内容（简化逻辑，支持多种格式）
-                let avatarDisplay = '';
-                const avatarSrc = groupData.avatarData || groupData.avatar;
-                
-                if (avatarSrc && (avatarSrc.startsWith('data:') || avatarSrc.startsWith('http'))) {
-                    // base64数据或网络链接，直接使用
-                    avatarDisplay = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
-                    console.log('消息列表使用头像图片，类型:', avatarSrc.startsWith('data:') ? 'base64' : 'URL');
-                } else {
-                    // 默认显示"群"字
-                    avatarDisplay = '群';
-                    console.log('消息列表使用默认群字头像');
-                }
-                
-                // 创建群聊消息项
-                const groupMessageHtml = `
-                    <div class="QQ_home_usermsg" style="cursor: pointer;" 
-                         data-name="${groupData.name}"
-                         data-group-id="${groupData.id}" 
-                         data-group-name="${groupData.name}" 
-                         data-group-type="true">
-                        <div class="QQ_home_head" style="background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; overflow: hidden;">
-                            ${avatarDisplay}
-                        </div>
-                        <div style="display: flex; align-items: start; justify-content: center; flex-direction: column; margin-left: 3px; gap: 3px; width: 100%;">
-                            <div style="display: flex; align-items: center; width: 100%;">
-                                <span class="QQ_home_name" style="font-size: 15px">${groupData.name}</span>
-                                <span class="QQ_home_lasttime" style="margin-left: auto; font-size: 11px; color: #999;">${groupData.lastTime || ''}</span>
-                            </div>
-                            <span class="QQ_home_lastmsg" style="font-size: 12px; color: #666; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 200px;">
-                                ${groupData.lastMessage || '群聊'}
-                            </span>
-                        </div>
-                    </div>
-                `;
-                
-                // 将群聊添加到消息列表顶部
-                messagesList.insertAdjacentHTML('afterbegin', groupMessageHtml);
-                
-                // 绑定点击事件
-                const addedElement = messagesList.querySelector(`[data-group-id="${groupData.id}"]`);
-                if (addedElement) {
-                    addedElement.addEventListener('click', function() {
-                        console.log('群聊被点击:', groupData.name);
-                        QQ_ChangeChatPage(null, groupData.name);
-                    });
-                }
-                
-                console.log('群聊已添加到消息列表');
-            }
+            // 注意：addGroupToContactList和addGroupToMessageList函数已删除
+            // 现在统一使用AddNewGroup函数，它会自动处理联系人列表和消息列表的同步
             
             /**
              * 保存群聊数据到本地存储
@@ -9970,12 +9856,9 @@
                                     console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupData.name);
                                 }
                                 
-                                // 直接添加（已在函数开头清理过重复项）
-                                console.log('将群聊添加到联系人列表:', groupData.name);
-                                addGroupToContactList(groupData);
-                                
-                                console.log('将群聊添加到消息列表:', groupData.name);
-                                addGroupToMessageList(groupData);
+                                // 使用标准的AddNewGroup函数（与私聊角色使用相同的逻辑）
+                                console.log('使用AddNewGroup函数添加群聊:', groupData.name);
+                                AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members);
                             }
                         }
                     });
@@ -10053,26 +9936,116 @@
                     QQ_Groups = [];
                 }
                 
-                // 定期检查QQ_Groups的完整性
-                setInterval(() => {
-                    if (groupChatInitialized && Array.isArray(QQ_Groups)) {
-                        // 从世界书重新验证群聊列表
-                        loadGroupChatsFromWorldbook().then(groups => {
-                            groups.forEach(group => {
-                                if (!QQ_Groups.includes(group.name)) {
-                                    console.warn(`发现遗漏的群聊，重新添加到QQ_Groups: ${group.name}`);
-                                    QQ_Groups.push(group.name);
-                                }
-                            });
-                        }).catch(error => {
-                            console.error('QQ_Groups保护机制检查失败:', error);
-                        });
+                            // 定期检查QQ_Groups的完整性（不再重新加载，只从界面恢复）
+            setInterval(() => {
+                if (groupChatInitialized && Array.isArray(QQ_Groups) && QQ_Groups.length === 0) {
+                    console.log('定期检查：QQ_Groups为空，尝试从界面元素恢复');
+                    
+                    // 只从现有界面元素恢复QQ_Groups，不重新加载
+                    const contactsGroups = document.querySelectorAll('#QQ_home_chars [data-group-type="true"]');
+                    const messageGroups = document.querySelectorAll('#QQ_message_list_chars [data-group-type="true"]');
+                    
+                    contactsGroups.forEach(element => {
+                        const groupName = element.getAttribute('data-group-name');
+                        if (groupName && !QQ_Groups.includes(groupName)) {
+                            QQ_Groups.push(groupName);
+                            console.log(`定期检查：从联系人界面恢复群聊: ${groupName}`);
+                        }
+                    });
+                    
+                    messageGroups.forEach(element => {
+                        const groupName = element.getAttribute('data-group-name');
+                        if (groupName && !QQ_Groups.includes(groupName)) {
+                            QQ_Groups.push(groupName);
+                            console.log(`定期检查：从消息界面恢复群聊: ${groupName}`);
+                        }
+                    });
+                    
+                    if (QQ_Groups.length > 0) {
+                        console.log('定期检查：QQ_Groups恢复完成:', QQ_Groups);
                     }
-                }, 30000); // 每30秒检查一次
+                }
+            }, 30000); // 每30秒检查一次
             }
             
             // 启动保护机制
             protectQQGroups();
+            
+            // 简化的QQ_Groups完整性检查（不重新加载群聊到界面）
+            function ensureQQGroupsIntegrity() {
+                if (groupChatInitialized && QQ_Groups.length === 0) {
+                    console.warn('检测到QQ_Groups为空，但不自动重新加载（避免重复）');
+                    console.log('当前页面群聊应该保持可见，问题可能在其他地方');
+                    
+                    // 仅检查现有界面元素并恢复QQ_Groups
+                    const contactsGroups = document.querySelectorAll('#QQ_home_chars [data-group-type="true"]');
+                    const messageGroups = document.querySelectorAll('#QQ_message_list_chars [data-group-type="true"]');
+                    
+                    contactsGroups.forEach(element => {
+                        const groupName = element.getAttribute('data-group-name');
+                        if (groupName && !QQ_Groups.includes(groupName)) {
+                            QQ_Groups.push(groupName);
+                            console.log(`从联系人界面恢复群聊到QQ_Groups: ${groupName}`);
+                        }
+                    });
+                    
+                    messageGroups.forEach(element => {
+                        const groupName = element.getAttribute('data-group-name');
+                        if (groupName && !QQ_Groups.includes(groupName)) {
+                            QQ_Groups.push(groupName);
+                            console.log(`从消息界面恢复群聊到QQ_Groups: ${groupName}`);
+                        }
+                    });
+                    
+                    console.log('QQ_Groups恢复后:', QQ_Groups);
+                }
+            }
+            
+            // 点击群聊时的完整性检查
+            function ensureQQGroupsIntegrityOnClick(groupName) {
+                console.log(`群聊 ${groupName} 被点击，检查QQ_Groups完整性`);
+                
+                // 确保点击的群聊在QQ_Groups中
+                if (!QQ_Groups.includes(groupName)) {
+                    console.warn(`群聊 ${groupName} 不在QQ_Groups中，添加中...`);
+                    QQ_Groups.push(groupName);
+                }
+                
+                // 确保QQ_msgjson中有该群聊的数据结构
+                if (!QQ_msgjson.群聊) {
+                    QQ_msgjson.群聊 = {};
+                }
+                if (!QQ_msgjson.群聊[groupName]) {
+                    console.log(`在QQ_msgjson.群聊中初始化群聊数据: ${groupName}`);
+                    QQ_msgjson.群聊[groupName] = {
+                        members: [],
+                        msgs: []
+                    };
+                }
+                
+                console.log(`群聊 ${groupName} 完整性检查完成`);
+            }
+            
+            // 统一的头像处理函数
+            function processGroupAvatar(groupData) {
+                console.log('处理群头像:', groupData.name, '头像数据:', groupData.avatar);
+                
+                // 统一的头像数据处理逻辑
+                let avatarDisplay = '';
+                const avatarSrc = groupData.avatarData || groupData.avatar;
+                
+                if (avatarSrc && (avatarSrc.startsWith('data:') || avatarSrc.startsWith('http'))) {
+                    // base64数据或网络链接，直接使用
+                    avatarDisplay = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    console.log('使用头像图片，类型:', avatarSrc.startsWith('data:') ? 'base64' : 'URL');
+                } else {
+                    // 默认显示"群"字
+                    avatarDisplay = '群';
+                    console.log('使用默认群字头像');
+                }
+                
+                return avatarDisplay;
+            }
             
             // 统一的初始化函数
             async function initGroupChatOnce() {
@@ -10084,8 +10057,30 @@
                 console.log('开始初始化群聊功能...');
                 initGroupChatFeature();
                 
+                // 检查界面是否有群聊元素
+                const contactsGroups = document.querySelectorAll('#QQ_home_chars [data-group-type="true"]');
+                const messageGroups = document.querySelectorAll('#QQ_message_list_chars [data-group-type="true"]');
+                
+                console.log('当前界面状态检查:');
+                console.log('- QQ_Groups数组长度:', QQ_Groups.length);
+                console.log('- 联系人界面群聊元素数量:', contactsGroups.length);
+                console.log('- 消息界面群聊元素数量:', messageGroups.length);
+                console.log('- worldbook状态:', !!worldbook);
+                console.log('- entries状态:', !!entries);
+                
+                // 如果有群聊数据但界面没有显示，强制重新加载
                 if (worldbook && entries) {
-                    await loadGroupChatsFromWorldbook(); // 加载保存的群聊
+                    if (QQ_Groups.length > 0 && contactsGroups.length === 0) {
+                        console.log('发现群聊数据但界面未显示，强制重新加载到界面');
+                        await loadGroupChatsFromWorldbook();
+                    } else if (QQ_Groups.length === 0) {
+                        console.log('首次初始化：从世界书加载群聊');
+                        await loadGroupChatsFromWorldbook();
+                    } else {
+                        console.log('群聊数据和界面状态正常，跳过加载');
+                    }
+                } else {
+                    console.log('worldbook或entries未准备好，跳过群聊加载');
                 }
                 
                 groupChatInitialized = true;
@@ -10096,6 +10091,21 @@
             window.resetGroupChatState = function() {
                 groupChatInitialized = false;
                 console.log('群聊状态已重置');
+            };
+            
+            // 强制重新加载群聊到界面（用于调试）
+            window.forceReloadGroupChats = async function() {
+                console.log('强制重新加载群聊...');
+                if (!worldbook || !entries) {
+                    console.error('worldbook或entries未准备好');
+                    return;
+                }
+                try {
+                    await loadGroupChatsFromWorldbook();
+                    console.log('群聊强制重新加载完成');
+                } catch (error) {
+                    console.error('强制重新加载群聊失败:', error);
+                }
             };
             
             // 单一的初始化调用点
@@ -10278,38 +10288,52 @@
             function renderContactGroups() {
                 const contactsContainer = document.getElementById('QQ_home_chars');
                 if (!contactsContainer) return;
-                
-                // 保存原始联系人
-                const originalContacts = Array.from(contactsContainer.querySelectorAll('.QQ_home_usermsg:not([data-group-type])'));
-                
+
+                // 分别保存群聊和私聊联系人
+                const originalGroupChats = Array.from(contactsContainer.querySelectorAll('.QQ_home_usermsg[data-group-type="true"]'));
+                const originalContacts = Array.from(contactsContainer.querySelectorAll('.QQ_home_usermsg:not([data-group-type="true"])'));
+
                 // 清空容器
                 contactsContainer.innerHTML = '';
-                
-                // 渲染分组
+
+                // 步骤1: 立即将群聊重新添加回去，确保它们总在最上方
+                if (originalGroupChats.length > 0) {
+                    const groupChatSection = document.createElement('div');
+                    originalGroupChats.forEach(chat => {
+                        groupChatSection.appendChild(chat);
+                    });
+                    contactsContainer.appendChild(groupChatSection);
+                }
+
+                // 步骤2: 渲染私聊的自定义分组
                 contactGroups.sort((a, b) => a.order - b.order).forEach(group => {
                     const groupElement = createGroupElement(group);
                     contactsContainer.appendChild(groupElement);
                 });
-                
-                // 渲染未分组的联系人
+
+                // 步骤3: 渲染未分组的私聊联系人
                 const ungroupedContacts = originalContacts.filter(contact => {
                     const contactName = contact.querySelector('.QQ_home_name')?.textContent?.trim();
                     return !isContactInAnyGroup(contactName);
                 });
-                
-                if (ungroupedContacts.length > 0 || contactGroups.length > 0) {
+
+                if (ungroupedContacts.length > 0) {
                     const ungroupedSection = document.createElement('div');
                     ungroupedSection.className = 'ungrouped-contacts';
                     ungroupedSection.innerHTML = `
                         <div class="ungrouped-header">未分组联系人</div>
-                        <div class="drop-zone ungrouped-drop-zone" data-group-id="ungrouped"></div>
                     `;
                     
+                    const dropZone = document.createElement('div');
+                    dropZone.className = 'drop-zone ungrouped-drop-zone';
+                    dropZone.setAttribute('data-group-id', 'ungrouped');
+
                     ungroupedContacts.forEach(contact => {
                         contact.draggable = true;
                         ungroupedSection.appendChild(contact);
                     });
-                    
+
+                    ungroupedSection.appendChild(dropZone);
                     contactsContainer.appendChild(ungroupedSection);
                 }
             }
@@ -10694,21 +10718,14 @@
             }
             
             /**
-             * 检查是否为群聊
+             * 检查是否为群聊（统一使用QQ_Groups数组）
              */
             function checkIfGroupChat(chatName) {
-                // 检查当前分组中是否有此群聊
-                const groupsData = JSON.parse(localStorage.getItem('contact_groups') || '[]');
+                // 移除标题中的人数信息，只保留群名
+                const cleanChatName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
                 
-                for (const group of groupsData) {
-                    const foundContact = group.contacts.find(contact => contact.name === chatName);
-                    if (foundContact && foundContact.isGroup) {
-                        return true;
-                    }
-                }
-                
-                // 也可以根据聊天名称的特征判断
-                return chatName.includes('群聊') || chatName.includes('讨论组') || chatName.includes('工作群');
+                // 使用QQ_Groups数组检查，确保与其他地方的逻辑一致
+                return QQ_Groups.includes(cleanChatName);
             }
             
             /**
@@ -10739,40 +10756,43 @@
             }
             
             /**
-             * 获取群成员数据
+             * 获取群成员数据（从QQ_msgjson.群聊中获取）
              */
             function getGroupMembers(groupName) {
-                // 新版本：从世界书获取群成员数据
+                // 移除可能的人数标识
+                const cleanGroupName = groupName.replace(/\s*\(\d+人\)\s*$/, '').trim();
+                
                 try {
-                    // 检查entries是否已初始化
-                    if (!entries) {
-                        console.warn('getGroupMembers: entries未初始化，使用示例成员');
-                        return generateSampleMembers(groupName);
-                    }
-                    
-                    const entry = entries.find(e => e.key === "手机-角色");
-                    if (entry && entry.content) {
-                        const sections = entry.content.split(/\n\[([^\]]+)\]/);
-                        for (let i = 1; i < sections.length; i += 2) {
-                            const name = sections[i];
-                            const content = sections[i + 1];
-                            if (name === groupName && content && content.includes('类型=群聊')) {
-                                const lines = content.split('\n');
-                                for (const line of lines) {
-                                    if (line.startsWith('成员=')) {
-                                        const memberNames = line.substring(3).split(',').filter(m => m.trim());
-                                        return memberNames.map(name => ({ name: name.trim(), avatar: 'http://sharkpan.xyz/f/EJeUD/Image_1737026320652.jpg' }));
-                                    }
-                                }
-                            }
+                    // 直接从QQ_msgjson.群聊中获取群聊数据
+                    if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[cleanGroupName]) {
+                        const groupData = QQ_msgjson.群聊[cleanGroupName];
+                        
+                        if (groupData.members && Array.isArray(groupData.members)) {
+                            console.log(`从QQ_msgjson获取群成员: ${cleanGroupName}`, groupData.members);
+                            
+                            // 获取随机头像列表
+                            const avatarList = QQ_RandomHeadList || [
+                                'http://sharkpan.xyz/f/EJeUD/Image_1737026320652.jpg',
+                                'http://sharkpan.xyz/f/Y8pt1/Image_1737026296736.jpg',
+                                'http://sharkpan.xyz/f/QWWc6/Image_1737026308451.jpg',
+                                'http://sharkpan.xyz/f/Z8LIW/Image_1737026306601.jpg',
+                                'http://sharkpan.xyz/f/W8lhW/Image_1737026313246.jpg'
+                            ];
+                            
+                            return groupData.members.map((memberName, index) => ({
+                                name: memberName,
+                                avatar: avatarList[index % avatarList.length]
+                            }));
                         }
                     }
+                    
+                    console.warn(`群聊 ${cleanGroupName} 的成员信息未找到，使用示例成员`);
                 } catch (error) {
-                    console.error('从世界书获取群成员失败:', error);
+                    console.error('从QQ_msgjson获取群成员失败:', error);
                 }
                 
                 // 如果没有数据，生成一些示例成员
-                return generateSampleMembers(groupName);
+                return generateSampleMembers(cleanGroupName);
             }
             
             /**
@@ -11289,9 +11309,12 @@
             }
 
             /**
-             * 清理重复的群聊
+             * 清理重复的群聊（已禁用，允许同名群聊存在）
              */
             async function cleanupDuplicateGroups() {
+                console.log('群聊重复清理功能已禁用，允许同名群聊存在');
+                return; // 禁用此函数，允许同名群聊
+                
                 console.log('开始清理重复群聊');
                 
                 // 从世界书加载群聊数据进行清理
@@ -12178,7 +12201,7 @@
                     
                     if (!existsByID && !existsByName) {
                         console.log('恢复群聊到联系人列表:', groupData.name, 'ID:', groupData.id);
-                        addGroupToContactList(groupData);
+                        AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members);
                     } else {
                         console.log('群聊已存在于联系人列表:', groupData.name);
                         // 确保现有群聊的头像正确显示
@@ -12281,55 +12304,8 @@
                 }
             }
             
-            /**
-             * 确保群聊在消息列表中存在
-             */
-            async function ensureGroupsInMessageList() {
-                const groups = await loadGroupsFromStorage();
-                const messageContainer = document.getElementById('QQ_message_list_chars');
-                
-                if (!messageContainer) {
-                    console.log('消息容器不存在，跳过群聊恢复');
-                    return;
-                }
-                
-                if (groups.length === 0) {
-                    console.log('没有群聊数据需要恢复到消息列表');
-                    return;
-                }
-                
-                console.log('检查消息列表中的群聊，共', groups.length, '个群聊需要恢复');
-                
-                // 清理重复的群聊元素
-                const existingGroups = messageContainer.querySelectorAll('[data-group-type="true"]');
-                const groupMap = new Map();
-                
-                existingGroups.forEach(element => {
-                    const groupId = element.getAttribute('data-group-id');
-                    if (groupId) {
-                        if (groupMap.has(groupId)) {
-                            console.log('移除消息列表中重复的群聊元素:', groupId);
-                            element.remove();
-                        } else {
-                            groupMap.set(groupId, element);
-                        }
-                    }
-                });
-                
-                groups.forEach(groupData => {
-                    if (!groupMap.has(groupData.id)) {
-                        console.log('恢复群聊到消息列表:', groupData.name);
-                        addGroupToMessageList(groupData);
-                    } else {
-                        console.log('群聊已存在于消息列表:', groupData.name);
-                        // 确保现有群聊的头像正确显示
-                        const existingElement = groupMap.get(groupData.id);
-                        updateGroupInMessageList(existingElement, groupData);
-                    }
-                });
-                
-                console.log('消息列表群聊恢复完成');
-            }
+            // 注意：ensureGroupsInMessageList函数已删除
+            // 消息列表现在由QQ_UpdateMessageList()自动从联系人列表同步
             
             /**
              * 更新聊天界面头部信息
@@ -12803,124 +12779,13 @@
              * 从本地存储加载群聊数据
              */
             // 此函数已被loadGroupChatsFromWorldbook替代，为了兼容性保留别名
+            // 但现在禁用自动加载，避免重复循环
             async function loadGroupsFromStorage() {
-                return await loadGroupChatsFromWorldbook();
+                console.log('loadGroupsFromStorage被调用，但已禁用自动加载');
+                return []; // 返回空数组，避免重复加载
             }
             
-            /**
-             * 添加群聊到联系人列表
-             */
-            function addGroupToContactList(groupData) {
-                console.log('添加群聊到联系人列表:', groupData.name);
-                
-                const contactsContainer = document.getElementById('QQ_home_chars');
-                if (!contactsContainer) {
-                    console.error('找不到联系人容器');
-                    return;
-                }
-                
-                // 检查是否已存在
-                const existingGroup = contactsContainer.querySelector(`[data-group-id="${groupData.id}"]`);
-                if (existingGroup) {
-                    console.log('群聊已存在于联系人列表，更新数据');
-                    updateGroupInContactList(existingGroup, groupData);
-                    return;
-                }
-                
-                // 创建群聊元素
-                const groupElement = document.createElement('div');
-                groupElement.className = 'QQ_home_usermsg';
-                groupElement.setAttribute('data-group-id', groupData.id);
-                groupElement.setAttribute('data-group-type', 'group');
-                groupElement.style.cssText = 'cursor: pointer; padding: 10px; border-bottom: 1px solid #f0f0f0;';
-                
-                // 创建头像
-                const avatarDiv = document.createElement('div');
-                avatarDiv.className = 'QQ_home_head';
-                avatarDiv.style.cssText = 'width: 50px; height: 50px; border-radius: 50%; margin-right: 15px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; color: white;';
-                
-                console.log('联系人列表-群聊头像数据:', groupData.avatar);
-                
-                if (groupData.avatar && groupData.avatar.type === 'preset' && groupData.avatar.gradient) {
-                    const gradient = groupData.avatar.gradient;
-                    avatarDiv.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
-                    avatarDiv.textContent = groupData.avatar.text || '群';
-                    console.log('应用预设头像:', gradient, '文字:', groupData.avatar.text);
-                } else if (groupData.avatar && groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
-                    avatarDiv.style.backgroundImage = `url('${groupData.avatar.imageData}')`;
-                    avatarDiv.style.backgroundSize = 'cover';
-                    avatarDiv.style.backgroundPosition = 'center';
-                    avatarDiv.textContent = '';
-                    console.log('应用上传头像');
-                } else {
-                    // 默认头像
-                    avatarDiv.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
-                    avatarDiv.textContent = '群';
-                    console.log('应用默认头像');
-                }
-                
-                // 创建信息容器
-                const infoDiv = document.createElement('div');
-                infoDiv.style.cssText = 'flex: 1; display: flex; flex-direction: column; justify-content: center;';
-                
-                const nameDiv = document.createElement('div');
-                nameDiv.className = 'QQ_home_name';
-                nameDiv.style.cssText = 'font-size: 16px; font-weight: bold; color: #333; margin-bottom: 5px;';
-                nameDiv.textContent = groupData.name;
-                
-                const msgDiv = document.createElement('div');
-                msgDiv.className = 'QQ_home_lastmsg';
-                msgDiv.style.cssText = 'font-size: 14px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
-                msgDiv.textContent = `群聊 · ${groupData.members.length}人`;
-                
-                infoDiv.appendChild(nameDiv);
-                infoDiv.appendChild(msgDiv);
-                
-                groupElement.appendChild(avatarDiv);
-                groupElement.appendChild(infoDiv);
-                
-                // 添加点击事件
-                groupElement.addEventListener('click', function() {
-                    console.log('切换到群聊:', groupData.name);
-                    console.log('群聊成员:', groupData.members);
-                    
-                    // 设置当前群聊和来源页面
-                    window.currentGroupChat = groupData;
-                    window.groupChatSourcePage = 'contacts'; // 记录来源页面
-                    
-                    // 切换到聊天页面
-                    if (typeof QQ_Nav === 'function') {
-                        QQ_Nav('chat');
-                    } else {
-                        // 手动切换页面
-                        document.querySelectorAll('.QQ_page').forEach(page => page.style.display = 'none');
-                        const chatPage = document.querySelector('.QQ_chat_page');
-                        if (chatPage) {
-                            chatPage.style.display = 'block';
-                        }
-                    }
-                    
-                    // 更新聊天界面
-                    updateChatHeader(groupData);
-                    
-                    // 清空聊天内容并显示群聊信息
-                    const msgContent = document.querySelector('.msgcontent');
-                    if (msgContent) {
-                        msgContent.innerHTML = `
-                            <div style="text-align: center; padding: 20px; color: #666;">
-                                <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${groupData.name}</div>
-                                <div style="font-size: 14px;">群成员：${groupData.members.join(', ')}</div>
-                                <div style="font-size: 12px; margin-top: 10px; color: #999;">群聊已创建，开始聊天吧！</div>
-                            </div>
-                        `;
-                    }
-                });
-                
-                // 添加到联系人列表顶部
-                contactsContainer.insertBefore(groupElement, contactsContainer.firstChild);
-                console.log('群聊已添加到联系人列表');
-            }
-            
+
 
             
             /**
@@ -13014,22 +12879,21 @@
                 
                 groups.forEach(groupData => {
                     console.log('恢复群聊:', groupData.name);
-                    addGroupToContactList(groupData);
-                    addGroupToMessageList(groupData);
+                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members);
                 });
                 
                 console.log('群聊数据恢复完成，共', groups.length, '个群聊');
             }
             
-            // 页面加载完成后恢复群聊数据
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(restoreGroupChats, 500);
-            });
+            // 页面加载完成后恢复群聊数据（暂时禁用，避免与统一初始化冲突）
+            // document.addEventListener('DOMContentLoaded', function() {
+            //     setTimeout(restoreGroupChats, 500);
+            // });
             
-            // 如果页面已经加载完成，立即恢复
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(restoreGroupChats, 500);
-            }
+            // 如果页面已经加载完成，立即恢复（暂时禁用，避免与统一初始化冲突）
+            // if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            //     setTimeout(restoreGroupChats, 500);
+            // }
             
             // ==================== 群聊管理功能 ====================
             
