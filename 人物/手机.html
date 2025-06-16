@@ -8628,46 +8628,36 @@
              * @param {*} name - 角色/群聊名称
              * @param {*} isNew - 是否为新消息
              */
-            function QQ_Chat_AddMsg(dom, content, name, isNew) {
+             function QQ_Chat_AddMsg(dom, content, name, isNew) {
                 // *** 核心改造：判断是否为系统消息 ***
                 if (content.startsWith("系统消息--")) {
-                    const sysMsgText = content.split("--")[2]; // 提取真实的消息内容
+                    const sysMsgText = content.split("--")[1] || content.substring(9); // 提取真实的消息内容
                     const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
                     $(dom).append(msgDiv);
                 } else {
-                    // --- 原有的普通消息处理逻辑 ---
-                    let head;
-                    let Class;
+                    // --- 简化后的普通消息处理逻辑（移除头像） ---
                     let sp = content.split("--");
-                    if (sp[0] == `${UserName}`) {
-                        head = GetCharHead(`${UserName}`);
-                        Class = "my_msg";
-                    } else {
-                        head = GetCharHead(sp[0]);
-                        Class = "user_msg";
-                    }
-                    if (head == "") {
-                        if (sp[0] == `${UserName}`) {
-                            head = "https://files.catbox.moe/koydgy.png";
-                        } else {
-                            head = "https://files.catbox.moe/jct0gf.png";
-                        }
-                    }
-                    if (sp.length >= 2) {
-                        const msgDiv = $("<div>", { class: Class });
-                        const headImg = $("<img>", { src: head });
-                        const bubbleDiv = $("<div>");
-                        bubbleDiv.html(sp[1]);
-                        msgDiv.append(headImg);
-                        msgDiv.append(bubbleDiv);
+                    if (sp.length < 2) return; // 如果消息格式不正确，则忽略
 
-                        if (sp.length >= 3) {
-                            const timeSpan = $("<span>");
-                            timeSpan.text(sp[2]);
-                            bubbleDiv.append(timeSpan);
-                        }
-                        $(dom).append(msgDiv);
-                    }
+                    const senderName = sp[0];
+                    const messageText = sp[1];
+                    const isMe = (senderName === `${UserName}`);
+                    const isGroup = QQ_Groups.includes(name);
+
+                    // 使用CSS类来区分自己和他人
+                    const messageClass = isMe ? "msg-me" : "msg-him";
+
+                    // 构建消息HTML结构（不含头像）
+                    const msg_html = `
+                        <div class="msg-container ${messageClass}">
+                            <div class="msg-content-container">
+                                ${!isMe && isGroup ? `<div class="msg-sender-name">${senderName}</div>` : ''}
+                                <div class="msg-content">${messageText}</div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    $(dom).append(msg_html);
                 }
                                 
                 // 仅当是新消息时才滚动到底部
