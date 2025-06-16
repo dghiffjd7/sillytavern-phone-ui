@@ -2422,6 +2422,64 @@
                 color: #666;
             }
             
+            /* URL输入区域 */
+            .url-input-zone {
+                padding: 20px;
+                text-align: center;
+            }
+            
+            .url-input-title {
+                font-size: 16px;
+                color: #333;
+                margin-bottom: 15px;
+                font-weight: 500;
+            }
+            
+            .url-input {
+                width: 100%;
+                padding: 12px 16px;
+                border: 2px solid #e9ecef;
+                border-radius: 8px;
+                font-size: 14px;
+                transition: all 0.2s ease;
+                box-sizing: border-box;
+            }
+            
+            .url-input:focus {
+                outline: none;
+                border-color: #199AFF;
+                box-shadow: 0 0 0 3px rgba(25, 154, 255, 0.1);
+            }
+            
+            .url-input-hint {
+                font-size: 12px;
+                color: #666;
+                margin-top: 8px;
+            }
+            
+            .url-preview-container {
+                margin-top: 20px;
+                padding: 15px;
+                border: 1px solid #e9ecef;
+                border-radius: 8px;
+                background-color: #f8f9fa;
+            }
+            
+            .url-preview-title {
+                font-size: 14px;
+                color: #333;
+                margin-bottom: 10px;
+                font-weight: 500;
+            }
+            
+            .url-preview-image {
+                max-width: 120px;
+                max-height: 120px;
+                border-radius: 8px;
+                object-fit: cover;
+                border: 2px solid #e9ecef;
+            }
+            
             .avatar-selector-actions {
                 padding: 15px 20px;
                 background-color: #f8f9fa;
@@ -7716,7 +7774,7 @@
                         let isExistingGroup = false;
                         
                         // 检查是否在存储的群聊列表中
-                        const storedGroups = loadGroupsFromStorage();
+                        const storedGroups = loadGroupChatsFromWorldbook();
                         const storedGroup = storedGroups.find(g => g.name === name);
                         
                         if (existingGroupElement.length > 0) {
@@ -7766,7 +7824,7 @@
                                         
                                         if (currentGroupId) {
                                             // 从群聊ID找到群聊名称
-                                            const groups = loadGroupsFromStorage();
+                                            const groups = loadGroupChatsFromWorldbook();
                                             const currentGroup = groups.find(g => g.id === currentGroupId);
                                             if (currentGroup) {
                                                 targetGroupName = currentGroup.name;
@@ -7906,7 +7964,7 @@
                             QQ_msgjson.群聊[name]["msgs"].push(msg);
                             
                             // 同时保存到群聊专用的消息存储
-                            const groupsForMessage = loadGroupsFromStorage();
+                            const groupsForMessage = loadGroupChatsFromWorldbook();
                             const currentGroup = groupsForMessage.find(g => g.name === name);
                             if (currentGroup) {
                                 const sp = msg.split("--");
@@ -7960,7 +8018,7 @@
                         $(`.QQ_home_usermsg[data-name='${name}'] .QQ_home_lasttime`).text(LastTime);
                         
                         // 同时更新群聊专用元素
-                        const groupsForUpdate = loadGroupsFromStorage();
+                        const groupsForUpdate = loadGroupChatsFromWorldbook();
                         const currentGroup = groupsForUpdate.find(g => g.name === name);
                         if (currentGroup) {
                             $(`.QQ_home_usermsg[data-group-id='${currentGroup.id}'] .QQ_home_lastmsg`).text(LastMsg);
@@ -8644,8 +8702,8 @@
                 }
                 
                 // 加载保存的群聊数据
-                if (typeof loadGroupsFromStorage === 'function') {
-                    loadGroupsFromStorage();
+                if (typeof loadGroupChatsFromWorldbook === 'function') {
+                    loadGroupChatsFromWorldbook();
                 }
                 
                 // 初始化联系人分组功能
@@ -9007,6 +9065,7 @@
                     <div class="avatar-selector-tabs">
                         <div class="avatar-tab active" onclick="switchAvatarTab('preset')">预设头像</div>
                         <div class="avatar-tab" onclick="switchAvatarTab('upload')">上传头像</div>
+                        <div class="avatar-tab" onclick="switchAvatarTab('url')">输入链接</div>
                     </div>
                     <div class="avatar-selector-body">
                         <!-- 预设头像选项 -->
@@ -9023,6 +9082,26 @@
                                 <div class="upload-hint">支持 JPG、PNG 格式</div>
                             </div>
                             <input type="file" id="avatar_upload_input" accept="image/*" style="display: none;" onchange="handleAvatarUpload(event)">
+                        </div>
+                        <!-- 输入链接选项 -->
+                        <div id="url_avatars" class="avatar-options">
+                            <div class="url-input-zone">
+                                <div class="url-input-title">输入图片链接</div>
+                                <input 
+                                    type="url" 
+                                    id="avatar_url_input" 
+                                    class="url-input" 
+                                    placeholder="请输入图片链接 (如: https://catbox.moe/...)"
+                                    oninput="handleAvatarUrlInput()"
+                                >
+                                <div class="url-input-hint">
+                                    推荐使用 <a href="https://catbox.moe" target="_blank" style="color: #199AFF;">catbox.moe</a> 等图床服务
+                                </div>
+                                <div id="url_preview_container" class="url-preview-container" style="display: none;">
+                                    <div class="url-preview-title">预览</div>
+                                    <img id="url_preview_image" class="url-preview-image" alt="预览图片">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -9648,6 +9727,11 @@
                                     if (!QQ_Groups.includes(groupData.name)) {
                                         QQ_Groups.push(groupData.name);
                                     }
+                                    
+                                    // 将群聊添加到界面中
+                                    console.log('将群聊添加到界面:', groupData.name);
+                                    addGroupToContactList(groupData);
+                                    addGroupToMessageList(groupData);
                                 }
                             }
                         }
@@ -10522,6 +10606,8 @@
              * 切换头像选择标签页
              */
             function switchAvatarTab(tabType) {
+                console.log('切换到标签页:', tabType);
+                
                 // 更新标签状态
                 document.querySelectorAll('.avatar-tab').forEach(tab => {
                     tab.classList.remove('active');
@@ -10533,6 +10619,91 @@
                     option.classList.remove('active');
                 });
                 document.getElementById(tabType + '_avatars').classList.add('active');
+                
+                // 如果切换到URL标签页，清空之前的预览
+                if (tabType === 'url') {
+                    const urlInput = document.getElementById('avatar_url_input');
+                    const previewContainer = document.getElementById('url_preview_container');
+                    if (urlInput) urlInput.value = '';
+                    if (previewContainer) previewContainer.style.display = 'none';
+                }
+            }
+            
+            /**
+             * 处理头像URL输入
+             */
+            function handleAvatarUrlInput() {
+                const urlInput = document.getElementById('avatar_url_input');
+                const previewContainer = document.getElementById('url_preview_container');
+                const previewImage = document.getElementById('url_preview_image');
+                
+                if (!urlInput || !previewContainer || !previewImage) return;
+                
+                const url = urlInput.value.trim();
+                
+                if (!url) {
+                    previewContainer.style.display = 'none';
+                    window.selectedAvatarData = null;
+                    updateAvatarConfirmButton();
+                    return;
+                }
+                
+                // 简单的URL验证
+                try {
+                    new URL(url);
+                } catch (e) {
+                    previewContainer.style.display = 'none';
+                    window.selectedAvatarData = null;
+                    updateAvatarConfirmButton();
+                    return;
+                }
+                
+                // 检查是否是图片URL
+                const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+                const isImageUrl = imageExtensions.some(ext => 
+                    url.toLowerCase().includes(ext) || 
+                    url.toLowerCase().includes('image') ||
+                    url.includes('catbox.moe') ||
+                    url.includes('imgur.com') ||
+                    url.includes('i.imgur.com')
+                );
+                
+                if (!isImageUrl && !url.startsWith('data:image/')) {
+                    console.warn('可能不是图片URL:', url);
+                }
+                
+                // 显示预览
+                previewImage.onload = function() {
+                    console.log('图片加载成功:', url);
+                    previewContainer.style.display = 'block';
+                    
+                    // 保存选中的头像数据
+                    window.selectedAvatarData = {
+                        type: 'url',
+                        url: url
+                    };
+                    
+                    console.log('URL头像数据已保存:', window.selectedAvatarData);
+                    updateAvatarConfirmButton();
+                };
+                
+                previewImage.onerror = function() {
+                    console.error('图片加载失败:', url);
+                    previewContainer.style.display = 'none';
+                    window.selectedAvatarData = null;
+                    updateAvatarConfirmButton();
+                    
+                    // 可以显示错误提示
+                    const urlInput = document.getElementById('avatar_url_input');
+                    if (urlInput) {
+                        urlInput.style.borderColor = '#ff6b6b';
+                        setTimeout(() => {
+                            urlInput.style.borderColor = '';
+                        }, 2000);
+                    }
+                };
+                
+                previewImage.src = url;
             }
             
             /**
@@ -10621,6 +10792,24 @@
                 
                 const reader = new FileReader();
                 reader.onload = function(e) {
+                    // 显示警告提示
+                    const shouldContinue = confirm(
+                        '⚠️ 重要提示：\n\n' +
+                        '本地上传的图片无法保存为真实的网络链接。\n' +
+                        '为了确保头像能正常显示，建议：\n\n' +
+                        '1. 将图片上传到 catbox.moe 等图床\n' +
+                        '2. 复制获得的链接地址\n' +
+                        '3. 在世界书中手动设置头像链接\n\n' +
+                        '如果继续使用本地图片，系统将使用默认头像。\n\n' +
+                        '是否继续？'
+                    );
+                    
+                    if (!shouldContinue) {
+                        // 用户选择不继续，重置文件输入
+                        event.target.value = '';
+                        return;
+                    }
+                    
                     // 更新上传区域显示
                     const uploadZone = document.querySelector('.upload-zone');
                     const originalHTML = uploadZone.innerHTML;
@@ -10628,20 +10817,25 @@
                     uploadZone.innerHTML = `
                         <div class="uploaded-preview">
                             <img src="${e.target.result}" alt="预览" style="width: 120px; height: 120px; border-radius: 12px; object-fit: cover;">
-                            <div class="upload-text" style="margin-top: 10px;">已选择图片</div>
+                            <div class="upload-text" style="margin-top: 10px; color: #ff6b6b;">⚠️ 本地图片（将使用默认头像）</div>
                             <button class="change-image-btn" onclick="triggerFileUpload()" style="margin-top: 8px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; background: white; cursor: pointer;">更换图片</button>
+                            <div style="margin-top: 8px; font-size: 12px; color: #666; text-align: center;">
+                                建议使用 <a href="https://catbox.moe" target="_blank" style="color: #199AFF;">catbox.moe</a> 上传图片获取链接
+                            </div>
                         </div>
                     `;
                     
-                    // 保存选中的头像数据
+                    // 保存选中的头像数据，但标记为本地上传
                     window.selectedAvatarData = {
                         type: 'upload',
-                        imageData: e.target.result
+                        imageData: e.target.result,
+                        isLocal: true  // 标记为本地上传
                     };
                     
-                    console.log('上传头像数据已保存:', {
+                    console.log('上传头像数据已保存（本地图片）:', {
                         type: window.selectedAvatarData.type,
-                        hasImageData: !!window.selectedAvatarData.imageData
+                        hasImageData: !!window.selectedAvatarData.imageData,
+                        isLocal: window.selectedAvatarData.isLocal
                     });
                     
                     updateAvatarConfirmButton();
@@ -10929,12 +11123,30 @@
                     // 解析现有内容
                     let content = entry.content;
                     
-                    // 构建群聊条目 - 始终使用默认头像URL，避免base64数据过长
+                    // 构建群聊条目 - 智能处理头像URL
                     let avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
-                    if (groupData.avatar && groupData.avatar.type === 'url' && groupData.avatar.url) {
-                        avatarUrl = groupData.avatar.url;
+                    
+                    if (groupData.avatar) {
+                        if (groupData.avatar.type === 'url' && groupData.avatar.url) {
+                            // 真实的网络链接，直接使用
+                            avatarUrl = groupData.avatar.url;
+                            console.log('使用网络链接头像:', avatarUrl);
+                        } else if (groupData.avatar.type === 'upload' && groupData.avatar.isLocal) {
+                            // 本地上传的图片，使用默认头像
+                            console.log('检测到本地上传图片，使用默认头像');
+                            avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                        } else if (groupData.avatar.type === 'upload' && groupData.avatar.imageData && !groupData.avatar.imageData.startsWith('data:')) {
+                            // 如果是真实的网络链接（不是base64），使用它
+                            avatarUrl = groupData.avatar.imageData;
+                            console.log('使用上传的网络链接头像:', avatarUrl);
+                        } else {
+                            // 其他情况（包括base64数据），使用默认头像
+                            console.log('使用默认头像，避免保存base64数据');
+                            avatarUrl = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                        }
                     }
-                    // 注意：不保存base64数据到世界书，避免条目过长
+                    
+                    console.log('最终头像URL:', avatarUrl);
                     
                     const groupEntry = `[${groupData.name}]
 类型=群聊
@@ -12180,7 +12392,7 @@
              */
             function initializeEnhancedFeatures() {
                 // 加载保存的群聊
-                loadGroupsFromStorage();
+                loadGroupChatsFromWorldbook();
                 
                 // 初始化分组功能
                 if (typeof loadGroupsFromStorage === 'function') {
