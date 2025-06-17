@@ -8660,9 +8660,7 @@
                     const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
                     $(dom).append(msgDiv);
                 } else {
-                    // --- 修复：恢复普通消息处理逻辑 ---
-                    let head;
-                    let Class;
+                    // --- 修复：使用正确的模板系统 ---
                     let sp = content.split("--");
                     
                     if (sp.length < 2) {
@@ -8676,45 +8674,31 @@
                     
                     console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
                     
-                    if (sender == `${UserName}`) {
-                        head = GetCharHead(`${UserName}`);
-                        Class = "my_msg";
+                    // 判断是否为用户消息
+                    const isUser = sender == `${UserName}`;
+                    
+                    let messageHtml;
+                    
+                    if (isUser) {
+                        // 用户消息 - 使用用户消息模板（右侧气泡，用户头像）
+                        const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), true);
+                        messageHtml = _.template(chat_user_message)({
+                            content: specialContent || messageContent
+                        });
+                        console.log('使用用户消息模板');
                     } else {
-                        head = GetCharHead(sender);
-                        Class = "user_msg";
+                        // 角色消息 - 使用角色消息模板（左侧气泡，角色头像）
+                        const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), false);
+                        messageHtml = _.template(chat_char_msg)({
+                            content: specialContent || messageContent,
+                            name: sender,
+                            isgroup: QQ_Groups.includes(name)
+                        });
+                        console.log('使用角色消息模板，角色名:', sender);
                     }
                     
-                    if (head == "") {
-                        if (sender == `${UserName}`) {
-                            head = "https://files.catbox.moe/koydgy.png";
-                        } else {
-                            head = "https://files.catbox.moe/jct0gf.png";
-                        }
-                    }
-                    
-                    // 创建消息元素
-                    const msgDiv = $("<div>", { class: Class });
-                    const headImg = $("<img>", { src: head });
-                    const bubbleDiv = $("<div>");
-                    
-                    // 处理特殊格式消息（表情包、图片等）
-                    const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), sender == `${UserName}`);
-                    if (specialContent) {
-                        bubbleDiv.html(specialContent);
-                    } else {
-                        bubbleDiv.html(messageContent);
-                    }
-                    
-                    msgDiv.append(headImg);
-                    msgDiv.append(bubbleDiv);
-
-                    if (timestamp) {
-                        const timeSpan = $("<span>", { class: "message-time" });
-                        timeSpan.text(timestamp);
-                        bubbleDiv.append(timeSpan);
-                    }
-                    
-                    $(dom).append(msgDiv);
+                    // 添加到聊天界面
+                    $(dom).append(messageHtml);
                     console.log(`消息已添加到DOM: ${sender}: ${messageContent}`);
                 }
                              
