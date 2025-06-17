@@ -10515,54 +10515,65 @@
              * 渲染分组界面
              */
             function renderContactGroups() {
-                const contactsContainer = document.getElementById('QQ_home_chars');
-                if (!contactsContainer) return;
+                const contactsContainer = $('#QQ_home_chars');
+                if (contactsContainer.length === 0) return;
 
-                // 使用jQuery来保存群聊和私聊联系人，确保事件绑定不丢失
-                const $originalGroupChats = $(contactsContainer).find('.QQ_home_usermsg[data-group-type="true"]');
-                const $originalContacts = $(contactsContainer).find('.QQ_home_usermsg:not([data-group-type="true"])');
+                // 1. Detach all contact items (groups and private) to preserve data and events
+                const $allContacts = contactsContainer.find('.QQ_home_usermsg').detach();
+                const $groupChats = $allContacts.filter('[data-group-type="true"]');
+                const $privateChats = $allContacts.not('[data-group-type="true"]');
 
-                // 清空容器，但用jQuery的方式
-                $(contactsContainer).empty();
-
-                // 步骤1: 立即将群聊重新添加回去，确保它们总在最上方
-                if ($originalGroupChats.length > 0) {
-                    const $groupChatSection = $('<div></div>');
-                    $originalGroupChats.each(function() {
-                        // 使用jQuery的detach()和appendTo()来保持事件绑定
-                        $(this).appendTo($groupChatSection);
-                    });
-                    $groupChatSection.appendTo($(contactsContainer));
-                }
-
-                // 步骤2: 渲染私聊的自定义分组
-                contactGroups.sort((a, b) => a.order - b.order).forEach(group => {
-                    const groupElement = createGroupElement(group);
-                    contactsContainer.appendChild(groupElement);
+                // Create a map of private chats by name for easy lookup
+                const privateChatsMap = new Map();
+                $privateChats.each(function() {
+                    const name = $(this).find('.QQ_home_name').text().trim();
+                    privateChatsMap.set(name, $(this));
                 });
 
-                // 步骤3: 渲染未分组的私聊联系人
-                const $ungroupedContacts = $originalContacts.filter(function() {
-                    const contactName = $(this).find('.QQ_home_name').text().trim();
-                    return !isContactInAnyGroup(contactName);
+                // 2. Clear the container
+                contactsContainer.empty();
+
+                // 3. Append group chats first
+                contactsContainer.append($groupChats);
+
+                // 4. Render user-defined contact groups
+                contactGroups.sort((a, b) => a.order - b.order).forEach(groupData => {
+                    const $groupElement = $(createGroupElement(groupData)); // createGroupElement is modified next
+                    const $groupContent = $groupElement.find('.group-content');
+                    let currentGroupCount = 0;
+
+                    if (groupData.contacts && Array.isArray(groupData.contacts)) {
+                        groupData.contacts.forEach(contactInfo => {
+                            if (privateChatsMap.has(contactInfo.name)) {
+                                const $contact = privateChatsMap.get(contactInfo.name);
+                                $contact.attr('draggable', true);
+                                $groupContent.append($contact);
+                                privateChatsMap.delete(contactInfo.name); // Remove from map as it's now grouped
+                                currentGroupCount++;
+                            }
+                        });
+                    }
+                    
+                    $groupElement.find('.group-count').text(currentGroupCount);
+                    contactsContainer.append($groupElement);
                 });
 
-                if ($ungroupedContacts.length > 0) {
+                // 5. Render ungrouped contacts
+                if (privateChatsMap.size > 0) {
                     const $ungroupedSection = $(`
                         <div class="ungrouped-contacts">
                             <div class="ungrouped-header">未分组联系人</div>
                         </div>
                     `);
-                    
                     const $dropZone = $('<div class="drop-zone ungrouped-drop-zone" data-group-id="ungrouped"></div>');
 
-                    $ungroupedContacts.each(function() {
-                        $(this).attr('draggable', 'true');
-                        $(this).appendTo($ungroupedSection);
+                    privateChatsMap.forEach($contact => {
+                        $contact.attr('draggable', true);
+                        $ungroupedSection.append($contact);
                     });
 
-                    $dropZone.appendTo($ungroupedSection);
-                    $ungroupedSection.appendTo($(contactsContainer));
+                    $ungroupedSection.append($dropZone);
+                    contactsContainer.append($ungroupedSection);
                 }
             }
             
@@ -10575,25 +10586,17 @@
                 groupDiv.setAttribute('data-group-id', group.id);
                 
                 const isCollapsed = group.collapsed;
-                const contactCount = group.contacts.length;
                 
                 groupDiv.innerHTML = `
                     <div class="group-header" onclick="toggleGroup('${group.id}')">
                         <span class="group-drag-handle" onmousedown="startGroupDrag(event, '${group.id}')">⋮⋮</span>
                         <span class="group-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
                         <span class="group-name" onclick="editGroupName(event, '${group.id}')" data-group-id="${group.id}">${group.name}</span>
-                        <span class="group-count">${contactCount}</span>
+                        <span class="group-count">0</span>
                         <span class="group-delete-btn" onclick="deleteContactGroup(event, '${group.id}')">×</span>
                     </div>
                     <div class="group-content ${isCollapsed ? 'collapsed' : 'expanded'}">
-                        ${group.contacts.map(contact => {
-                            // 确保联系人可以拖拽
-                            const contactHtml = contact.html.replace(
-                                'class="QQ_home_usermsg"',
-                                'class="QQ_home_usermsg" draggable="true"'
-                            );
-                            return contactHtml;
-                        }).join('')}
+                        <!-- Contacts inserted by JS -->
                     </div>
                     <div class="drop-zone" data-group-id="${group.id}"></div>
                 `;
