@@ -8209,7 +8209,7 @@
                         } else if (storedGroup) {
                             // 群聊在存储中存在，但界面元素不存在，重新创建
                             console.log(`群聊 ${name} 在存储中存在，重新创建界面元素`);
-                            AddNewGroup(storedGroup.name, storedGroup.avatar || 'https://files.catbox.moe/default-group.png', storedGroup.members, storedGroup.description);
+                            AddNewGroup(storedGroup.name, storedGroup.avatar || 'https://files.catbox.moe/skngqq.jpg', storedGroup.members, storedGroup.description);
                             isExistingGroup = true;
                         } else {
                             // 这是一个全新的群聊，需要智能处理
@@ -10156,7 +10156,7 @@
                                 }
                                 
                                 console.log('准备调用AddNewGroup函数添加群聊:', groupData.name);
-                                AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members, groupData.description);
+                                AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                                 
                                 // *** 修复：在加载群聊后立即更新最后消息显示 ***
                                 setTimeout(() => {
@@ -11011,7 +11011,7 @@
                     groupData = {
                         name: cleanGroupName,
                         members: msgGroupData.members || [],
-                        avatar: 'https://files.catbox.moe/default-group.png' // 默认头像
+                        avatar: 'https://files.catbox.moe/skngqq.jpg' // 默认头像
                     };
                 }
                 
@@ -11020,7 +11020,7 @@
                     groupData = {
                         name: cleanGroupName,
                         members: ['成员1', '成员2', '成员3'], // 示例成员
-                        avatar: 'https://files.catbox.moe/default-group.png'
+                        avatar: 'https://files.catbox.moe/skngqq.jpg'
                     };
                     console.warn(`群聊 ${cleanGroupName} 数据未找到，使用默认数据`);
                 }
@@ -12508,7 +12508,7 @@
                     
                     if (!existsByID && !existsByName) {
                         console.log('恢复群聊到联系人列表:', groupData.name, 'ID:', groupData.id);
-                        AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members, groupData.description);
+                        AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                     } else {
                         console.log('群聊已存在于联系人列表:', groupData.name);
                         // 确保现有群聊的头像正确显示
@@ -12539,12 +12539,105 @@
             }
             
             /**
-             * 获取角色头像数据
+             * 从世界书获取角色头像数据
+             */
+            function getCharacterAvatarFromWorldbook(characterName) {
+                console.log(`从世界书获取角色头像: ${characterName}`);
+                
+                // 从世界书 "手机-角色" 条目获取头像
+                let entry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
+                if (!entry || !entry.content) {
+                    console.log('未找到手机-角色世界书条目');
+                    return null;
+                }
+                
+                const content = entry.content;
+                const lines = content.split('\n');
+                let currentSection = null;
+                
+                for (let line of lines) {
+                    line = line.trim();
+                    if (line.startsWith('[') && line.endsWith(']')) {
+                        currentSection = line.slice(1, -1);
+                    } else if (currentSection === characterName && line.startsWith('头像=')) {
+                        const avatarUrl = line.substring(3);
+                        console.log(`找到角色 ${characterName} 的头像: ${avatarUrl}`);
+                        return {
+                            backgroundImage: `url("${avatarUrl}")`,
+                            background: '',
+                            textContent: '',
+                            avatarUrl: avatarUrl
+                        };
+                    }
+                }
+                
+                console.log(`未在世界书中找到角色 ${characterName} 的头像`);
+                return null;
+            }
+            
+            /**
+             * 从世界书获取群聊头像数据
+             */
+            function getGroupAvatarFromWorldbook(groupName) {
+                console.log(`从世界书获取群聊头像: ${groupName}`);
+                
+                // 从世界书 "手机-群聊" 条目获取头像
+                if (!entries) {
+                    console.log('entries未定义，无法获取群聊头像');
+                    return null;
+                }
+                
+                const groupEntry = entries.find(e => 
+                    e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)
+                );
+                
+                if (!groupEntry) {
+                    console.log(`未找到群聊 ${groupName} 的世界书条目`);
+                    return null;
+                }
+                
+                const content = groupEntry.content;
+                const lines = content.split('\n');
+                let currentSection = null;
+                
+                for (let line of lines) {
+                    line = line.trim();
+                    if (line.startsWith('[') && line.endsWith(']')) {
+                        currentSection = line.slice(1, -1);
+                    } else if (currentSection === groupName && line.startsWith('头像=')) {
+                        const avatarUrl = line.substring(3);
+                        console.log(`找到群聊 ${groupName} 的头像: ${avatarUrl}`);
+                        return {
+                            backgroundImage: `url("${avatarUrl}")`,
+                            background: '',
+                            textContent: '',
+                            avatarUrl: avatarUrl
+                        };
+                    }
+                }
+                
+                console.log(`未在世界书中找到群聊 ${groupName} 的头像`);
+                return null;
+            }
+            
+            /**
+             * 获取角色头像数据（优先从世界书，备选从联系人列表）
              */
             function getCharacterAvatar(characterName) {
-                // 从联系人列表中查找角色头像
+                console.log(`获取角色头像: ${characterName}`);
+                
+                // 首先尝试从世界书获取
+                const worldbookAvatar = getCharacterAvatarFromWorldbook(characterName);
+                if (worldbookAvatar) {
+                    return worldbookAvatar;
+                }
+                
+                // 备选方案：从联系人列表中查找角色头像
                 const contactsContainer = document.getElementById('QQ_home_chars');
-                if (!contactsContainer) return null;
+                if (!contactsContainer) {
+                    console.log('联系人容器未找到');
+                    return null;
+                }
                 
                 // 查找对应的联系人元素
                 const contactElements = contactsContainer.querySelectorAll('.QQ_home_char');
@@ -12558,6 +12651,7 @@
                             const background = avatarElement.style.background;
                             const textContent = avatarElement.textContent;
                             
+                            console.log(`从联系人列表获取角色 ${characterName} 的头像`);
                             return {
                                 backgroundImage,
                                 background,
@@ -12567,6 +12661,7 @@
                     }
                 }
                 
+                console.log(`未找到角色 ${characterName} 的头像`);
                 return null;
             }
             
@@ -12574,18 +12669,19 @@
              * 应用角色头像到元素
              */
             function applyCharacterAvatar(element, avatarData, characterName) {
-                // 设置基础样式
-                element.style.width = '40px';
-                element.style.height = '40px';
+                // *** 修复：不要强制设置尺寸，保持CSS中的样式 ***
+                // 只设置必要的基础样式，让CSS控制尺寸
                 element.style.borderRadius = '50%';
                 element.style.display = 'flex';
                 element.style.alignItems = 'center';
                 element.style.justifyContent = 'center';
                 element.style.fontWeight = 'bold';
-                element.style.fontSize = '14px';
+                element.style.fontSize = '12px';
                 element.style.color = 'white';
                 element.style.backgroundSize = 'cover';
                 element.style.backgroundPosition = 'center';
+                element.style.backgroundRepeat = 'no-repeat';
+                element.style.flexShrink = '0';
                 
                 if (avatarData && (avatarData.backgroundImage || avatarData.background)) {
                     // 使用真实头像
@@ -13195,7 +13291,7 @@
                 
                 groups.forEach(groupData => {
                     console.log('恢复群聊:', groupData.name);
-                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members, groupData.description);
+                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                 });
                 
                 console.log('群聊数据恢复完成，共', groups.length, '个群聊');
@@ -13246,9 +13342,28 @@
                     const memberAvatar = document.createElement('div');
                     memberAvatar.className = 'group-member-avatar';
                     
-                    // 获取成员的真实头像
-                    const memberAvatarData = getCharacterAvatar(memberName);
-                    applyCharacterAvatar(memberAvatar, memberAvatarData, memberName);
+                    // *** 修复：优先从世界书获取成员头像 ***
+                    console.log(`群聊下拉菜单：获取成员 ${memberName} 头像`);
+                    const worldbookAvatar = getCharacterAvatarFromWorldbook(memberName);
+                    if (worldbookAvatar) {
+                        memberAvatar.style.backgroundImage = worldbookAvatar.backgroundImage;
+                        memberAvatar.style.backgroundSize = 'cover';
+                        memberAvatar.style.backgroundPosition = 'center';
+                        memberAvatar.style.backgroundRepeat = 'no-repeat';
+                        memberAvatar.style.borderRadius = '50%';
+                        memberAvatar.style.width = '32px';
+                        memberAvatar.style.height = '32px';
+                        memberAvatar.style.flexShrink = '0';
+                        memberAvatar.textContent = '';
+                        console.log(`群聊下拉菜单：成功应用 ${memberName} 的世界书头像`);
+                    } else {
+                        // 备选方案
+                        const memberAvatarData = getCharacterAvatar(memberName);
+                        applyCharacterAvatar(memberAvatar, memberAvatarData, memberName);
+                        memberAvatar.style.width = '32px';
+                        memberAvatar.style.height = '32px';
+                        console.log(`群聊下拉菜单：使用备选方案为 ${memberName} 应用头像`);
+                    }
                     
                     const memberNameDiv = document.createElement('div');
                     memberNameDiv.className = 'group-member-name';
@@ -13310,39 +13425,97 @@
                     nameInput.value = currentManagingGroup.name;
                 }
                 
-                // 显示当前群聊头像
+                // *** 修复：优先从世界书获取群聊头像 ***
                 const avatarPreview = document.getElementById('group_settings_avatar_preview');
                 if (avatarPreview) {
                     avatarPreview.innerHTML = '';
-                    if (currentManagingGroup.avatar) {
-                        // 检查是否是avatar ID格式
-                        if (currentManagingGroup.avatar.startsWith('avatar_')) {
-                            const avatarData = localStorage.getItem(`avatarData_${currentManagingGroup.avatar.replace('avatar_', '')}`);
-                            if (avatarData) {
-                                const img = document.createElement('img');
-                                img.src = avatarData;
-                                img.alt = '群聊头像';
-                                avatarPreview.appendChild(img);
-                            } else {
-                                // 如果localStorage中没有数据，显示默认头像
-                                const defaultAvatar = document.createElement('div');
-                                defaultAvatar.className = 'group-settings-default-avatar';
-                                defaultAvatar.textContent = '群';
-                                avatarPreview.appendChild(defaultAvatar);
-                            }
-                        } else {
-                            // 直接是URL
-                            const img = document.createElement('img');
-                            img.src = currentManagingGroup.avatar;
-                            img.alt = '群聊头像';
-                            avatarPreview.appendChild(img);
-                        }
+                    
+                    console.log(`群聊设置：获取群聊 ${currentManagingGroup.name} 头像`);
+                    
+                    // 首先尝试从世界书获取群聊头像
+                    const worldbookGroupAvatar = getGroupAvatarFromWorldbook(currentManagingGroup.name);
+                    let realAvatarFound = false;
+                    
+                    if (worldbookGroupAvatar) {
+                        console.log(`从世界书获取到群聊 ${currentManagingGroup.name} 头像:`, worldbookGroupAvatar);
+                        const avatarImg = document.createElement('div');
+                        avatarImg.style.backgroundImage = worldbookGroupAvatar.backgroundImage;
+                        avatarImg.style.backgroundSize = 'cover';
+                        avatarImg.style.backgroundPosition = 'center';
+                        avatarImg.style.backgroundRepeat = 'no-repeat';
+                        avatarImg.style.borderRadius = '12px';
+                        avatarImg.style.width = '100%';
+                        avatarImg.style.height = '100%';
+                        avatarPreview.appendChild(avatarImg);
+                        realAvatarFound = true;
                     } else {
-                        // 没有头像，显示默认
+                        // 备选方案：从群聊列表中获取真实的头像数据
+                        const contactsContainer = document.getElementById('QQ_home_chars');
+                        
+                        if (contactsContainer) {
+                            const groupElements = contactsContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                            for (let element of groupElements) {
+                                const nameElement = element.querySelector('.QQ_home_name');
+                                if (nameElement && nameElement.textContent.trim() === currentManagingGroup.name) {
+                                    const avatarElement = element.querySelector('.QQ_home_head');
+                                    if (avatarElement) {
+                                        // 创建一个和联系人列表中相同的头像
+                                        const avatarClone = document.createElement('div');
+                                        avatarClone.style.cssText = avatarElement.style.cssText;
+                                        avatarClone.style.width = '60px';
+                                        avatarClone.style.height = '60px';
+                                        avatarClone.style.fontSize = '20px';
+                                        avatarClone.textContent = avatarElement.textContent;
+                                        avatarPreview.appendChild(avatarClone);
+                                        realAvatarFound = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 如果没有找到真实头像，尝试使用存储的头像数据
+                        if (!realAvatarFound && currentManagingGroup.avatar) {
+                            if (currentManagingGroup.avatar.startsWith('avatar_')) {
+                                const avatarData = localStorage.getItem(`avatarData_${currentManagingGroup.avatar.replace('avatar_', '')}`);
+                                if (avatarData) {
+                                    const img = document.createElement('img');
+                                    img.src = avatarData;
+                                    img.alt = '群聊头像';
+                                    img.style.width = '100%';
+                                    img.style.height = '100%';
+                                    img.style.objectFit = 'cover';
+                                    avatarPreview.appendChild(img);
+                                    realAvatarFound = true;
+                                }
+                            } else if (currentManagingGroup.avatar.startsWith('http')) {
+                                // 直接是URL
+                                const img = document.createElement('img');
+                                img.src = currentManagingGroup.avatar;
+                                img.alt = '群聊头像';
+                                img.style.width = '100%';
+                                img.style.height = '100%';
+                                img.style.objectFit = 'cover';
+                                avatarPreview.appendChild(img);
+                                realAvatarFound = true;
+                            }
+                        }
+                    }
+                    
+                    // 如果仍然没有头像，显示默认头像
+                    if (!realAvatarFound) {
                         const defaultAvatar = document.createElement('div');
                         defaultAvatar.className = 'group-settings-default-avatar';
-                        defaultAvatar.textContent = '群';
+                        defaultAvatar.textContent = currentManagingGroup.name.charAt(0);
+                        defaultAvatar.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+                        defaultAvatar.style.color = 'white';
+                        defaultAvatar.style.width = '100%';
+                        defaultAvatar.style.height = '100%';
+                        defaultAvatar.style.display = 'flex';
+                        defaultAvatar.style.alignItems = 'center';
+                        defaultAvatar.style.justifyContent = 'center';
                         avatarPreview.appendChild(defaultAvatar);
+                        console.log(`群聊设置：使用默认头像显示 ${currentManagingGroup.name}`);
                     }
                 }
                 
@@ -13362,9 +13535,28 @@
                         const memberAvatar = document.createElement('div');
                         memberAvatar.className = 'group-member-avatar';
                         
-                        // 获取成员的真实头像
-                        const memberAvatarData = getCharacterAvatar(memberName);
-                        applyCharacterAvatar(memberAvatar, memberAvatarData, memberName);
+                        // *** 修复：优先从世界书获取成员头像 ***
+                        console.log(`群聊设置：获取成员 ${memberName} 头像`);
+                        const worldbookAvatar = getCharacterAvatarFromWorldbook(memberName);
+                        if (worldbookAvatar) {
+                            memberAvatar.style.backgroundImage = worldbookAvatar.backgroundImage;
+                            memberAvatar.style.backgroundSize = 'cover';
+                            memberAvatar.style.backgroundPosition = 'center';
+                            memberAvatar.style.backgroundRepeat = 'no-repeat';
+                            memberAvatar.style.borderRadius = '50%';
+                            memberAvatar.style.width = '32px';
+                            memberAvatar.style.height = '32px';
+                            memberAvatar.style.flexShrink = '0';
+                            memberAvatar.textContent = '';
+                            console.log(`群聊设置：成功应用 ${memberName} 的世界书头像`);
+                        } else {
+                            // 备选方案
+                            const memberAvatarData = getCharacterAvatar(memberName);
+                            applyCharacterAvatar(memberAvatar, memberAvatarData, memberName);
+                            memberAvatar.style.width = '32px';
+                            memberAvatar.style.height = '32px';
+                            console.log(`群聊设置：使用备选方案为 ${memberName} 应用头像`);
+                        }
                         
                         const memberNameDiv = document.createElement('div');
                         memberNameDiv.className = 'group-member-name';
@@ -13780,25 +13972,42 @@
              */
             function loadContactsForAddMember() {
                 const contactList = document.getElementById('add_member_contact_list');
-                if (!contactList) return;
+                if (!contactList) {
+                    console.error('添加成员联系人列表容器未找到');
+                    return;
+                }
                 
                 contactList.innerHTML = '';
                 
                 // 获取所有联系人
                 const contactsContainer = document.getElementById('QQ_home_chars');
-                if (!contactsContainer) return;
+                if (!contactsContainer) {
+                    console.error('联系人容器未找到');
+                    return;
+                }
                 
                 const contactElements = contactsContainer.querySelectorAll('.QQ_home_char');
                 const currentMembers = new Set(currentManagingGroup.members);
                 
+                console.log(`找到 ${contactElements.length} 个联系人，当前群聊成员:`, currentMembers);
+                
+                let addedCount = 0;
                 contactElements.forEach(element => {
+                    // 跳过群聊类型的联系人，只处理个人联系人
+                    if (element.hasAttribute('data-group-type')) {
+                        return;
+                    }
+                    
                     const nameElement = element.querySelector('.QQ_home_name');
                     if (!nameElement) return;
                     
                     const contactName = nameElement.textContent.trim();
                     
                     // 跳过已经在群聊中的成员
-                    if (currentMembers.has(contactName)) return;
+                    if (currentMembers.has(contactName)) {
+                        console.log(`跳过已存在成员: ${contactName}`);
+                        return;
+                    }
                     
                     const contactItem = document.createElement('div');
                     contactItem.className = 'add-member-contact-item';
@@ -13807,9 +14016,65 @@
                     const contactAvatar = document.createElement('div');
                     contactAvatar.className = 'add-member-contact-avatar';
                     
-                    // 获取联系人头像
-                    const avatarData = getCharacterAvatar(contactName);
-                    applyCharacterAvatar(contactAvatar, avatarData, contactName);
+                    // *** 修复：优先从世界书获取头像，确保显示正确的角色头像 ***
+                    console.log(`为联系人 ${contactName} 获取头像`);
+                    
+                    // 首先尝试从世界书获取头像
+                    const worldbookAvatar = getCharacterAvatarFromWorldbook(contactName);
+                    if (worldbookAvatar) {
+                        console.log(`从世界书获取到 ${contactName} 的头像:`, worldbookAvatar);
+                        
+                        // 应用世界书中的头像
+                        contactAvatar.style.backgroundImage = worldbookAvatar.backgroundImage;
+                        contactAvatar.style.backgroundSize = 'cover';
+                        contactAvatar.style.backgroundPosition = 'center';
+                        contactAvatar.style.backgroundRepeat = 'no-repeat';
+                        contactAvatar.style.borderRadius = '50%';
+                        contactAvatar.style.width = '40px';
+                        contactAvatar.style.height = '40px';
+                        contactAvatar.style.marginRight = '12px';
+                        contactAvatar.style.flexShrink = '0';
+                        contactAvatar.textContent = '';
+                    } else {
+                        // 备选方案：从联系人列表复制头像
+                        const avatarElement = element.querySelector('.QQ_home_head');
+                        if (avatarElement) {
+                            console.log(`从联系人列表复制 ${contactName} 的头像`);
+                            
+                            // 直接复制原始头像的所有样式和内容
+                            contactAvatar.style.cssText = avatarElement.style.cssText;
+                            contactAvatar.style.width = '40px';
+                            contactAvatar.style.height = '40px';
+                            contactAvatar.style.marginRight = '12px';
+                            contactAvatar.style.flexShrink = '0';
+                            contactAvatar.textContent = avatarElement.textContent;
+                            
+                            // 确保背景图像和背景样式都复制过来
+                            const computedStyle = window.getComputedStyle(avatarElement);
+                            if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
+                                contactAvatar.style.backgroundImage = computedStyle.backgroundImage;
+                            }
+                            if (computedStyle.backgroundColor && computedStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                                contactAvatar.style.backgroundColor = computedStyle.backgroundColor;
+                            }
+                        } else {
+                            // 最后的备选方案：使用默认头像
+                            console.log(`为 ${contactName} 使用默认头像`);
+                            contactAvatar.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+                            contactAvatar.style.backgroundImage = '';
+                            contactAvatar.style.color = 'white';
+                            contactAvatar.style.display = 'flex';
+                            contactAvatar.style.alignItems = 'center';
+                            contactAvatar.style.justifyContent = 'center';
+                            contactAvatar.style.fontWeight = 'bold';
+                            contactAvatar.style.borderRadius = '50%';
+                            contactAvatar.style.width = '40px';
+                            contactAvatar.style.height = '40px';
+                            contactAvatar.style.marginRight = '12px';
+                            contactAvatar.style.flexShrink = '0';
+                            contactAvatar.textContent = contactName.charAt(0);
+                        }
+                    }
                     
                     const contactNameDiv = document.createElement('div');
                     contactNameDiv.className = 'add-member-contact-name';
@@ -13829,7 +14094,18 @@
                     });
                     
                     contactList.appendChild(contactItem);
+                    addedCount++;
                 });
+                
+                console.log(`已加载 ${addedCount} 个可添加的联系人`);
+                
+                // 如果没有可添加的联系人，显示提示
+                if (addedCount === 0) {
+                    const noContactDiv = document.createElement('div');
+                    noContactDiv.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px;';
+                    noContactDiv.textContent = '暂无可添加的联系人';
+                    contactList.appendChild(noContactDiv);
+                }
             }
             
             /**
@@ -13883,19 +14159,72 @@
                 const searchInput = document.getElementById('add_member_search_input');
                 const contactList = document.getElementById('add_member_contact_list');
                 
-                if (!searchInput || !contactList) return;
+                if (!searchInput || !contactList) {
+                    console.log('搜索输入框或联系人列表未找到');
+                    return;
+                }
                 
                 const searchTerm = searchInput.value.toLowerCase().trim();
                 const contactItems = contactList.querySelectorAll('.add-member-contact-item');
                 
-                contactItems.forEach(item => {
+                console.log(`=== 添加成员搜索调试 ===`);
+                console.log(`搜索词: "${searchTerm}"`);
+                console.log(`联系人总数: ${contactItems.length}`);
+                
+                let visibleCount = 0;
+                const debugInfo = [];
+                
+                contactItems.forEach((item, index) => {
                     const contactName = item.getAttribute('data-contact-name');
-                    if (contactName && contactName.toLowerCase().includes(searchTerm)) {
+                    const nameElement = item.querySelector('.add-member-contact-name');
+                    const displayName = nameElement ? nameElement.textContent.trim() : '';
+                    
+                    // 详细的搜索匹配逻辑
+                    const matchesAttribute = contactName && contactName.toLowerCase().includes(searchTerm);
+                    const matchesDisplay = displayName.toLowerCase().includes(searchTerm);
+                    const shouldShow = searchTerm === '' || matchesAttribute || matchesDisplay;
+                    
+                    debugInfo.push({
+                        index: index,
+                        contactName: contactName,
+                        displayName: displayName,
+                        matchesAttribute: matchesAttribute,
+                        matchesDisplay: matchesDisplay,
+                        shouldShow: shouldShow
+                    });
+                    
+                    if (shouldShow) {
                         item.style.display = 'flex';
+                        visibleCount++;
                     } else {
                         item.style.display = 'none';
                     }
                 });
+                
+                // 详细的调试输出
+                if (searchTerm !== '') {
+                    console.log('搜索详情:', debugInfo);
+                    console.log(`匹配结果: ${visibleCount}/${contactItems.length} 个联系人`);
+                }
+                
+                // 移除之前的无结果提示
+                const existingNoResult = contactList.querySelector('.no-search-result');
+                if (existingNoResult) {
+                    existingNoResult.remove();
+                }
+                
+                // 如果搜索有内容但无结果，显示提示
+                if (searchTerm !== '' && visibleCount === 0) {
+                    const noResultDiv = document.createElement('div');
+                    noResultDiv.className = 'no-search-result';
+                    noResultDiv.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px; border: 1px dashed #ddd; border-radius: 8px; margin: 10px 0;';
+                    noResultDiv.innerHTML = `
+                        <div style="font-size: 16px; margin-bottom: 8px;">🔍</div>
+                        <div>未找到包含 "<strong>${searchTerm}</strong>" 的联系人</div>
+                        <div style="font-size: 12px; color: #666; margin-top: 4px;">请尝试输入其他关键词</div>
+                    `;
+                    contactList.appendChild(noResultDiv);
+                }
             }
             
             /**
