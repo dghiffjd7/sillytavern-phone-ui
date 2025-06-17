@@ -7373,41 +7373,8 @@
             }
             
             /**
-             * 为群聊添加初始欢迎消息
+             * 为群聊添加初始欢迎消息（已移动到后面，此处删除重复函数）
              */
-             function addGroupWelcomeMessages(groupName, members) {
-                console.log(`addGroupWelcomeMessages (强制覆盖) 被调用: ${groupName}`);
-                
-                if (!QQ_msgjson.群聊[groupName]) {
-                    QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
-                }
-                
-                const groupData = QQ_msgjson.群聊[groupName];
-                
-                console.log(`强制清空群聊 ${groupName} 的旧消息...`);
-                groupData.msgs = [];
-
-                const currentTime = new Date().toLocaleTimeString('zh-CN', { 
-                    hour12: false, 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                });
-                
-                // *** 核心改造：合并欢迎语 ***
-                let welcomeText = `你创建了群聊，并邀请了`;
-                if (members && members.length > 0) {
-                    welcomeText += members.join('、'); // 使用顿号连接成员
-                    welcomeText += ' 加入了群聊。';
-                } else {
-                    welcomeText = '你创建了群聊，开始聊天吧！';
-                }
-
-                // 添加合并后的系统消息
-                const systemMsg = `系统消息--${currentTime}--${welcomeText}`;
-                groupData.msgs.push(systemMsg);
-                
-                console.log(`为群聊 ${groupName} 生成了新的初始消息: ${systemMsg}`);
-            }
             
             function SetCssVariable(name, variable, value) {
                 let cssvalue = $(`style[data-name='${name}']`).text();
@@ -7531,7 +7498,7 @@
              * 为群聊添加初始欢迎消息 (强制覆盖版)
              */
             function addGroupWelcomeMessages(groupName, members) {
-                console.log(`addGroupWelcomeMessages (强制覆盖) 被调用: ${groupName}`);
+                console.log(`addGroupWelcomeMessages 被调用: ${groupName}`);
                 
                 if (!QQ_msgjson.群聊[groupName]) {
                     QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
@@ -7539,9 +7506,11 @@
                 
                 const groupData = QQ_msgjson.群聊[groupName];
                 
-                // *** 核心改动：强制清空消息列表，确保初始消息不被覆盖 ***
-                console.log(`强制清空群聊 ${groupName} 的旧消息...`);
-                groupData.msgs = [];
+                // *** 修复：只有在群聊消息为空时才添加初始消息，避免重复 ***
+                if (groupData.msgs.length > 0) {
+                    console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条消息，跳过添加初始消息`);
+                    return;
+                }
 
                 const currentTime = new Date().toLocaleTimeString('zh-CN', { 
                     hour12: false, 
@@ -12322,32 +12291,16 @@
                         };
                     }
                     
-                    // 新版本：不再从localStorage恢复消息，使用空消息列表
-                    const storedMessages = [];
-                    
-                    // 将存储的消息格式转换为QQ_msgjson格式
-                    const convertedMessages = storedMessages.map(msg => {
-                        return `${msg.sender}--${msg.content}--${msg.timestamp}`;
-                    });
-                    
-                    // 合并消息（避免重复）
-                    const existingMessages = QQ_msgjson.群聊[groupData.name].msgs || [];
-                    const allMessages = [...existingMessages];
-                    
-                    convertedMessages.forEach(newMsg => {
-                        if (!allMessages.includes(newMsg)) {
-                            allMessages.push(newMsg);
-                        }
-                    });
-                    
-                    QQ_msgjson.群聊[groupData.name].msgs = allMessages;
+                    // *** 修复：保持现有消息，不要清空 ***
+                    // 如果QQ_msgjson中已经有消息，保持它们
+                    console.log(`群聊 ${groupData.name} 当前有 ${QQ_msgjson.群聊[groupData.name].msgs.length} 条消息`);
                     
                     // 确保群聊在QQ_Groups数组中
                     if (!QQ_Groups.includes(groupData.name)) {
                         QQ_Groups.push(groupData.name);
                     }
                     
-                    console.log(`恢复群聊数据: ${groupData.name}, 消息数量: ${allMessages.length}`);
+                    console.log(`恢复群聊数据: ${groupData.name}, 消息数量: ${QQ_msgjson.群聊[groupData.name].msgs.length}`);
                 });
             }
             

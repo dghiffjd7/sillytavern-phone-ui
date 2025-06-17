@@ -7565,8 +7565,54 @@
                 const timeMsg = `系统消息--${currentTime}--${currentTime}`;
                 groupData.msgs.push(timeMsg);
                 
+                // *** 新增：立即更新群聊的最后消息和时间显示 ***
+                updateGroupLastMessageDisplay(groupName);
+                
                 console.log(`为群聊 ${groupName} 生成了 ${groupData.msgs.length} 条新的初始消息。`);
             }
+            
+            /**
+             * 更新群聊的最后消息和时间显示
+             */
+            function updateGroupLastMessageDisplay(groupName) {
+                const groupData = QQ_msgjson.群聊[groupName];
+                if (!groupData || !groupData.msgs || groupData.msgs.length === 0) {
+                    return;
+                }
+                
+                // 获取最后一条消息
+                const lastMsgRaw = groupData.msgs[groupData.msgs.length - 1];
+                const msgParts = lastMsgRaw.split('--');
+                
+                if (msgParts.length >= 3) {
+                    const sender = msgParts[0];
+                    const content = msgParts[1];
+                    const time = msgParts[2] || '';
+                    
+                    let displayMsg = content;
+                    let displayTime = time;
+                    
+                    // 如果是系统消息，直接显示内容
+                    if (sender === '系统消息') {
+                        displayMsg = content;
+                    } else {
+                        // 如果是用户消息，显示为 "发送者: 内容"
+                        displayMsg = `${sender}: ${content}`;
+                    }
+                    
+                    // 限制消息长度避免界面过宽
+                    if (displayMsg.length > 20) {
+                        displayMsg = displayMsg.substring(0, 20) + '...';
+                    }
+                    
+                    // 更新界面显示
+                    $(`.QQ_home_usermsg[data-name='${groupName}'] .QQ_home_lastmsg`).text(displayMsg);
+                    $(`.QQ_home_usermsg[data-name='${groupName}'] .QQ_home_lasttime`).text(displayTime);
+                    
+                    console.log(`群聊 ${groupName} 最后消息已更新: ${displayMsg} (${displayTime})`);
+                }
+            }
+            
             function getFilenameWithoutExtension(path) {
                 // 解码URI组件（处理特殊字符）
                 const decodedPath = decodeURIComponent(path);
@@ -8454,6 +8500,9 @@
                         //         loadGroupChatHistory(currentGroup.id);
                         //     }, 100);
                         // }
+                        
+                        // 更新群聊的最后消息显示
+                        updateGroupLastMessageDisplay(name);
                         
                         // 群聊消息更新时也更新消息列表
                         QQ_UpdateMessageList();
