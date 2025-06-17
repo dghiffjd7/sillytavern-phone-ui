@@ -10116,12 +10116,12 @@
                     
                     console.log('当前entries:', typeof entries, entries ? entries.length : 'undefined');
 
-                    // 查找所有群聊条目
-                    const groupEntries = entries.filter(e => e.comment === "手机-群聊");
-                    console.log('找到的"手机-群聊"条目数量:', groupEntries.length);
+                    // 查找所有群聊条目 - 使用唯一comment前缀查找
+                    const groupEntries = entries.filter(e => e.comment && e.comment.startsWith("手机-群聊-"));
+                    console.log('找到的群聊条目数量:', groupEntries.length);
                     
                     if (groupEntries.length === 0) {
-                        console.log('没有找到"手机-群聊"条目，函数执行结束');
+                        console.log('没有找到群聊条目，函数执行结束');
                         return groups; // 既然没有群聊，就直接返回
                     }
                     
@@ -11849,9 +11849,9 @@
                         console.log('创建新的独立群聊条目');
                         
                         // 使用正确的createLorebookEntry函数，遵循项目标准设定
-                        console.log('准备调用createLorebookEntry，参数:', { worldbook, groupEntryKey, groupContent });
+                        console.log('准备调用createLorebookEntry，参数:', { worldbook, uniqueComment, groupContent });
                         const createResult = await createLorebookEntry(worldbook, {
-                            comment: "手机-群聊",
+                            comment: uniqueComment, // 使用唯一的comment标识群聊
                             key: ["此世界书永不触发"], // 使用标准的永不触发关键词，与手机-角色保持一致
                             content: groupContent,
                             position: "at_depth_as_system",
@@ -11877,7 +11877,7 @@
                     // 验证条目是否真的被添加了
                     console.log('验证：重新获取世界书条目...');
                     const updatedEntries = await getLorebookEntries(worldbook);
-                    const verifyEntry = updatedEntries.find(e => e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`));
+                    const verifyEntry = updatedEntries.find(e => e.comment === uniqueComment);
                     console.log('验证结果 - 找到新条目:', !!verifyEntry);
                     if (verifyEntry) {
                         console.log('新条目内容:', verifyEntry.content);
@@ -11905,13 +11905,13 @@
                 try {
                     console.log('更新群聊成员到独立世界书条目:', groupName, members);
                     
-                    // 查找对应的群聊条目
+                    // 查找对应的群聊条目 - 使用唯一comment查找
                     let groupEntry = null;
-                    const groupEntryKey = `手机-群聊-${groupName}`;
+                    const uniqueComment = `手机-群聊-${groupName}`;
                     
                     if (entries) {
                         groupEntry = entries.find(e => 
-                            e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)
+                            e.comment === uniqueComment
                         );
                     }
                     
@@ -11964,11 +11964,13 @@
                 try {
                     console.log('更新群聊名称到世界书（简化版）:', oldName, '->', newName);
                     
-                    // 1. 查找旧群聊条目
+                    // 1. 查找旧群聊条目 - 使用唯一comment查找
                     let oldGroupEntry = null;
+                    const oldUniqueComment = `手机-群聊-${oldName}`;
+                    
                     if (entries) {
                         oldGroupEntry = entries.find(e => 
-                            e.comment === "手机-群聊" && e.content && e.content.includes(`[${oldName}]`)
+                            e.comment === oldUniqueComment
                         );
                     }
                     
@@ -11976,7 +11978,7 @@
                         console.error('在世界书中未找到群聊条目:', oldName);
                         console.error('当前所有群聊相关条目:');
                         if (entries) {
-                            entries.filter(e => e.comment === "手机-群聊").forEach((e, i) => {
+                            entries.filter(e => e.comment.startsWith("手机-群聊")).forEach((e, i) => {
                                 console.error(`群聊条目 ${i}:`, {
                                     uid: e.uid,
                                     key: e.key,
@@ -12001,17 +12003,20 @@
 成员=${backupMembers}
 头像=${backupAvatar}`;
                     
-                    // 4. 直接在原条目上更新内容和key（避免创建新条目的复杂性）
+                    // 4. 直接在原条目上更新内容、comment和key（避免创建新条目的复杂性）
+                    const newUniqueComment = `手机-群聊-${newName}`;
                     const newGroupEntryKey = `手机-群聊-${newName}`;
                     
                     console.log('直接更新现有条目:', oldGroupEntry.uid);
+                    console.log('新comment:', newUniqueComment);
                     console.log('新key:', [newGroupEntryKey]);
                     console.log('新内容:', newContent.substring(0, 100) + '...');
                     
-                    // 使用setLorebookEntries更新现有条目
+                    // 使用setLorebookEntries更新现有条目的comment、key和content
                     await setLorebookEntries(worldbook, [
                         {
                             uid: oldGroupEntry.uid,
+                            comment: newUniqueComment,
                             key: [newGroupEntryKey],
                             content: newContent
                         }
@@ -12054,13 +12059,13 @@
                 try {
                     console.log('开始从独立世界书条目中删除群聊:', groupName);
                     
-                    // 查找对应的群聊条目
+                    // 查找对应的群聊条目 - 使用唯一comment查找
                     let groupEntry = null;
                     let groupIndex = -1;
-                    const groupEntryKey = `手机-群聊-${groupName}`;
+                    const uniqueComment = `手机-群聊-${groupName}`;
                     
                     if (entries) {
-                        groupIndex = entries.findIndex(e => e.key === groupEntryKey || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)));
+                        groupIndex = entries.findIndex(e => e.comment === uniqueComment);
                         if (groupIndex >= 0) {
                             groupEntry = entries[groupIndex];
                         }
@@ -12655,8 +12660,9 @@
                     return null;
                 }
                 
+                const uniqueComment = `手机-群聊-${groupName}`;
                 const groupEntry = entries.find(e => 
-                    e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupName}]`)
+                    e.comment === uniqueComment
                 );
                 
                 if (!groupEntry) {
@@ -14419,9 +14425,10 @@
                         }
                     }
                     
-                    // 查找现有的群聊条目
+                    // 查找现有的群聊条目 - 使用唯一comment查找
+                    const uniqueComment = `手机-群聊-${groupData.name}`;
                     let groupEntry = entries.find(e => 
-                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)
+                        e.comment === uniqueComment
                     );
                     
                     // 处理头像引用
