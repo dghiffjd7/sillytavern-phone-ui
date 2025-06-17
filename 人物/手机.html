@@ -12885,19 +12885,65 @@
             }
             
             /**
-             * 加载群聊消息历史
+             * 加载群聊消息历史（增强版：支持系统消息）
              */
             function loadGroupChatHistory(groupId) {
-                // 这里可以从本地存储或服务器加载群聊的消息历史
-                // 暂时显示欢迎消息
+                console.log('加载群聊消息历史:', groupId);
+                
                 const chatContainer = document.querySelector('#QQ_chat_msgs');
-                if (chatContainer) {
-                    chatContainer.innerHTML = `
-                        <div class="system-message" style="text-align: center; color: #999; margin: 20px 0; font-size: 14px;">
-                            欢迎来到群聊！开始聊天吧～
-                        </div>
-                    `;
+                if (!chatContainer) {
+                    console.error('找不到聊天消息容器');
+                    return;
                 }
+                
+                // 清空现有消息
+                chatContainer.innerHTML = '';
+                
+                // 检查是否有保存的群聊消息
+                if (window.groupChatMessages && window.groupChatMessages[groupId]) {
+                    const messages = window.groupChatMessages[groupId];
+                    console.log(`群聊 ${groupId} 有 ${messages.length} 条消息`);
+                    
+                    // 显示所有消息（包括系统消息）
+                    messages.forEach(message => {
+                        if (message.type === 'system') {
+                            // 显示系统消息
+                            const systemMsgDiv = document.createElement('div');
+                            systemMsgDiv.className = 'system-message';
+                            systemMsgDiv.style.cssText = `
+                                text-align: center;
+                                color: #999;
+                                font-size: 12px;
+                                margin: 10px 0;
+                                padding: 5px;
+                                line-height: 1.4;
+                            `;
+                            systemMsgDiv.textContent = message.content;
+                            chatContainer.appendChild(systemMsgDiv);
+                        } else {
+                            // 显示普通消息（这里可以扩展更多消息类型）
+                            console.log('显示普通消息:', message);
+                            // TODO: 添加普通消息显示逻辑
+                        }
+                    });
+                }
+                
+                // 如果没有消息，显示欢迎消息
+                if (chatContainer.children.length === 0) {
+                    const welcomeDiv = document.createElement('div');
+                    welcomeDiv.className = 'system-message';
+                    welcomeDiv.style.cssText = `
+                        text-align: center;
+                        color: #999;
+                        margin: 20px 0;
+                        font-size: 14px;
+                    `;
+                    welcomeDiv.textContent = '欢迎来到群聊！开始聊天吧～';
+                    chatContainer.appendChild(welcomeDiv);
+                }
+                
+                // 滚动到底部
+                chatContainer.scrollTop = chatContainer.scrollHeight;
             }
 
             // ==================== 群聊隔离功能 ====================
@@ -13624,6 +13670,14 @@
                         // 更新到世界书
                         await updateGroupMembersInWorldbook(currentManagingGroup.name, currentManagingGroup.members);
                         
+                        // *** 新增：添加系统消息 ***
+                        const changes = [{
+                            type: 'remove_member',
+                            operator: '群主',
+                            oldValue: memberName
+                        }];
+                        await addSystemMessagesForChanges(currentManagingGroup.id, changes);
+                        
                         // 重新生成成员列表
                         showGroupSettings();
                     }
@@ -13679,9 +13733,20 @@
                 // 保存旧的信息
                 const oldName = currentManagingGroup.name;
                 const oldId = currentManagingGroup.id;
+                const oldAvatar = currentManagingGroup.avatar;
+                
+                // 记录变更类型
+                const changes = [];
                 
                 // 更新群聊名称
-                currentManagingGroup.name = newName;
+                if (newName !== oldName) {
+                    currentManagingGroup.name = newName;
+                    changes.push({
+                        type: 'name',
+                        oldValue: oldName,
+                        newValue: newName
+                    });
+                }
                 
                 // *** 修复：更新头像信息 ***
                 if (window.selectedAvatarData) {
@@ -13692,6 +13757,12 @@
                     if (window.selectedAvatarData.type === 'upload' && window.selectedAvatarData.imageData) {
                         currentManagingGroup.avatarUrl = window.selectedAvatarData.imageData;
                     }
+                    
+                    changes.push({
+                        type: 'avatar',
+                        oldValue: oldAvatar,
+                        newValue: window.selectedAvatarData
+                    });
                 }
                 
                 // 更新到世界书
@@ -13726,12 +13797,15 @@
                 // 清空选中的头像数据
                 window.selectedAvatarData = null;
                 
-                console.log(`群聊设置已保存并立即生效: ${oldName} -> ${newName}`);
+                console.log(`群聊设置已保存: ${oldName} -> ${newName}`);
+                
+                // *** 新增：添加系统消息通知群聊变更 ***
+                await addSystemMessagesForChanges(currentManagingGroup.id, changes);
                 
                 // *** 新增：自动重新加载界面数据，保持消息内容不丢失 ***
                 await autoReloadInterfaceAfterGroupUpdate(currentManagingGroup);
                 
-                alert('群聊设置已保存并立即生效');
+                alert('群聊设置已保存');
                 closeGroupSettings();
             }
             
@@ -13849,121 +13923,277 @@
             }
             
             /**
-             * 群聊设置更新后自动重新加载界面数据（保持消息内容）
+             * 群聊设置更新后自动重新加载界面数据（简化版：避免重复群聊）
              */
             async function autoReloadInterfaceAfterGroupUpdate(updatedGroupData) {
-                console.log('=== 开始自动重新加载界面数据 ===');
+                console.log('=== 开始自动更新界面显示 ===');
                 console.log('更新的群聊数据:', updatedGroupData);
                 
                 try {
-                    // 1. 保存当前消息状态（确保消息不丢失）
-                    const currentMessages = {};
-                    const currentGroupMessages = {};
-                    
-                    // 保存个人聊天消息
-                    if (window.msgjson && window.msgjson.data) {
-                        currentMessages = JSON.parse(JSON.stringify(window.msgjson.data));
-                        console.log('已保存个人聊天消息数据');
-                    }
-                    
-                    // 保存群聊消息
-                    if (window.groupChatMessages) {
-                        currentGroupMessages = JSON.parse(JSON.stringify(window.groupChatMessages));
-                        console.log('已保存群聊消息数据');
-                    }
-                    
-                    // 2. 重新从世界书加载群聊数据
-                    console.log('重新从世界书加载群聊数据...');
-                    await loadGroupChatsFromWorldbook();
-                    
-                    // 3. 恢复消息数据（确保消息不丢失）
-                    if (currentMessages && Object.keys(currentMessages).length > 0) {
-                        window.msgjson = window.msgjson || {};
-                        window.msgjson.data = currentMessages;
-                        console.log('已恢复个人聊天消息数据');
-                    }
-                    
-                    if (currentGroupMessages && Object.keys(currentGroupMessages).length > 0) {
-                        window.groupChatMessages = currentGroupMessages;
-                        console.log('已恢复群聊消息数据');
-                    }
-                    
-                    // 4. 重新加载和显示群聊列表
-                    console.log('重新加载和显示群聊列表...');
+                    // 1. 直接更新现有的群聊元素，而不重新加载
+                    console.log('直接更新现有群聊元素...');
                     await refreshGroupChatsDisplay();
                     
-                    // 6. 如果当前在群聊界面，重新加载消息显示
+                    // 2. 如果当前在群聊界面，更新头部显示
                     if (window.currentGroupChat && window.currentGroupChat.id === updatedGroupData.id) {
-                        console.log('重新加载当前群聊消息显示...');
+                        console.log('更新当前群聊界面头部...');
                         // 更新当前群聊对象
                         window.currentGroupChat.name = updatedGroupData.name;
                         window.currentGroupChat.avatar = updatedGroupData.avatar;
                         window.currentGroupChat.avatarUrl = updatedGroupData.avatarUrl;
                         
-                        // 重新加载消息显示（保持消息内容）
-                        loadGroupChatHistory(updatedGroupData.id);
-                        
                         // 更新聊天头部
                         updateChatHeader(updatedGroupData);
                     }
                     
-                    // 7. 更新最后消息显示
+                    // 3. 更新最后消息显示
                     console.log('更新群聊最后消息显示...');
                     updateGroupLastMessageDisplay();
                     
-                    console.log('=== 自动重新加载界面数据完成 ===');
+                    console.log('=== 界面显示更新完成 ===');
                     
                 } catch (error) {
-                    console.error('自动重新加载界面数据时出错:', error);
-                    alert('界面更新时出现问题，但数据已保存。建议手动刷新页面。');
+                    console.error('更新界面显示时出错:', error);
+                    alert('界面更新时出现问题，建议手动刷新页面。');
                 }
             }
             
             /**
-             * 刷新群聊显示（保持消息内容）
+             * 刷新群聊显示（修复版：防止重复群聊，正确应用头像）
              */
             async function refreshGroupChatsDisplay() {
-                console.log('刷新群聊显示...');
+                console.log('刷新群聊显示（修复版）...');
                 
                 try {
-                    // 移除现有的群聊元素，但保留个人聊天
-                    const contactsContainer = document.getElementById('QQ_home_chars');
-                    const messagesContainer = document.getElementById('QQ_message_list_chars');
-                    
-                    if (contactsContainer) {
-                        // 移除群聊元素
-                        const groupElements = contactsContainer.querySelectorAll('[data-group-id]');
-                        groupElements.forEach(el => el.remove());
-                    }
-                    
-                    if (messagesContainer) {
-                        // 移除群聊元素
-                        const groupElements = messagesContainer.querySelectorAll('[data-group-id]');
-                        groupElements.forEach(el => el.remove());
-                    }
-                    
-                    // 重新使用AddNewGroup函数添加所有群聊
-                    if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
-                        for (const groupData of window.QQ_Groups) {
-                            if (groupData && groupData.name) {
-                                console.log('重新添加群聊:', groupData.name);
-                                AddNewGroup(
-                                    groupData.name, 
-                                    groupData.avatar || groupData.avatarUrl || 'https://files.catbox.moe/skngqq.jpg', 
-                                    groupData.members || [], 
-                                    groupData.description || `${groupData.members?.length || 0}人群聊`
-                                );
-                            }
-                        }
-                    }
+                    // 不要重新从世界书加载，直接使用当前的QQ_Groups数据
+                    // 清理和重新显示现有的群聊元素
+                    await updateExistingGroupElements();
                     
                     console.log('群聊显示刷新完成');
                     
                 } catch (error) {
                     console.error('刷新群聊显示时出错:', error);
-                    // 降级方案：简单地重新初始化增强功能
-                    console.log('使用降级方案：重新初始化增强功能');
-                    setTimeout(initializeEnhancedFeatures, 500);
+                    alert('界面更新时出现问题，建议手动刷新页面。');
+                }
+            }
+            
+            /**
+             * 更新现有群聊元素而不重新创建
+             */
+            async function updateExistingGroupElements() {
+                console.log('更新现有群聊元素...');
+                
+                const contactsContainer = document.getElementById('QQ_home_chars');
+                const messagesContainer = document.getElementById('QQ_message_list_chars');
+                
+                // 更新联系人列表中的群聊
+                if (contactsContainer && window.QQ_Groups) {
+                    for (const groupData of window.QQ_Groups) {
+                        if (groupData && groupData.name) {
+                            const existingElement = contactsContainer.querySelector(`[data-group-id="${groupData.id}"]`);
+                            if (existingElement) {
+                                console.log('更新现有群聊元素:', groupData.name);
+                                updateGroupElement(existingElement, groupData);
+                            } else {
+                                console.log('群聊元素不存在，需要等待自然重新加载');
+                            }
+                        }
+                    }
+                }
+                
+                // 更新消息列表中的群聊
+                if (messagesContainer && window.QQ_Groups) {
+                    for (const groupData of window.QQ_Groups) {
+                        if (groupData && groupData.name) {
+                            const existingElement = messagesContainer.querySelector(`[data-group-id="${groupData.id}"]`);
+                            if (existingElement) {
+                                console.log('更新消息列表中的群聊元素:', groupData.name);
+                                updateGroupElement(existingElement, groupData);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            /**
+             * 更新群聊元素的名称和头像
+             */
+            function updateGroupElement(element, groupData) {
+                try {
+                    // 更新群聊名称
+                    const nameElement = element.querySelector('.QQ_home_name');
+                    if (nameElement) {
+                        nameElement.textContent = groupData.name;
+                    }
+                    
+                    // 更新群聊头像
+                    const avatarElement = element.querySelector('.QQ_home_head');
+                    if (avatarElement && groupData.avatar) {
+                        console.log('应用群聊头像:', groupData.name, groupData.avatar);
+                        
+                        if (groupData.avatar.type === 'preset') {
+                            // 预设头像
+                            avatarElement.style.background = `linear-gradient(135deg, ${groupData.avatar.gradient.start}, ${groupData.avatar.gradient.end})`;
+                            avatarElement.style.backgroundImage = 'none';
+                            avatarElement.style.color = 'white';
+                            avatarElement.style.display = 'flex';
+                            avatarElement.style.alignItems = 'center';
+                            avatarElement.style.justifyContent = 'center';
+                            avatarElement.style.fontWeight = 'bold';
+                            avatarElement.textContent = groupData.avatar.text || '群';
+                        } else if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                            // 上传的头像
+                            avatarElement.style.background = 'none';
+                            avatarElement.style.backgroundImage = `url('${groupData.avatar.imageData}')`;
+                            avatarElement.style.backgroundSize = 'cover';
+                            avatarElement.style.backgroundPosition = 'center';
+                            avatarElement.style.backgroundRepeat = 'no-repeat';
+                            avatarElement.textContent = '';
+                        } else if (typeof groupData.avatar === 'string' && groupData.avatar.startsWith('data:')) {
+                            // 直接的base64字符串
+                            avatarElement.style.background = 'none';
+                            avatarElement.style.backgroundImage = `url('${groupData.avatar}')`;
+                            avatarElement.style.backgroundSize = 'cover';
+                            avatarElement.style.backgroundPosition = 'center';
+                            avatarElement.style.backgroundRepeat = 'no-repeat';
+                            avatarElement.textContent = '';
+                        } else if (typeof groupData.avatar === 'string' && (groupData.avatar.startsWith('http://') || groupData.avatar.startsWith('https://'))) {
+                            // 网络图片URL
+                            avatarElement.style.background = 'none';
+                            avatarElement.style.backgroundImage = `url('${groupData.avatar}')`;
+                            avatarElement.style.backgroundSize = 'cover';
+                            avatarElement.style.backgroundPosition = 'center';
+                            avatarElement.style.backgroundRepeat = 'no-repeat';
+                            avatarElement.textContent = '';
+                        } else {
+                            // 默认头像
+                            avatarElement.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
+                            avatarElement.style.backgroundImage = 'none';
+                            avatarElement.style.color = 'white';
+                            avatarElement.style.display = 'flex';
+                            avatarElement.style.alignItems = 'center';
+                            avatarElement.style.justifyContent = 'center';
+                            avatarElement.style.fontWeight = 'bold';
+                            avatarElement.textContent = '群';
+                        }
+                    }
+                    
+                    console.log('群聊元素更新完成:', groupData.name);
+                } catch (error) {
+                    console.error('更新群聊元素时出错:', error);
+                }
+            }
+            
+            /**
+             * 添加系统消息到群聊（灰色小字）
+             */
+            async function addSystemMessageToGroup(groupId, systemMessage) {
+                console.log('添加系统消息到群聊:', { groupId, systemMessage });
+                
+                try {
+                    // 确保群聊消息数组存在
+                    if (!window.groupChatMessages) {
+                        window.groupChatMessages = {};
+                    }
+                    if (!window.groupChatMessages[groupId]) {
+                        window.groupChatMessages[groupId] = [];
+                    }
+                    
+                    // 创建系统消息对象
+                    const systemMessageObj = {
+                        id: 'system_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        type: 'system',
+                        content: systemMessage,
+                        timestamp: new Date().toISOString(),
+                        sender: 'system'
+                    };
+                    
+                    // 添加到群聊消息数组
+                    window.groupChatMessages[groupId].push(systemMessageObj);
+                    
+                    // 如果当前正在查看这个群聊，立即显示系统消息
+                    if (window.currentGroupChat && window.currentGroupChat.id === groupId) {
+                        displaySystemMessage(systemMessage);
+                    }
+                    
+                    console.log('系统消息已添加到群聊');
+                    
+                } catch (error) {
+                    console.error('添加系统消息时出错:', error);
+                }
+            }
+            
+            /**
+             * 在聊天界面显示系统消息（灰色小字）
+             */
+            function displaySystemMessage(message) {
+                try {
+                    const msgContent = document.querySelector('.msgcontent');
+                    if (!msgContent) {
+                        console.log('找不到消息容器，无法显示系统消息');
+                        return;
+                    }
+                    
+                    // 创建系统消息元素
+                    const systemMsgDiv = document.createElement('div');
+                    systemMsgDiv.className = 'system-message';
+                    systemMsgDiv.style.cssText = `
+                        text-align: center;
+                        color: #999;
+                        font-size: 12px;
+                        margin: 10px 0;
+                        padding: 5px;
+                        line-height: 1.4;
+                    `;
+                    systemMsgDiv.textContent = message;
+                    
+                    // 添加到消息容器末尾
+                    msgContent.appendChild(systemMsgDiv);
+                    
+                    // 滚动到底部
+                    msgContent.scrollTop = msgContent.scrollHeight;
+                    
+                    console.log('系统消息已显示:', message);
+                    
+                } catch (error) {
+                    console.error('显示系统消息时出错:', error);
+                }
+            }
+            
+            /**
+             * 为群聊变更添加系统消息
+             */
+            async function addSystemMessagesForChanges(groupId, changes) {
+                if (!changes || changes.length === 0) {
+                    return;
+                }
+                
+                console.log('为群聊变更添加系统消息:', { groupId, changes });
+                
+                for (const change of changes) {
+                    let systemMessage = '';
+                    
+                    switch (change.type) {
+                        case 'name':
+                            systemMessage = `群聊名称已更改为"${change.newValue}"`;
+                            break;
+                        case 'avatar':
+                            systemMessage = `群主已更改群头像`;
+                            break;
+                        case 'add_member':
+                            systemMessage = `${change.operator}邀请${change.newValue}加入群聊`;
+                            break;
+                        case 'remove_member':
+                            systemMessage = `${change.operator}将${change.oldValue}移出群聊`;
+                            break;
+                        default:
+                            systemMessage = `群聊设置已更新`;
+                            break;
+                    }
+                    
+                    if (systemMessage) {
+                        await addSystemMessageToGroup(groupId, systemMessage);
+                    }
                 }
             }
             
@@ -14536,22 +14766,37 @@
             /**
              * 确认添加成员
              */
-            function confirmAddMembers() {
+            async function confirmAddMembers() {
                 if (!currentManagingGroup || !window.selectedMembersToAdd || window.selectedMembersToAdd.length === 0) {
                     return;
                 }
                 
                 console.log('添加成员到群聊:', window.selectedMembersToAdd);
                 
+                // 记录要添加的新成员（用于系统消息）
+                const newMembers = [];
+                
                 // 将选中的成员添加到群聊
                 window.selectedMembersToAdd.forEach(memberName => {
                     if (!currentManagingGroup.members.includes(memberName)) {
                         currentManagingGroup.members.push(memberName);
+                        newMembers.push(memberName);
                     }
                 });
                 
                 // 保存到本地存储
                 saveGroupToStorage(currentManagingGroup);
+                
+                // *** 新增：更新到世界书 ***
+                await updateGroupMembersInWorldbook(currentManagingGroup.name, currentManagingGroup.members);
+                
+                // *** 新增：为每个新成员添加系统消息 ***
+                const changes = newMembers.map(memberName => ({
+                    type: 'add_member',
+                    operator: '群主',
+                    newValue: memberName
+                }));
+                await addSystemMessagesForChanges(currentManagingGroup.id, changes);
                 
                 // 更新界面显示
                 updateGroupInAllLists(currentManagingGroup);
@@ -14562,8 +14807,8 @@
                     updateChatHeader(currentManagingGroup);
                 }
                 
-                console.log(`已添加 ${window.selectedMembersToAdd.length} 个成员到群聊`);
-                alert(`已添加 ${window.selectedMembersToAdd.length} 个成员到群聊`);
+                console.log(`已添加 ${newMembers.length} 个新成员到群聊`);
+                alert(`已添加 ${newMembers.length} 个成员到群聊`);
                 
                 // 关闭模态窗口
                 closeAddMemberModal();
