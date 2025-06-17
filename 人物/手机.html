@@ -11976,7 +11976,18 @@
                     
                     if (!oldGroupEntry) {
                         console.error('在世界书中未找到群聊条目:', oldName);
-                        return false;
+                        console.error('当前所有群聊相关条目:');
+                        if (entries) {
+                            entries.filter(e => e.comment === "手机-群聊").forEach((e, i) => {
+                                console.error(`群聊条目 ${i}:`, {
+                                    uid: e.uid,
+                                    key: e.key,
+                                    comment: e.comment,
+                                    content: e.content?.substring(0, 100) + '...'
+                                });
+                            });
+                        }
+                        throw new Error(`找不到要更新的群聊条目: ${oldName}`);
                     }
                     
                     // 2. 备份旧条目的所有信息
@@ -12031,13 +12042,66 @@
                     await setLorebookEntries(worldbook, [newEntry]);
                     console.log('新群聊条目创建成功');
                     
-                    // 5. 重新加载entries以确认新条目创建成功
-                    entries = await getLorebookEntries(worldbook);
-                    const createdEntry = entries.find(e => 
-                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${newName}]`)
-                    );
+                    // 5. 重新加载entries以确认新条目创建成功（带重试机制）
+                    let createdEntry = null;
+                    let retryCount = 0;
+                    const maxRetries = 3;
+                    
+                    while (!createdEntry && retryCount < maxRetries) {
+                        retryCount++;
+                        console.log(`第${retryCount}次尝试查找新创建的条目...`);
+                        
+                        // 等待一段时间让世界书同步
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                        // 重新加载entries
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('当前世界书条目数量:', entries.length);
+                        
+                        // 查找新条目（使用多种查找条件）
+                        createdEntry = entries.find(e => {
+                            // 条件1：通过comment和content查找
+                            const byCommentAndContent = e.comment === "手机-群聊" && e.content && e.content.includes(`[${newName}]`);
+                            
+                            // 条件2：通过key查找
+                            const byKey = e.key && Array.isArray(e.key) && e.key.includes(newGroupEntryKey);
+                            
+                            // 条件3：通过key字符串查找
+                            const byKeyString = e.key === newGroupEntryKey;
+                            
+                            if (byCommentAndContent || byKey || byKeyString) {
+                                console.log('找到新条目，匹配条件:', {
+                                    byCommentAndContent,
+                                    byKey,
+                                    byKeyString,
+                                    entryKey: e.key,
+                                    entryComment: e.comment,
+                                    entryContent: e.content?.substring(0, 100) + '...'
+                                });
+                                return true;
+                            }
+                            return false;
+                        });
+                        
+                        if (!createdEntry && retryCount < maxRetries) {
+                            console.log(`第${retryCount}次查找失败，继续重试...`);
+                        }
+                    }
                     
                     if (!createdEntry) {
+                        // 打印详细的调试信息
+                        console.error('所有重试都失败，详细调试信息：');
+                        console.error('查找的群聊名称:', newName);
+                        console.error('查找的条目key:', newGroupEntryKey);
+                        console.error('当前所有条目:');
+                        entries.forEach((e, i) => {
+                            console.error(`条目 ${i}:`, {
+                                uid: e.uid,
+                                key: e.key,
+                                comment: e.comment,
+                                content: e.content?.substring(0, 50) + '...'
+                            });
+                        });
                         throw new Error('新条目创建后未能找到，创建可能失败');
                     }
                     
