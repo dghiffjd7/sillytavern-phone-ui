@@ -13900,34 +13900,68 @@
             }
             
             /**
-             * 保存群聊到世界书的通用函数
+             * 保存群聊到世界书的通用函数（修复版）
              */
             async function saveGroupToWorldbook(groupData) {
                 console.log('保存群聊到世界书:', groupData);
                 
                 try {
-                    // 构建群聊内容
-                    let content = `[${groupData.name}]\n`;
-                    content += `成员=${groupData.members.join(',')}\n`;
-                    
-                    // 处理头像信息
-                    if (groupData.avatar) {
-                        if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
-                            content += `头像=${groupData.avatar.imageData}\n`;
-                        } else if (groupData.avatar.type === 'preset') {
-                            content += `头像=预设:${groupData.avatar.text || '群'}\n`;
+                    // 如果entries未定义，先初始化它
+                    if (!entries) {
+                        console.log('entries未定义，正在初始化...');
+                        if (!worldbook) {
+                            console.error('worldbook未定义，无法初始化entries');
+                            return false;
                         }
-                    } else if (groupData.avatarUrl) {
-                        content += `头像=${groupData.avatarUrl}\n`;
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries初始化完成，条目数量:', entries ? entries.length : 'failed');
+                        if (!entries) {
+                            console.error('entries初始化失败');
+                            return false;
+                        }
                     }
                     
-                    content += `ID=${groupData.id}\n`;
-                    content += `创建时间=${groupData.createdAt || new Date().toISOString()}`;
+                    // 查找现有的群聊条目
+                    let groupEntry = entries.find(e => 
+                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)
+                    );
                     
-                    // 更新世界书条目
-                    await updateWorldbookEntry(`手机-群聊-${groupData.name}`, content);
+                    // 处理头像引用
+                    let avatarReference = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                    if (groupData.avatar) {
+                        if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                            avatarReference = groupData.avatar.imageData;
+                        } else if (groupData.avatar.type === 'preset') {
+                            avatarReference = `预设:${groupData.avatar.text || '群'}`;
+                        } else if (groupData.avatar.type === 'url' && groupData.avatar.url) {
+                            avatarReference = groupData.avatar.url;
+                        }
+                    } else if (groupData.avatarUrl) {
+                        avatarReference = groupData.avatarUrl;
+                    }
                     
-                    console.log('群聊已保存到世界书');
+                    // 构建群聊内容
+                    const groupContent = `[${groupData.name}]
+类型=群聊
+成员=${groupData.members.join(',')}
+头像=${avatarReference}`;
+                    
+                    if (groupEntry) {
+                        // 更新现有条目
+                        console.log('更新现有群聊条目:', groupEntry.uid);
+                        await setLorebookEntries(worldbook, [
+                            {
+                                uid: groupEntry.uid,
+                                content: groupContent,
+                            }
+                        ]);
+                        console.log('群聊已保存到世界书');
+                    } else {
+                        console.error('未找到群聊条目，无法保存');
+                        return false;
+                    }
+                    
+                    return true;
                 } catch (error) {
                     console.error('保存群聊到世界书失败:', error);
                     throw error;
