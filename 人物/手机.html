@@ -14065,10 +14065,69 @@
                     console.log(`已更新联系人列表data-name: ${oldName} -> ${newName}`);
                 }
                 
-                // *** 核心修复2：超强制立即更新当前聊天界面 ***
-                // 不再依赖检测，直接强制更新所有可能的界面
-                let shouldUpdateChatInterface = true; // 强制设为true
-                console.log('*** 启动超强制界面更新模式 - 不依赖检测逻辑 ***');
+                // *** 核心修复2：智能强制更新当前聊天界面（安全版本） ***
+                let shouldUpdateChatInterface = false;
+                let updateReason = '';
+                
+                // 安全检测1：检查window.currentGroupChat是否匹配
+                if (window.currentGroupChat && window.currentGroupChat.id === stableGroupId) {
+                    shouldUpdateChatInterface = true;
+                    updateReason = '检测到currentGroupChat匹配目标群聊';
+                }
+                
+                // 安全检测2：检查当前可见页面是否为目标群聊
+                if (!shouldUpdateChatInterface) {
+                    const visibleChatPages = document.querySelectorAll('.QQ_chat_page');
+                    for (const chatPage of visibleChatPages) {
+                        const style = window.getComputedStyle(chatPage);
+                        if (style.display !== 'none') {
+                            // 检查页面中的群聊标识
+                            const groupIndicators = chatPage.querySelectorAll('[data-group-name], [data-group-id]');
+                            for (const indicator of groupIndicators) {
+                                const groupName = indicator.getAttribute('data-group-name');
+                                const groupId = indicator.getAttribute('data-group-id');
+                                if (groupName === currentManagingGroup.name || groupName === oldName || groupId === stableGroupId) {
+                                    shouldUpdateChatInterface = true;
+                                    updateReason = `检测到群聊标识匹配: ${groupName || groupId}`;
+                                    break;
+                                }
+                            }
+                            if (shouldUpdateChatInterface) break;
+                            
+                            // 检查页面标题是否匹配群聊名称
+                            const nameElements = chatPage.querySelectorAll('.QQ_home_name');
+                            for (const nameEl of nameElements) {
+                                const text = nameEl.textContent.trim();
+                                if (text === currentManagingGroup.name || text === oldName) {
+                                    // 额外检查：确保这不是私聊（私聊通常没有成员列表）
+                                    const memberCount = chatPage.querySelector('.QQ_home_count');
+                                    if (memberCount || currentManagingGroup.members.length > 2) {
+                                        shouldUpdateChatInterface = true;
+                                        updateReason = `检测到群聊标题匹配，且有成员信息: ${text}`;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (shouldUpdateChatInterface) break;
+                        }
+                    }
+                }
+                
+                // 安全检测3：检查是否刚从群聊设置返回（最后的保险措施）
+                if (!shouldUpdateChatInterface && currentManagingGroup) {
+                    // 检查最近是否有群聊设置操作痕迹
+                    const settingsModal = document.querySelector('.group_settings_modal, [class*="setting"], [class*="modal"]');
+                    if (!settingsModal || window.getComputedStyle(settingsModal).display === 'none') {
+                        // 设置弹窗已关闭，可能是刚保存完毕
+                        const hasGroupMessages = window.groupChatMessages && window.groupChatMessages[stableGroupId];
+                        if (hasGroupMessages) {
+                            shouldUpdateChatInterface = true;
+                            updateReason = '检测到群聊设置操作后返回，且有群聊消息记录';
+                        }
+                    }
+                }
+                
+                console.log(`界面更新决策: ${shouldUpdateChatInterface}, 原因: ${updateReason}`);
                 
                 if (shouldUpdateChatInterface) {
                     console.log('*** 强制立即更新聊天界面显示 ***');
@@ -14082,13 +14141,46 @@
                         window.currentGroupChat.id = stableGroupId;
                     }
                     
-                    // *** 强制更新所有可能的聊天界面头部 ***
+                    // *** 安全更新：只更新匹配的群聊界面头部 ***
                     const allChatPages = document.querySelectorAll('.QQ_chat_page');
                     allChatPages.forEach((chatPage, index) => {
-                        const chatHeader = chatPage.querySelector('.QQ_chat_header, .QQ_home');
-                        if (chatHeader) {
-                            console.log(`强制更新第${index + 1}个聊天页面头部:`, currentManagingGroup.name);
-                            updateHeaderContent(chatHeader, currentManagingGroup);
+                        // 检查这个页面是否是目标群聊
+                        let isTargetGroupPage = false;
+                        
+                        // 方法1：检查data属性
+                        const groupIndicators = chatPage.querySelectorAll('[data-group-name], [data-group-id]');
+                        for (const indicator of groupIndicators) {
+                            const groupName = indicator.getAttribute('data-group-name');
+                            const groupId = indicator.getAttribute('data-group-id');
+                            if (groupName === currentManagingGroup.name || groupName === oldName || groupId === stableGroupId) {
+                                isTargetGroupPage = true;
+                                break;
+                            }
+                        }
+                        
+                        // 方法2：检查标题，但要确保是群聊而非私聊
+                        if (!isTargetGroupPage) {
+                            const nameElements = chatPage.querySelectorAll('.QQ_home_name');
+                            for (const nameEl of nameElements) {
+                                const text = nameEl.textContent.trim();
+                                if (text === currentManagingGroup.name || text === oldName) {
+                                    // 确保有成员数量显示（群聊特征）
+                                    const memberCount = chatPage.querySelector('.QQ_home_count');
+                                    if (memberCount || currentManagingGroup.members.length > 2) {
+                                        isTargetGroupPage = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 只更新匹配的页面
+                        if (isTargetGroupPage) {
+                            const chatHeader = chatPage.querySelector('.QQ_chat_header, .QQ_home');
+                            if (chatHeader) {
+                                console.log(`安全更新第${index + 1}个群聊页面头部:`, currentManagingGroup.name);
+                                updateHeaderContent(chatHeader, currentManagingGroup);
+                            }
                         }
                     });
                     
@@ -14210,11 +14302,17 @@
                                 }
                             }
                             
-                            // 方法5：强制假设（保险方案）
+                            // 方法5：保险方案（安全检查）
                             if (!isInTargetGroupChat) {
-                                // 如果用户刚刚在群聊设置页面操作，强制假设会回到聊天界面
-                                isInTargetGroupChat = true;
-                                detectionMethod = '方法5：强制假设用户在聊天界面';
+                                // 检查是否刚从群聊设置操作返回，且有群聊相关数据
+                                const hasGroupData = window.groupChatMessages && window.groupChatMessages[stableGroupId];
+                                const settingsModal = document.querySelector('.group_settings_modal, [class*="setting"], [class*="modal"]');
+                                const modalClosed = !settingsModal || window.getComputedStyle(settingsModal).display === 'none';
+                                
+                                if (hasGroupData && modalClosed && currentManagingGroup) {
+                                    isInTargetGroupChat = true;
+                                    detectionMethod = '方法5：群聊设置操作后的安全假设';
+                                }
                             }
                             
                             console.log(`检测结果: ${isInTargetGroupChat}, 使用方法: ${detectionMethod}`);
