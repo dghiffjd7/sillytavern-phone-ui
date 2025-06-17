@@ -7439,10 +7439,10 @@
                 const $html = $(html);
                 $html.attr('data-group-type', 'true').attr('data-group-name', name).attr('draggable', 'true');
                 
-                const displayMsg = description || '群聊';
-                $html.find('.QQ_home_lastmsg').text(displayMsg);
-
+                // *** 修复：不要硬编码群聊显示，稍后会通过updateGroupLastMessageDisplay更新 ***
+                // 临时设置初始显示，防止空白
                 const memberCount = members ? members.length : 0;
+                $html.find('.QQ_home_lastmsg').text('群聊');
                 $html.find('.QQ_home_lasttime').text(`${memberCount}人`);
 
                 $html.on('click', function() {
@@ -7487,7 +7487,9 @@
                 // *** 核心改动：直接在此处生成欢迎消息 ***
                 addGroupWelcomeMessages(name, members);
 
+                // *** 修复：在创建群聊后立即更新最后消息显示 ***
                 setTimeout(() => {
+                    updateGroupLastMessageDisplay(name);
                     QQ_UpdateMessageList();
                 }, 100);
 
@@ -10156,6 +10158,11 @@
                                 console.log('准备调用AddNewGroup函数添加群聊:', groupData.name);
                                 AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/default-group.png', groupData.members, groupData.description);
                                 
+                                // *** 修复：在加载群聊后立即更新最后消息显示 ***
+                                setTimeout(() => {
+                                    updateGroupLastMessageDisplay(groupData.name);
+                                }, 300);
+                                
                                
 
                             } else {
@@ -12300,6 +12307,13 @@
                         QQ_Groups.push(groupData.name);
                     }
                     
+                    // *** 新增：重新加载后立即更新群聊最后消息显示 ***
+                    if (QQ_msgjson.群聊[groupData.name].msgs.length > 0) {
+                        setTimeout(() => {
+                            updateGroupLastMessageDisplay(groupData.name);
+                        }, 200);
+                    }
+                    
                     console.log(`恢复群聊数据: ${groupData.name}, 消息数量: ${QQ_msgjson.群聊[groupData.name].msgs.length}`);
                 });
             }
@@ -12877,6 +12891,15 @@
                 if (typeof initContactGroups === 'function') {
                     initContactGroups();
                 }
+                
+                // *** 修复：在初始化完成后更新所有群聊的最后消息显示 ***
+                setTimeout(() => {
+                    console.log('开始更新所有群聊的最后消息显示...');
+                    QQ_Groups.forEach(groupName => {
+                        updateGroupLastMessageDisplay(groupName);
+                    });
+                    console.log('所有群聊最后消息显示更新完成');
+                }, 500);
                 
                 console.log('增强功能初始化完成');
                 console.log('- 群聊功能已启用');
