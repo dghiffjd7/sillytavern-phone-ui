@@ -10129,6 +10129,8 @@
                         if (entry && entry.content) {
                             console.log('>>> 开始处理群聊条目:', entry.key);
                             
+                            // 从comment中提取原始群聊名称，用于生成稳定的ID
+                            const originalGroupName = entry.comment.replace('手机-群聊-', '');
                             const lines = entry.content.split('\n');
                             let groupData = null;
                             
@@ -10139,7 +10141,8 @@
                                     groupData = { 
                                         name, 
                                         type: 'group',
-                                        id: `group_${name.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`
+                                        // 使用comment中的原始名称生成ID，保持稳定性
+                                        id: `group_${originalGroupName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`
                                     };
                                 } else if (groupData && trimmed.includes('类型=群聊')) {
                                     continue;
@@ -11849,6 +11852,7 @@
                         console.log('创建新的独立群聊条目');
                         
                         // 使用正确的createLorebookEntry函数，遵循项目标准设定
+                        const uniqueComment = `手机-群聊-${groupData.name}`;
                         console.log('准备调用createLorebookEntry，参数:', { worldbook, uniqueComment, groupContent });
                         const createResult = await createLorebookEntry(worldbook, {
                             comment: uniqueComment, // 使用唯一的comment标识群聊
@@ -11949,7 +11953,16 @@
                         }
                     ]);
                     
-                    console.log('群聊成员已更新到独立世界书条目');
+                    // 重新加载entries以更新本地数据
+                    entries = await getLorebookEntries(worldbook);
+                    
+                    // 同步更新本地数据结构
+                    if (QQ_msgjson.群聊[groupName]) {
+                        QQ_msgjson.群聊[groupName].members = members;
+                        console.log('已同步更新 QQ_msgjson.群聊 中的成员列表');
+                    }
+                    
+                    console.log('群聊成员已更新到独立世界书条目并同步本地数据');
                     return true;
                 } catch (error) {
                     console.error('更新群聊成员到世界书失败:', error);
@@ -11963,6 +11976,27 @@
             async function updateGroupNameInWorldbook(oldName, newName) {
                 try {
                     console.log('更新群聊名称到世界书（简化版）:', oldName, '->', newName);
+                    
+                    // *** 重要修复：确保世界书变量已正确初始化 ***
+                    if (!worldbook) {
+                        console.log('updateGroupNameInWorldbook: 世界书变量未初始化，重新获取...');
+                        worldbook = await GetWorldBookName();
+                        if (!worldbook) {
+                            console.error('updateGroupNameInWorldbook: 无法获取世界书');
+                            return false;
+                        }
+                    }
+                    
+                    if (!entries || entries.length === 0) {
+                        console.log('updateGroupNameInWorldbook: entries变量未初始化，重新获取...');
+                        entries = await getLorebookEntries(worldbook);
+                        if (!entries) {
+                            console.error('updateGroupNameInWorldbook: 无法获取世界书条目');
+                            return false;
+                        }
+                    }
+                    
+                    console.log('updateGroupNameInWorldbook: 世界书检查完成，worldbook:', worldbook, 'entries数量:', entries.length);
                     
                     // 1. 查找旧群聊条目 - 使用唯一comment查找
                     let oldGroupEntry = null;
@@ -12044,16 +12078,38 @@
                         console.log('已迁移群聊消息记录:', oldName, '->', newName);
                     }
                     
-                    // 更新界面元素的 data 属性
+                    // 重要：确保QQ_msgjson.群聊[newName]结构正确
+                    if (!QQ_msgjson.群聊[newName]) {
+                        QQ_msgjson.群聊[newName] = {
+                            members: backupMembers.split(',').map(m => m.trim()),
+                            msgs: []
+                        };
+                        console.log('重新初始化QQ_msgjson.群聊数据:', newName);
+                    }
+                    
+                    // *** 修复：生成稳定的群聊ID，基于原始名称 ***
+                    const originalGroupName = oldUniqueComment.replace('手机-群聊-', '');
+                    const stableGroupId = `group_${originalGroupName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
+                    console.log('为群聊生成稳定ID:', stableGroupId, '(基于原始名称:', originalGroupName, ')');
+                    
+                    // 更新界面元素的 data 属性（名称更新，但ID保持稳定）
                     document.querySelectorAll(`[data-group-name="${oldName}"]`).forEach(element => {
                         element.setAttribute('data-group-name', newName);
-                        console.log('已更新界面元素 data-group-name 属性');
+                        // 确保使用稳定的群聊ID
+                        if (element.hasAttribute('data-group-id')) {
+                            element.setAttribute('data-group-id', stableGroupId);
+                        }
+                        console.log('已更新界面元素 data-group-name 和 data-group-id 属性');
                     });
                     
                     // 更新群聊页面的 data 属性
                     document.querySelectorAll(`[data-name="${oldName}"]`).forEach(element => {
                         element.setAttribute('data-name', newName);
-                        console.log('已更新群聊页面 data-name 属性');
+                        // 确保使用稳定的群聊ID
+                        if (element.hasAttribute('data-group-id')) {
+                            element.setAttribute('data-group-id', stableGroupId);
+                        }
+                        console.log('已更新群聊页面 data-name 和 data-group-id 属性');
                     });
                     
                     console.log('群聊名称已成功更新到世界书并同步所有相关数据 (完整版)');
@@ -13832,17 +13888,72 @@
                 console.log('新群聊名称:', newName);
                 console.log('选中的头像数据:', window.selectedAvatarData);
                 
+                // *** 重要修复：确保世界书变量已正确初始化 ***
+                try {
+                    if (!worldbook) {
+                        console.log('世界书变量未初始化，重新获取...');
+                        worldbook = await GetWorldBookName();
+                        if (!worldbook) {
+                            console.error('无法获取世界书，保存操作终止');
+                            alert('无法连接到世界书，请稍后重试');
+                            return;
+                        }
+                    }
+                    
+                    if (!entries) {
+                        console.log('entries变量未初始化，重新获取...');
+                        entries = await getLorebookEntries(worldbook);
+                        if (!entries) {
+                            console.error('无法获取世界书条目，保存操作终止');
+                            alert('无法读取世界书数据，请稍后重试');
+                            return;
+                        }
+                    }
+                    
+                    console.log('世界书初始化检查完成，worldbook:', worldbook, 'entries数量:', entries.length);
+                } catch (error) {
+                    console.error('世界书初始化失败:', error);
+                    alert('世界书初始化失败，请稍后重试');
+                    return;
+                }
+                
                 // 保存旧的信息
                 const oldName = currentManagingGroup.name;
                 const oldId = currentManagingGroup.id;
                 const oldAvatar = currentManagingGroup.avatar;
                 
+                // *** 关键修复：从世界书comment中获取原始群聊名称，确保ID稳定 ***
+                let originalGroupName = oldName; // 默认使用当前名称
+                try {
+                    if (entries) {
+                        // 查找对应的世界书条目
+                        const groupEntry = entries.find(e => 
+                            e.comment === `手机-群聊-${oldName}` || 
+                            e.comment.startsWith('手机-群聊-') && 
+                            e.content.includes(`[${oldName}]`)
+                        );
+                        
+                        if (groupEntry && groupEntry.comment.startsWith('手机-群聊-')) {
+                            originalGroupName = groupEntry.comment.replace('手机-群聊-', '');
+                            console.log('从世界书comment中获取到原始群聊名称:', originalGroupName);
+                        }
+                    }
+                } catch (error) {
+                    console.warn('获取原始群聊名称时出错，使用当前名称:', error);
+                }
+                
+                // *** 修复：确保ID保持稳定，基于原始名称生成 ***
+                const stableGroupId = `group_${originalGroupName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
+                console.log('使用稳定的群聊ID:', stableGroupId, '(基于原始名称:', originalGroupName, ')');
+                
                 // 记录变更类型
                 const changes = [];
                 
-                // 更新群聊名称
+                // 更新群聊名称（保持ID不变）
                 if (newName !== oldName) {
                     currentManagingGroup.name = newName;
+                    // 重要：保持群聊ID不变，使用稳定的ID
+                    currentManagingGroup.id = stableGroupId;
                     changes.push({
                         type: 'name',
                         oldValue: oldName,
@@ -13875,25 +13986,40 @@
                     await saveGroupToWorldbook(currentManagingGroup);
                 }
                 
-                // *** 修复：立即更新所有界面显示，包括头像 ***
+                // *** 修复：立即更新所有界面显示，包括头像，使用稳定ID ***
+                currentManagingGroup.id = stableGroupId; // 确保使用稳定ID
                 await updateGroupInAllListsWithAvatar(currentManagingGroup);
                 
+                // *** 新增：强制立即刷新头像，不等待自动刷新 ***
+                if (changes.some(c => c.type === 'avatar')) {
+                    console.log('检测到头像更改，立即强制更新界面头像');
+                    setTimeout(() => {
+                        updateGroupInAllListsWithAvatar(currentManagingGroup);
+                    }, 100);
+                    
+                    // 双重保险：再次延迟更新
+                    setTimeout(() => {
+                        updateGroupInAllListsWithAvatar(currentManagingGroup);
+                    }, 500);
+                }
+                
                 // *** 修复：如果当前正在聊天界面，更新头部并保持聊天记录 ***
-                if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
+                if (window.currentGroupChat && window.currentGroupChat.id === stableGroupId) {
                     // 更新当前群聊对象的信息，保持消息记录不变
                     window.currentGroupChat.name = currentManagingGroup.name;
                     window.currentGroupChat.avatar = currentManagingGroup.avatar;
                     window.currentGroupChat.avatarUrl = currentManagingGroup.avatarUrl;
+                    window.currentGroupChat.id = stableGroupId; // 确保ID一致
                     
                     // 更新聊天界面头部显示
                     updateChatHeader(currentManagingGroup);
                     
-                    console.log('已更新当前聊天界面，聊天记录保持不变');
+                    console.log('已更新当前聊天界面，使用稳定ID:', stableGroupId);
                 }
                 
                 // *** 修复：更新消息JSON中的群聊信息，保持聊天记录 ***
                 if (oldName !== newName) {
-                    await updateGroupChatMessagesInMsgjson(oldId, oldName, newName);
+                    await updateGroupChatMessagesInMsgjson(stableGroupId, oldName, newName);
                 }
                 
                 // 清空选中的头像数据
@@ -13902,9 +14028,33 @@
                 console.log(`群聊设置已保存: ${oldName} -> ${newName}`);
                 
                 // *** 新增：添加系统消息通知群聊变更 ***
-                await addSystemMessagesForChanges(currentManagingGroup.id, changes);
+                if (changes.length > 0) {
+                    console.log('准备添加系统消息，变更列表:', changes);
+                    await addSystemMessagesForChanges(stableGroupId, changes);
+                    
+                    // 如果当前正在群聊界面，立即显示系统消息
+                    if (window.currentGroupChat && window.currentGroupChat.id === stableGroupId) {
+                        for (const change of changes) {
+                            let systemMessage = '';
+                            switch (change.type) {
+                                case 'name':
+                                    systemMessage = `群聊名称已更改为"${change.newValue}"`;
+                                    break;
+                                case 'avatar':
+                                    systemMessage = `群主已更改群头像`;
+                                    break;
+                            }
+                            if (systemMessage) {
+                                setTimeout(() => {
+                                    displaySystemMessage(systemMessage);
+                                }, 200);
+                            }
+                        }
+                    }
+                }
                 
                 // *** 新增：自动重新加载界面数据，保持消息内容不丢失 ***
+                currentManagingGroup.id = stableGroupId; // 确保传递正确的ID
                 await autoReloadInterfaceAfterGroupUpdate(currentManagingGroup);
                 
                 alert('群聊设置已保存');
@@ -14416,21 +14566,7 @@
                 }
             }
             
-            /**
-             * 更新消息JSON中的群聊信息（保持聊天记录）
-             */
-            async function updateGroupChatMessagesInMsgjson(groupId, oldName, newName) {
-                console.log(`更新消息JSON中的群聊名称: ${oldName} -> ${newName}`);
-                
-                try {
-                    // 这里需要调用SillyTavern的API来更新消息记录中的群聊名称
-                    // 具体实现取决于SillyTavern的消息存储机制
-                    // 暂时记录日志，实际实现可能需要访问msgjson文件
-                    console.log('消息记录更新功能需要根据SillyTavern的具体实现进行调整');
-                } catch (error) {
-                    console.error('更新消息记录失败:', error);
-                }
-            }
+
             
             /**
              * 保存群聊到世界书的通用函数（修复版）
