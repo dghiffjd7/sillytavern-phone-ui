@@ -7695,10 +7695,10 @@
             function QQ_ChangeChatPage(event, directName = null) {
                 const $QQpage = $("#App_QQ");
                 if ($QQpage.length === 0) {
-                    console.log("获取QQpage失败");
+                    console.error("获取QQpage失败");
                     return;
                 }
-                
+
                 let name;
                 if (directName) {
                     name = directName;
@@ -7706,58 +7706,69 @@
                     let element = event.currentTarget;
                     name = element.getAttribute("data-name") ?? "";
                 }
-                
+
                 const isGroup = QQ_Groups.includes(name);
-                console.log(`开始切换页面: ${name}, 是否群聊: ${isGroup}`);
-                
+                console.log(`[ChangePage] 开始切换页面: ${name}, 是否群聊: ${isGroup}`);
+
                 let $page = $(`.QQ_chat_page[data-name='${name}']`);
-                
-                // 核心逻辑：无论页面是否存在，都重新渲染消息
+
                 if ($page.length === 0) {
-                    console.log(`页面不存在，创建新页面: ${name}`);
-                    $page = QQ_CreatChatPage(name); // QQ_CreatChatPage 现在只创建框架
+                    console.log(`[ChangePage] 页面不存在，创建新页面: ${name}`);
+                    $page = QQ_CreatChatPage(name);
                 }
 
-                console.log(`页面已存在或已创建，刷新消息: ${name}`);
                 const $msgContent = $page.find(".msgcontent");
-                $msgContent.empty(); // 清空旧消息
+                if ($msgContent.length === 0) {
+                    console.error(`[ChangePage] 致命错误: 找不到 ${name} 页面的 .msgcontent 容器!`);
+                    return;
+                }
+                $msgContent.empty();
 
-                // --- 健壮的消息加载逻辑 ---
                 let messages = [];
                 if (isGroup) {
-                    messages = QQ_msgjson.群聊[name]?.msgs || [];
+                    messages = (QQ_msgjson.群聊[name]?.msgs || []).slice(); // 使用slice创建副本
                 } else {
                     const key1 = `${UserName}和${name}的聊天`;
                     const key2 = `${name}和${UserName}的聊天`;
                     if (QQ_msgjson.私聊[key1]) {
-                        messages = QQ_msgjson.私聊[key1];
+                        messages = QQ_msgjson.私聊[key1].slice();
                     } else if (QQ_msgjson.私聊[key2]) {
-                        messages = QQ_msgjson.私聊[key2];
+                        messages = QQ_msgjson.私聊[key2].slice();
                     }
                 }
-                console.log(`为 ${name} 加载了 ${messages.length} 条消息`);
                 
-                messages.forEach(msg => {
-                    QQ_Chat_AddMsg($msgContent[0], msg, name, false);
-                });
-                
+                console.log(`[ChangePage] 为 ${name} 加载了 ${messages.length} 条消息。`, messages);
+
+                if (messages.length > 0) {
+                    messages.forEach(msg => {
+                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                    });
+                } else {
+                    console.log(`[ChangePage] ${name} 没有消息记录可显示。`);
+                }
+
+
                 if (isGroup) {
                     const groupData = QQ_msgjson.群聊[name];
-                    const memberCount = groupData && groupData.members ? groupData.members.length : 0;
+                    const memberCount = groupData?.members?.length || 0;
                     $page.find('#QQ_chat_username').html(`${name} <span style="font-size: 12px; color: #999; font-weight: normal;">(${memberCount}人)</span>`);
                 }
 
-                QQ_SetHomeTips(name, "0");
+                QQ_SetHomeTips(name, "0"); // 清除红点
                 QQ_HideAllChat();
                 $("#QQ_home_page, #QQ_message_list_page, #QQ_space_page").hide();
                 $(".QQ_bottom_nav").hide();
                 $page.show();
-                
+
+                // 滚动到底部
                 $msgContent.scrollTop($msgContent[0].scrollHeight);
                 
                 const TipsCount = QQ_GetChatShowTipsCount(name);
                 const $Tips = $page.find(`.new_tips`);
                 $Tips.text(TipsCount).toggle(TipsCount > 0);
+
+                current_chat_name_and_isgroup.name = name;
+                current_chat_name_and_isgroup.isGroup = isGroup;
             }
 
             function QQ_CreatChatPage(name) {
@@ -8431,58 +8442,44 @@
                 );
             }
             function QQ_SetHomeTips(name, count, lastmsg, lasttime) {
-                if (!name) {
-                    return;
-                }
+                if (!name) return;
+                
                 const isGroup = QQ_Groups.includes(name);
+                console.log(`[SetHomeTips] Firing for: ${name} | isGroup: ${isGroup} | count: ${count} | lastmsg: ${lastmsg} | lasttime: ${lasttime}`);
 
-                // 在整个联系人列表中查找元素，无论是否分组
-                const $contact = $('#QQ_home_chars .QQ_home_usermsg').filter(function() {
-                    return $(this).attr('data-name') === name && $(this).data('group-type') === isGroup;
-                });
+                // 精确查找私聊和群聊的元素
+                const selector = `.QQ_home_usermsg[data-name="${name}"]`;
+                const $contacts = $('#QQ_home_chars, #QQ_message_list_chars').find(selector);
 
-                if ($contact.length === 0) {
-                    console.warn(`[QQ_SetHomeTips] 未找到联系人/群组: ${name}`);
+                if ($contacts.length === 0) {
+                    console.warn(`[SetHomeTips] 未在任何列表(联系人/消息)中找到元素: ${name}`);
                     return;
                 }
-
-                const $contactInMsgList = $('#QQ_message_list_chars .QQ_home_usermsg').filter(function() {
-                    return $(this).attr('data-name') === name && $(this).data('group-type') === isGroup;
-                });
-
 
                 if (lastmsg) {
-                    $contact.find('.QQ_home_usermsg_newmsg').text(lastmsg);
-                    $contactInMsgList.find('.QQ_home_usermsg_newmsg').text(lastmsg);
+                    $contacts.find('.QQ_home_usermsg_newmsg').text(lastmsg);
                 }
                 if (lasttime) {
                     const timeString = formatTimestamp(lasttime);
-                    $contact.find('.QQ_home_lasttime').text(timeString);
-                    $contactInMsgList.find('.QQ_home_lasttime').text(timeString);
+                    $contacts.find('.QQ_home_lasttime').text(timeString);
                 }
-                if (count == "0") {
-                    $contact.find('.QQ_home_usermsg_new').hide().text('0');
-                    $contactInMsgList.find('.QQ_home_usermsg_new').hide().text('0');
+
+                const $countElements = $contacts.find('.QQ_home_usermsg_new');
+                if (count === "0") {
+                    $countElements.hide().text('0');
                 } else if (count) {
                     const num = parseInt(count);
-                    $contact.find('.QQ_home_usermsg_new').show().text(num);
-                    $contactInMsgList.find('.QQ_home_usermsg_new').show().text(num);
-                } else {
-                    const $count = $contact.find('.QQ_home_usermsg_new');
-                    let num = parseInt($count.text());
-                    if (isNaN(num)) {
-                        num = 0;
+                    if (num > 0) {
+                        $countElements.show().text(num);
+                    } else {
+                         $countElements.hide().text('0');
                     }
-                    num++;
-                    $count.show().text(num);
-
-                    const $countInMsgList = $contactInMsgList.find('.QQ_home_usermsg_new');
-                    let numInMsgList = parseInt($countInMsgList.text());
-                    if (isNaN(numInMsgList)) {
-                        numInMsgList = 0;
-                    }
-                    numInMsgList++;
-                    $countInMsgList.show().text(numInMsgList);
+                } else { // Increment logic
+                    $countElements.each(function() {
+                        let num = parseInt($(this).text()) || 0;
+                        num++;
+                        $(this).show().text(num);
+                    });
                 }
             }
             function QQ_GetChatShowTipsCount(name) {
