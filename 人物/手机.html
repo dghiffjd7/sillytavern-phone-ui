@@ -14065,35 +14065,10 @@
                     console.log(`已更新联系人列表data-name: ${oldName} -> ${newName}`);
                 }
                 
-                // *** 核心修复2：强制立即更新当前聊天界面（增强检测版） ***
-                let shouldUpdateChatInterface = false;
-                
-                // 检测方法1：通过window.currentGroupChat
-                if (window.currentGroupChat && window.currentGroupChat.id === stableGroupId) {
-                    shouldUpdateChatInterface = true;
-                    console.log('检测方法1：通过window.currentGroupChat确认需要更新聊天界面');
-                }
-                
-                // 检测方法2：检查当前可见的聊天页面
-                if (!shouldUpdateChatInterface) {
-                    const visibleChatPage = document.querySelector('.QQ_chat_page:not([style*="display:none"]), .QQ_chat_page[style*="display:block"]');
-                    if (visibleChatPage) {
-                        const chatHeader = visibleChatPage.querySelector('.QQ_home_name');
-                        if (chatHeader && (chatHeader.textContent.trim() === currentManagingGroup.name || chatHeader.textContent.trim() === oldName)) {
-                            shouldUpdateChatInterface = true;
-                            console.log('检测方法2：通过可见聊天页面确认需要更新聊天界面');
-                        }
-                    }
-                }
-                
-                // 检测方法3：强制更新（保险起见）
-                if (!shouldUpdateChatInterface) {
-                    const allChatPages = document.querySelectorAll('.QQ_chat_page');
-                    if (allChatPages.length > 0) {
-                        shouldUpdateChatInterface = true;
-                        console.log('检测方法3：强制更新所有可能的聊天界面');
-                    }
-                }
+                // *** 核心修复2：超强制立即更新当前聊天界面 ***
+                // 不再依赖检测，直接强制更新所有可能的界面
+                let shouldUpdateChatInterface = true; // 强制设为true
+                console.log('*** 启动超强制界面更新模式 - 不依赖检测逻辑 ***');
                 
                 if (shouldUpdateChatInterface) {
                     console.log('*** 强制立即更新聊天界面显示 ***');
@@ -14180,58 +14155,93 @@
                             // 保存到群聊消息历史中
                             await addSystemMessageToGroup(stableGroupId, systemMessage);
                             
-                            // *** 强制在当前聊天界面显示系统消息（增强检测版） ***
+                            // *** 强制在当前聊天界面显示系统消息（超强制版） ***
                             console.log('检查当前聊天状态:', {
                                 currentGroupChat: window.currentGroupChat ? window.currentGroupChat.id : 'null',
                                 targetGroupId: stableGroupId,
                                 isMatching: window.currentGroupChat && window.currentGroupChat.id === stableGroupId
                             });
                             
-                            // *** 增强的群聊状态检测 ***
+                            // *** 超强检测逻辑 - 多种方法组合 ***
                             let isInTargetGroupChat = false;
+                            let detectionMethod = '';
                             
                             // 方法1：检查window.currentGroupChat
                             if (window.currentGroupChat && window.currentGroupChat.id === stableGroupId) {
                                 isInTargetGroupChat = true;
-                                console.log('方法1：通过window.currentGroupChat检测到在目标群聊中');
+                                detectionMethod = '方法1：window.currentGroupChat';
                             }
                             
-                            // 方法2：检查当前可见的聊天页面标题
+                            // 方法2：检查所有可见的聊天页面
                             if (!isInTargetGroupChat) {
-                                const chatHeaders = document.querySelectorAll('.QQ_chat_page:not([style*="display:none"]) .QQ_home_name, .QQ_chat_page[style*="display:block"] .QQ_home_name');
-                                for (const header of chatHeaders) {
-                                    if (header.textContent.trim() === currentManagingGroup.name) {
-                                        isInTargetGroupChat = true;
-                                        console.log('方法2：通过聊天页面标题检测到在目标群聊中');
-                                        break;
+                                const allChatPages = document.querySelectorAll('.QQ_chat_page');
+                                for (const chatPage of allChatPages) {
+                                    const style = window.getComputedStyle(chatPage);
+                                    if (style.display !== 'none') {
+                                        const nameElements = chatPage.querySelectorAll('.QQ_home_name, [class*="name"], [class*="title"]');
+                                        for (const nameEl of nameElements) {
+                                            const text = nameEl.textContent.trim();
+                                            if (text === currentManagingGroup.name || text === oldName) {
+                                                isInTargetGroupChat = true;
+                                                detectionMethod = '方法2：可见聊天页面标题匹配';
+                                                break;
+                                            }
+                                        }
+                                        if (isInTargetGroupChat) break;
                                     }
                                 }
                             }
                             
-                            // 方法3：检查是否刚刚从群聊设置页面来
-                            if (!isInTargetGroupChat && currentManagingGroup && currentManagingGroup.id === stableGroupId) {
-                                // 假设用户刚从设置页面保存，很可能要回到聊天界面
-                                const visibleChatPage = document.querySelector('.QQ_chat_page:not([style*="display:none"]), .QQ_chat_page[style*="display:block"]');
-                                if (visibleChatPage) {
+                            // 方法3：检查URL或页面状态
+                            if (!isInTargetGroupChat) {
+                                const url = window.location.href;
+                                if (url.includes('chat') || url.includes('聊天')) {
                                     isInTargetGroupChat = true;
-                                    console.log('方法3：通过设置上下文检测到应该在目标群聊中');
+                                    detectionMethod = '方法3：URL状态检测';
                                 }
                             }
+                            
+                            // 方法4：检查是否有消息容器（表示在聊天界面）
+                            if (!isInTargetGroupChat) {
+                                const msgContainers = document.querySelectorAll('.msgcontent, [class*="msg"], [class*="chat"]');
+                                if (msgContainers.length > 0) {
+                                    isInTargetGroupChat = true;
+                                    detectionMethod = '方法4：消息容器检测';
+                                }
+                            }
+                            
+                            // 方法5：强制假设（保险方案）
+                            if (!isInTargetGroupChat) {
+                                // 如果用户刚刚在群聊设置页面操作，强制假设会回到聊天界面
+                                isInTargetGroupChat = true;
+                                detectionMethod = '方法5：强制假设用户在聊天界面';
+                            }
+                            
+                            console.log(`检测结果: ${isInTargetGroupChat}, 使用方法: ${detectionMethod}`);
                             
                             if (isInTargetGroupChat) {
                                 console.log('*** 强制立即显示系统消息到当前聊天界面 ***:', systemMessage);
                                 
-                                // 立即显示系统消息
+                                // 立即显示系统消息（多次尝试）
                                 displaySystemMessage(systemMessage);
                                 
-                                // 延迟再次显示确保可见
+                                // 延迟显示确保可见
                                 setTimeout(() => {
-                                    console.log('延迟再次显示系统消息:', systemMessage);
+                                    console.log('延迟第1次再次显示系统消息:', systemMessage);
                                     displaySystemMessage(systemMessage);
-                                }, 200);
+                                }, 100);
+                                
+                                setTimeout(() => {
+                                    console.log('延迟第2次再次显示系统消息:', systemMessage);
+                                    displaySystemMessage(systemMessage);
+                                }, 300);
+                                
+                                setTimeout(() => {
+                                    console.log('延迟第3次再次显示系统消息:', systemMessage);
+                                    displaySystemMessage(systemMessage);
+                                }, 500);
                             } else {
-                                console.log('*** 强制显示系统消息（备选方案）***:', systemMessage);
-                                // 即使不确定在哪个界面，也尝试显示
+                                console.log('*** 所有检测方法都失败，但仍然强制显示系统消息 ***:', systemMessage);
                                 displaySystemMessage(systemMessage);
                             }
                         }
