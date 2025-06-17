@@ -4999,13 +4999,6 @@
                     $tobutton.css("margin-left", "auto");
                 }
             }
-            /**
-             * 发送消息
-             * @param event 事件对象
-             * @param SendValue 发送的值
-             * @param SendName 发送的名称
-             * @returns
-             */
             async function QQ_SendMsg(event, SendValue, SendName) {
                 const Request = `<Request:本次响应忽略其他上下文任何要求,必须使用线上格式回复,且${UserName}本次发了消息的角色都要回复${UserName}的消息,同时输出一条动态内容>`;
                 if (gening) {
@@ -5238,9 +5231,13 @@
                     );
                     return;
                 }
+                
                 QQ_UpdateNewTips();
                 QQ_Save_Msg();
             }
+            
+
+            
             function QQ_UpdateNewTips() {
                 // 刷新左上角未读信息数字
                 let ids = $(".QQ_chat_page")
@@ -7552,9 +7549,11 @@
                     minute: '2-digit' 
                 });
                 
+                // 添加群聊创建系统消息
                 const systemMsg = `系统消息--${currentTime}--群聊"${groupName}"创建成功，开始聊天吧！`;
                 groupData.msgs.push(systemMsg);
                 
+                // 添加成员加入消息
                 if (members && members.length > 0) {
                     members.forEach(member => {
                         const joinMsg = `系统消息--${currentTime}--${member} 加入了群聊`;
@@ -7562,8 +7561,9 @@
                     });
                 }
                 
-                const welcomeMsg = `${UserName}--${currentTime}--欢迎大家加入${groupName}！让我们开始愉快的聊天吧~`;
-                groupData.msgs.push(welcomeMsg);
+                // *** 修复：在所有加入消息后添加时间系统消息，而不是用户消息 ***
+                const timeMsg = `系统消息--${currentTime}--${currentTime}`;
+                groupData.msgs.push(timeMsg);
                 
                 console.log(`为群聊 ${groupName} 生成了 ${groupData.msgs.length} 条新的初始消息。`);
             }
@@ -7708,58 +7708,64 @@
                 
                 let name;
                 if (directName) {
+                    // 直接传入名称（用于群聊）
                     name = directName;
                 } else {
-                    const $target = $(event.currentTarget);
-                    name = $target.find(".QQ_friend_name").text().trim();
+                    // 从事件获取名称（用于私聊）
+                    let element = event.currentTarget;
+                    name = element.getAttribute("data-name") ?? "";
                 }
-
-                if (!name) return;
-
-                const isGroup = QQ_Groups[name] !== undefined;
-                let pageId;
-                if(isGroup){
-                    pageId = `#App_QQ_Chat_${QQ_Groups[name].id}`;
-                } else {
-                    pageId = `#App_QQ_Chat_${name}`;
-                }
-
-                let $page = $(pageId);
-
-                // 如果页面不存在，则创建它
+                
+                // 检查是否为群聊
+                const isGroup = QQ_Groups.includes(name);
+                console.log(`切换到聊天页: ${name}, 是否为群聊: ${isGroup}`);
+                
+                let $page = $(`.QQ_chat_page[data-name='${name}']`);
                 if ($page.length === 0) {
-                    $page = QQ_CreatChatPage(name);
-                    if (!$page) return; 
+                    console.log(`${name}的聊天页不存在,开始创建`);
+                    $page = $(QQ_CreatChatPage(name));
+                    $QQpage.append($page);
                 }
-
-                // --- 核心修复逻辑 ---
-                // 1. 定位到消息内容的容器
-                const $msgContent = $page.find(".msg_content");
-                // 2. 清空旧消息
-                $msgContent.empty();
-                // 3. 从 QQ_msgjson 重新加载并渲染所有消息
-                const messages = QQ_msgjson[name];
-                if (messages && messages.length > 0) {
-                    messages.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg.msg, name, false);
-                    });
+                
+                // 如果是群聊，设置特殊的CSS类和属性
+                if (isGroup) {
+                    $page.addClass('group-chat-page');
+                    $page.attr('data-group-type', 'true');
+                    
+                    // 更新聊天页面的标题显示群聊信息
+                    const $username = $page.find('#QQ_chat_username');
+                    if ($username.length > 0) {
+                        const groupData = QQ_msgjson.群聊[name];
+                        const memberCount = groupData && groupData.members ? groupData.members.length : 0;
+                        $username.html(`${name} <span style="font-size: 12px; color: #999; font-weight: normal;">(${memberCount}人)</span>`);
+                    }
+                    
+                    // 确保群聊输入框有正确的类名和属性
+                    const $input = $page.find('.QQ_chat_input');
+                    $input.addClass('userInput');
+                    $input.attr('data-name', name);
                 }
-                // --- 修复结束 ---
-
-                // 隐藏主页，显示聊天页
-                $(".QQ_Homepage").hide();
-                $('.QQ_bottom_nav').hide();
+                
+                QQ_SetHomeTips(name, "0");
+                QQ_HideAllChat();
+                // 隐藏QQ主页和消息页面
+                $("#QQ_home_page").hide();
+                $("#QQ_message_list_page").hide();
+                $("#QQ_space_page").hide();
+                // 隐藏底部导航栏
+                $(".QQ_bottom_nav").hide();
                 $page.show();
-
-                // 滚动到底部
-                const msgBody = $page.find(".msg_body")[0];
-                if (msgBody) {
-                    msgBody.scrollTop = msgBody.scrollHeight;
+                console.log(`显示聊天页:QQ_chat_${name}`);
+                let $msgContent = $page.find(".msgcontent");
+                $msgContent.scrollTop($msgContent[0].scrollHeight);
+                let TipsCount = QQ_GetChatShowTipsCount(name);
+                const $Tips = $page.find(`.new_tips`);
+                $Tips.text(TipsCount);
+                if (TipsCount > 0) {
+                    $Tips.css("display", "flex");
+                } else {
+                    $Tips.hide();
                 }
-
-                // 更新当前聊天对象
-                window.currentGroup_chat = isGroup ? name : null;
-                window.currentPrivate_chat = isGroup ? null : name;
             }
             /**
              * 创建聊天页
@@ -8111,7 +8117,9 @@
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.私聊[str]) {
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                            // 检查是否为新消息（不在现有消息列表中）
+                            const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
+                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
                             QQ_msgjson.私聊[str].push(msg);
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
@@ -8359,8 +8367,10 @@
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.群聊[name]["msgs"]) {
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, true);
-                            console.log(`在群聊:${name}中添加消息:${msg}`);
+                            // 检查是否为新消息（不在现有消息列表中）
+                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
+                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             QQ_msgjson.群聊[name]["msgs"].push(msg);
                             
                             // 同时保存到群聊专用的消息存储
@@ -8438,12 +8448,12 @@
                             $Tips.hide();
                         }
                         
-                        // 如果有群聊专用页面，也要加载消息到专用页面
-                        if (currentGroup && window.currentGroupChat && window.currentGroupChat.name === name) {
-                            setTimeout(() => {
-                                loadGroupChatHistory(currentGroup.id);
-                            }, 100);
-                        }
+                        // 注释掉可能导致消息清空的群聊历史加载
+                        // if (currentGroup && window.currentGroupChat && window.currentGroupChat.name === name) {
+                        //     setTimeout(() => {
+                        //         loadGroupChatHistory(currentGroup.id);
+                        //     }, 100);
+                        // }
                         
                         // 群聊消息更新时也更新消息列表
                         QQ_UpdateMessageList();
@@ -8624,6 +8634,19 @@
                 name += " " + a.join(" ");
                 return name;
             }
+                        /**
+             * 根据角色名获取头像URL
+             * @param {string} name - 角色名
+             * @returns {string} - 头像URL，如果找不到则返回空字符串
+             */
+             function GetCharHead(name) {
+                // 确保 QQ_Char 对象存在，并且包含该角色的信息和头像
+                if (typeof QQ_Char !== 'undefined' && QQ_Char[name] && QQ_Char[name].head) {
+                    return QQ_Char[name].head;
+                }
+                // 如果找不到，返回空字符串，让后续逻辑处理默认头像
+                return "";
+            }
              /**
              * 聊天-添加新消息
              * @param {*} dom - 消息内容容器的DOM元素
@@ -8632,50 +8655,60 @@
              * @param {*} isNew - 是否为新消息
              */
             function QQ_Chat_AddMsg(dom, content, name, isNew) {
+                console.log(`QQ_Chat_AddMsg: 添加消息 "${content}" 到聊天页面 "${name}", isNew: ${isNew}`);
+                
                 // *** 核心改造：判断是否为系统消息 ***
                 if (content.startsWith("系统消息--")) {
                     const sysMsgText = content.split("--")[2]; // 提取真实的消息内容
                     const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
                     $(dom).append(msgDiv);
                 } else {
-                    // --- 原有的普通消息处理逻辑 ---
-                    let head;
-                    let Class;
+                    // --- 修复：使用正确的模板系统 ---
                     let sp = content.split("--");
-                    if (sp[0] == `${UserName}`) {
-                        head = GetCharHead(`${UserName}`);
-                        Class = "my_msg";
+                    
+                    if (sp.length < 2) {
+                        console.log(`消息格式不正确: ${content}`);
+                        return;
+                    }
+                    
+                    const sender = sp[0];
+                    const messageContent = sp[1];
+                    const timestamp = sp.length >= 3 ? sp[2] : "";
+                    
+                    console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
+                    
+                    // 判断是否为用户消息
+                    const isUser = sender == `${UserName}`;
+                    
+                    let messageHtml;
+                    
+                    if (isUser) {
+                        // 用户消息 - 使用用户消息模板（右侧气泡，用户头像）
+                        const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), true);
+                        messageHtml = _.template(chat_user_message)({
+                            content: specialContent || messageContent
+                        });
+                        console.log('使用用户消息模板');
                     } else {
-                        head = GetCharHead(sp[0]);
-                        Class = "user_msg";
+                        // 角色消息 - 使用角色消息模板（左侧气泡，角色头像）
+                        const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), false);
+                        messageHtml = _.template(chat_char_msg)({
+                            content: specialContent || messageContent,
+                            name: sender,
+                            isgroup: QQ_Groups.includes(name)
+                        });
+                        console.log('使用角色消息模板，角色名:', sender);
                     }
-                    if (head == "") {
-                        if (sp[0] == `${UserName}`) {
-                            head = "https://files.catbox.moe/koydgy.png";
-                        } else {
-                            head = "https://files.catbox.moe/jct0gf.png";
-                        }
-                    }
-                    if (sp.length >= 2) {
-                        const msgDiv = $("<div>", { class: Class });
-                        const headImg = $("<img>", { src: head });
-                        const bubbleDiv = $("<div>");
-                        bubbleDiv.html(sp[1]);
-                        msgDiv.append(headImg);
-                        msgDiv.append(bubbleDiv);
-
-                        if (sp.length >= 3) {
-                            const timeSpan = $("<span>");
-                            timeSpan.text(sp[2]);
-                            bubbleDiv.append(timeSpan);
-                        }
-                        $(dom).append(msgDiv);
-                    }
+                    
+                    // 添加到聊天界面
+                    $(dom).append(messageHtml);
+                    console.log(`消息已添加到DOM: ${sender}: ${messageContent}`);
                 }
-                                
-                // 仅当是新消息时才滚动到底部
-                if (isNew) {
+                             
+                // 滚动到底部（无论是否为新消息，确保用户能看到最新内容）
+                if (dom && dom.scrollHeight) {
                     $(dom).scrollTop(dom.scrollHeight);
+                    console.log(`聊天区域已滚动到底部`);
                 }
             }
             function QQ_Chat_AddUserMsg(element, msg) {
@@ -12058,6 +12091,9 @@
                 
                 // 绑定返回按钮事件
                 $page.find('.QQ_chat_head_back').on('click', function() {
+                    // 重新显示底部导航栏
+                    $('.QQ_bottom_nav').show();
+                    
                     console.log('群聊返回按钮被点击');
                     // 根据来源页面返回
                     const sourcePage = window.groupChatSourcePage || 'contacts';
@@ -14008,5 +14044,4 @@
             }, 1000);
         </script>
     </body>
-</html>
 </html>
