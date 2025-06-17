@@ -5231,9 +5231,81 @@
                     );
                     return;
                 }
+                
+                // *** 关键修复：AI回复后立即刷新当前聊天页面 ***
+                refreshCurrentChatPage();
+                
                 QQ_UpdateNewTips();
                 QQ_Save_Msg();
             }
+            
+            /**
+             * 刷新当前聊天页面，确保AI回复后能立即显示新消息
+             */
+            function refreshCurrentChatPage() {
+                try {
+                    console.log('开始刷新当前聊天页面...');
+                    
+                    // 查找当前可见的聊天页面
+                    const $visibleChatPage = $('.QQ_chat_page:visible').last();
+                    if ($visibleChatPage.length === 0) {
+                        console.log('没有找到可见的聊天页面，跳过刷新');
+                        return;
+                    }
+                    
+                    const chatName = $visibleChatPage.attr('data-name');
+                    const groupId = $visibleChatPage.attr('data-group-id');
+                    
+                    console.log(`当前聊天页面: ${chatName}, 群聊ID: ${groupId}`);
+                    
+                    if (!chatName && !groupId) {
+                        console.log('无法确定聊天页面名称，跳过刷新');
+                        return;
+                    }
+                    
+                    const $msgContent = $visibleChatPage.find('.msgcontent');
+                    if ($msgContent.length === 0) {
+                        console.log('未找到消息容器，跳过刷新');
+                        return;
+                    }
+                    
+                    // 记录当前滚动位置，如果用户没有滚动到底部，保持当前位置
+                    const wasAtBottom = $msgContent[0].scrollTop >= ($msgContent[0].scrollHeight - $msgContent[0].clientHeight - 50);
+                    
+                    // 如果是群聊页面，刷新群聊消息
+                    if (groupId || QQ_Groups.includes(chatName)) {
+                        const realChatName = chatName || (window.currentGroupChat && window.currentGroupChat.name);
+                        console.log(`刷新群聊消息: ${realChatName}`);
+                        
+                        if (realChatName && QQ_msgjson.群聊[realChatName] && QQ_msgjson.群聊[realChatName].msgs) {
+                            console.log(`群聊 ${realChatName} 有 ${QQ_msgjson.群聊[realChatName].msgs.length} 条消息`);
+                            // 这里不需要重新加载所有消息，因为QQ_Msg_Parse已经处理了新消息的添加
+                        }
+                    } else {
+                        // 私聊页面
+                        const privateChatKey = `${UserName}和${chatName}的聊天`;
+                        console.log(`刷新私聊消息: ${privateChatKey}`);
+                        
+                        if (QQ_msgjson.私聊[privateChatKey]) {
+                            console.log(`私聊 ${chatName} 有 ${QQ_msgjson.私聊[privateChatKey].length} 条消息`);
+                            // 这里不需要重新加载所有消息，因为QQ_Msg_Parse已经处理了新消息的添加
+                        }
+                    }
+                    
+                    // 如果用户之前在底部，自动滚动到底部
+                    if (wasAtBottom) {
+                        setTimeout(() => {
+                            $msgContent.scrollTop($msgContent[0].scrollHeight);
+                            console.log('聊天页面已滚动到底部');
+                        }, 100);
+                    }
+                    
+                    console.log('聊天页面刷新完成');
+                } catch (error) {
+                    console.error('刷新聊天页面时出错:', error);
+                }
+            }
+            
             function QQ_UpdateNewTips() {
                 // 刷新左上角未读信息数字
                 let ids = $(".QQ_chat_page")
@@ -8110,7 +8182,9 @@
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.私聊[str]) {
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                            // 检查是否为新消息（不在现有消息列表中）
+                            const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
+                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
                             QQ_msgjson.私聊[str].push(msg);
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
@@ -8358,8 +8432,10 @@
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.群聊[name]["msgs"]) {
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, true);
-                            console.log(`在群聊:${name}中添加消息:${msg}`);
+                            // 检查是否为新消息（不在现有消息列表中）
+                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
+                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             QQ_msgjson.群聊[name]["msgs"].push(msg);
                             
                             // 同时保存到群聊专用的消息存储
@@ -8644,50 +8720,76 @@
              * @param {*} isNew - 是否为新消息
              */
             function QQ_Chat_AddMsg(dom, content, name, isNew) {
+                console.log(`QQ_Chat_AddMsg: 添加消息 "${content}" 到聊天页面 "${name}", isNew: ${isNew}`);
+                
                 // *** 核心改造：判断是否为系统消息 ***
                 if (content.startsWith("系统消息--")) {
                     const sysMsgText = content.split("--")[2]; // 提取真实的消息内容
                     const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
                     $(dom).append(msgDiv);
-                } /*se {
-                    // --- 原有的普通消息处理逻辑 ---
+                } else {
+                    // --- 修复：恢复普通消息处理逻辑 ---
                     let head;
                     let Class;
                     let sp = content.split("--");
-                    if (sp[0] == `${UserName}`) {
+                    
+                    if (sp.length < 2) {
+                        console.log(`消息格式不正确: ${content}`);
+                        return;
+                    }
+                    
+                    const sender = sp[0];
+                    const messageContent = sp[1];
+                    const timestamp = sp.length >= 3 ? sp[2] : "";
+                    
+                    console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
+                    
+                    if (sender == `${UserName}`) {
                         head = GetCharHead(`${UserName}`);
                         Class = "my_msg";
                     } else {
-                        head = GetCharHead(sp[0]);
+                        head = GetCharHead(sender);
                         Class = "user_msg";
                     }
+                    
                     if (head == "") {
-                        if (sp[0] == `${UserName}`) {
+                        if (sender == `${UserName}`) {
                             head = "https://files.catbox.moe/koydgy.png";
                         } else {
                             head = "https://files.catbox.moe/jct0gf.png";
                         }
                     }
-                    if (sp.length >= 2) {
-                        const msgDiv = $("<div>", { class: Class });
-                        const headImg = $("<img>", { src: head });
-                        const bubbleDiv = $("<div>");
-                        bubbleDiv.html(sp[1]);
-                        msgDiv.append(headImg);
-                        msgDiv.append(bubbleDiv);
-
-                        if (sp.length >= 3) {
-                            const timeSpan = $("<span>");
-                            timeSpan.text(sp[2]);
-                            bubbleDiv.append(timeSpan);
-                        }
-                        $(dom).append(msgDiv);
+                    
+                    // 创建消息元素
+                    const msgDiv = $("<div>", { class: Class });
+                    const headImg = $("<img>", { src: head });
+                    const bubbleDiv = $("<div>");
+                    
+                    // 处理特殊格式消息（表情包、图片等）
+                    const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), sender == `${UserName}`);
+                    if (specialContent) {
+                        bubbleDiv.html(specialContent);
+                    } else {
+                        bubbleDiv.html(messageContent);
                     }
-                }*/
+                    
+                    msgDiv.append(headImg);
+                    msgDiv.append(bubbleDiv);
+
+                    if (timestamp) {
+                        const timeSpan = $("<span>", { class: "message-time" });
+                        timeSpan.text(timestamp);
+                        bubbleDiv.append(timeSpan);
+                    }
+                    
+                    $(dom).append(msgDiv);
+                    console.log(`消息已添加到DOM: ${sender}: ${messageContent}`);
+                }
                              
-                // 仅当是新消息时才滚动到底部
-                if (isNew) {
+                // 滚动到底部（无论是否为新消息，确保用户能看到最新内容）
+                if (dom && dom.scrollHeight) {
                     $(dom).scrollTop(dom.scrollHeight);
+                    console.log(`聊天区域已滚动到底部`);
                 }
             }
             function QQ_Chat_AddUserMsg(element, msg) {
