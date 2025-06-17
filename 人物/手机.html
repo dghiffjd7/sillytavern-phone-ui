@@ -13863,16 +13863,32 @@
                     const contactAvatar = document.createElement('div');
                     contactAvatar.className = 'add-member-contact-avatar';
                     
-                    // *** 修复：改进头像获取逻辑 ***
+                    // *** 修复：改进头像获取逻辑，确保获取联系人的真实头像 ***
                     const avatarElement = element.querySelector('.QQ_home_head');
                     if (avatarElement) {
-                        // 直接复制原始头像的样式
+                        // 直接复制原始头像的所有样式和内容
                         contactAvatar.style.cssText = avatarElement.style.cssText;
                         contactAvatar.style.width = '40px';
                         contactAvatar.style.height = '40px';
                         contactAvatar.style.marginRight = '12px';
                         contactAvatar.style.flexShrink = '0';
                         contactAvatar.textContent = avatarElement.textContent;
+                        
+                        // 确保背景图像和背景样式都复制过来
+                        const computedStyle = window.getComputedStyle(avatarElement);
+                        if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
+                            contactAvatar.style.backgroundImage = computedStyle.backgroundImage;
+                        }
+                        if (computedStyle.backgroundColor && computedStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                            contactAvatar.style.backgroundColor = computedStyle.backgroundColor;
+                        }
+                        
+                        console.log(`添加成员头像调试 - ${contactName}:`, {
+                            originalStyle: avatarElement.style.cssText,
+                            computedBgImage: computedStyle.backgroundImage,
+                            computedBgColor: computedStyle.backgroundColor,
+                            textContent: avatarElement.textContent
+                        });
                     } else {
                         // 使用备选方案
                         const avatarData = getCharacterAvatar(contactName);
@@ -13880,6 +13896,7 @@
                         contactAvatar.style.width = '40px';
                         contactAvatar.style.height = '40px';
                         contactAvatar.style.marginRight = '12px';
+                        console.log(`添加成员头像调试 - ${contactName}: 使用备选方案`);
                     }
                     
                     const contactNameDiv = document.createElement('div');
@@ -13973,19 +13990,33 @@
                 const searchTerm = searchInput.value.toLowerCase().trim();
                 const contactItems = contactList.querySelectorAll('.add-member-contact-item');
                 
-                console.log(`搜索词: "${searchTerm}", 联系人数量: ${contactItems.length}`);
+                console.log(`=== 添加成员搜索调试 ===`);
+                console.log(`搜索词: "${searchTerm}"`);
+                console.log(`联系人总数: ${contactItems.length}`);
                 
                 let visibleCount = 0;
-                contactItems.forEach(item => {
+                const debugInfo = [];
+                
+                contactItems.forEach((item, index) => {
                     const contactName = item.getAttribute('data-contact-name');
                     const nameElement = item.querySelector('.add-member-contact-name');
                     const displayName = nameElement ? nameElement.textContent.trim() : '';
                     
-                    // 改进搜索逻辑：同时匹配属性和显示文本
+                    // 详细的搜索匹配逻辑
                     const matchesAttribute = contactName && contactName.toLowerCase().includes(searchTerm);
                     const matchesDisplay = displayName.toLowerCase().includes(searchTerm);
+                    const shouldShow = searchTerm === '' || matchesAttribute || matchesDisplay;
                     
-                    if (searchTerm === '' || matchesAttribute || matchesDisplay) {
+                    debugInfo.push({
+                        index: index,
+                        contactName: contactName,
+                        displayName: displayName,
+                        matchesAttribute: matchesAttribute,
+                        matchesDisplay: matchesDisplay,
+                        shouldShow: shouldShow
+                    });
+                    
+                    if (shouldShow) {
                         item.style.display = 'flex';
                         visibleCount++;
                     } else {
@@ -13993,19 +14024,28 @@
                     }
                 });
                 
-                console.log(`搜索结果: ${visibleCount} 个可见联系人`);
+                // 详细的调试输出
+                if (searchTerm !== '') {
+                    console.log('搜索详情:', debugInfo);
+                    console.log(`匹配结果: ${visibleCount}/${contactItems.length} 个联系人`);
+                }
                 
-                // 如果没有搜索结果，显示提示
+                // 移除之前的无结果提示
                 const existingNoResult = contactList.querySelector('.no-search-result');
                 if (existingNoResult) {
                     existingNoResult.remove();
                 }
                 
+                // 如果搜索有内容但无结果，显示提示
                 if (searchTerm !== '' && visibleCount === 0) {
                     const noResultDiv = document.createElement('div');
                     noResultDiv.className = 'no-search-result';
-                    noResultDiv.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px;';
-                    noResultDiv.textContent = `未找到包含 "${searchTerm}" 的联系人`;
+                    noResultDiv.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px; border: 1px dashed #ddd; border-radius: 8px; margin: 10px 0;';
+                    noResultDiv.innerHTML = `
+                        <div style="font-size: 16px; margin-bottom: 8px;">🔍</div>
+                        <div>未找到包含 "<strong>${searchTerm}</strong>" 的联系人</div>
+                        <div style="font-size: 12px; color: #666; margin-top: 4px;">请尝试输入其他关键词</div>
+                    `;
                     contactList.appendChild(noResultDiv);
                 }
             }
