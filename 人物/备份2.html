@@ -2305,7 +2305,7 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                z-index: 10000;
+                z-index: 30000; /* 确保在群聊设置模态窗口(z-index: 20000)之上 */
                 animation: modalFadeIn 0.3s ease;
             }
             
@@ -12639,8 +12639,8 @@
                     return null;
                 }
                 
-                // 查找对应的联系人元素
-                const contactElements = contactsContainer.querySelectorAll('.QQ_home_char');
+                // 查找对应的联系人元素 - 修复：使用正确的选择器
+                const contactElements = contactsContainer.querySelectorAll('.QQ_home_usermsg');
                 for (let element of contactElements) {
                     const nameElement = element.querySelector('.QQ_home_name');
                     if (nameElement && nameElement.textContent.trim() === characterName) {
@@ -13197,8 +13197,6 @@
                 return []; // 返回空数组，避免重复加载
             }
             
-
-
             
             /**
              * 更新联系人列表中的群聊信息
@@ -13986,7 +13984,8 @@
                     return;
                 }
                 
-                const contactElements = contactsContainer.querySelectorAll('.QQ_home_char');
+                // *** 修复：使用正确的选择器 .QQ_home_usermsg，与联系人界面搜索保持一致 ***
+                const contactElements = contactsContainer.querySelectorAll('.QQ_home_usermsg');
                 const currentMembers = new Set(currentManagingGroup.members);
                 
                 console.log(`找到 ${contactElements.length} 个联系人，当前群聊成员:`, currentMembers);
@@ -14153,7 +14152,7 @@
             }
             
             /**
-             * 过滤添加成员联系人列表
+             * 过滤添加成员联系人列表（参考联系人界面搜索逻辑）
              */
             function filterAddMemberContacts() {
                 const searchInput = document.getElementById('add_member_search_input');
@@ -14164,7 +14163,9 @@
                     return;
                 }
                 
-                const searchTerm = searchInput.value.toLowerCase().trim();
+                const searchTerm = searchInput.value.trim();
+                const search = searchTerm.toLowerCase();
+                const isEmpty = search === '';
                 const contactItems = contactList.querySelectorAll('.add-member-contact-item');
                 
                 console.log(`=== 添加成员搜索调试 ===`);
@@ -14172,40 +14173,6 @@
                 console.log(`联系人总数: ${contactItems.length}`);
                 
                 let visibleCount = 0;
-                const debugInfo = [];
-                
-                contactItems.forEach((item, index) => {
-                    const contactName = item.getAttribute('data-contact-name');
-                    const nameElement = item.querySelector('.add-member-contact-name');
-                    const displayName = nameElement ? nameElement.textContent.trim() : '';
-                    
-                    // 详细的搜索匹配逻辑
-                    const matchesAttribute = contactName && contactName.toLowerCase().includes(searchTerm);
-                    const matchesDisplay = displayName.toLowerCase().includes(searchTerm);
-                    const shouldShow = searchTerm === '' || matchesAttribute || matchesDisplay;
-                    
-                    debugInfo.push({
-                        index: index,
-                        contactName: contactName,
-                        displayName: displayName,
-                        matchesAttribute: matchesAttribute,
-                        matchesDisplay: matchesDisplay,
-                        shouldShow: shouldShow
-                    });
-                    
-                    if (shouldShow) {
-                        item.style.display = 'flex';
-                        visibleCount++;
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
-                
-                // 详细的调试输出
-                if (searchTerm !== '') {
-                    console.log('搜索详情:', debugInfo);
-                    console.log(`匹配结果: ${visibleCount}/${contactItems.length} 个联系人`);
-                }
                 
                 // 移除之前的无结果提示
                 const existingNoResult = contactList.querySelector('.no-search-result');
@@ -14213,8 +14180,46 @@
                     existingNoResult.remove();
                 }
                 
+                contactItems.forEach((item, index) => {
+                    const nameElement = item.querySelector('.add-member-contact-name');
+                    if (!nameElement) {
+                        console.warn("联系人项目缺少姓名元素", item);
+                        item.style.display = 'none';
+                        return;
+                    }
+                    
+                    // 获取原始文本内容（参考联系人搜索逻辑）
+                    const originalName = nameElement.getAttribute('data-original-text') || nameElement.textContent;
+                    const name = originalName.toLowerCase();
+                    
+                    // 检查是否匹配搜索条件
+                    const nameMatches = isEmpty || name.includes(search);
+                    const isMatch = nameMatches;
+                    
+                    if (isMatch) {
+                        // 显示联系人
+                        item.style.display = 'flex';
+                        visibleCount++;
+                        
+                        // 处理高亮显示（参考联系人搜索的高亮逻辑）
+                        if (!isEmpty && nameMatches) {
+                            highlightAddMemberSearchTerm(nameElement, searchTerm, originalName);
+                        } else {
+                            // 恢复原始文本，移除高亮
+                            if (nameElement.getAttribute('data-original-text')) {
+                                nameElement.innerHTML = originalName;
+                            }
+                        }
+                    } else {
+                        // 隐藏不匹配的联系人
+                        item.style.display = 'none';
+                    }
+                });
+                
+                console.log(`搜索"${searchTerm}": 找到 ${visibleCount} 个联系人`);
+                
                 // 如果搜索有内容但无结果，显示提示
-                if (searchTerm !== '' && visibleCount === 0) {
+                if (!isEmpty && visibleCount === 0) {
                     const noResultDiv = document.createElement('div');
                     noResultDiv.className = 'no-search-result';
                     noResultDiv.style.cssText = 'text-align: center; color: #999; padding: 20px; font-size: 14px; border: 1px dashed #ddd; border-radius: 8px; margin: 10px 0;';
@@ -14224,7 +14229,29 @@
                         <div style="font-size: 12px; color: #666; margin-top: 4px;">请尝试输入其他关键词</div>
                     `;
                     contactList.appendChild(noResultDiv);
+                    console.log("没有找到匹配的联系人");
                 }
+            }
+            
+            /**
+             * 添加成员搜索高亮功能（参考联系人搜索高亮逻辑）
+             */
+            function highlightAddMemberSearchTerm(element, searchTerm, originalText) {
+                if (!searchTerm || searchTerm.trim() === '') {
+                    element.innerHTML = originalText;
+                    return;
+                }
+                
+                // 保存原始文本
+                if (!element.getAttribute('data-original-text')) {
+                    element.setAttribute('data-original-text', originalText);
+                }
+                
+                // 创建高亮HTML
+                const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                const highlightedText = originalText.replace(regex, '<span style="background-color: #FFE066; color: #333; font-weight: bold; padding: 1px 2px; border-radius: 2px;">$1</span>');
+                
+                element.innerHTML = highlightedText;
             }
             
             /**
