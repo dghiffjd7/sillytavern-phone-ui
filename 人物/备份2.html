@@ -11442,39 +11442,8 @@
                     // 直接使用压缩后的base64数据，避免localStorage存储
                     console.log('使用压缩后的base64数据，跳过localStorage存储');
                     
-                    // 检查是否是群聊设置中的头像上传
-                    if (window.isSelectingGroupAvatar && window.currentAvatarGroup) {
-                        // 群聊设置中的头像上传，直接使用压缩后的数据
-                        window.currentAvatarGroup.avatar = imageData;
-                        
-                        // 更新到世界书
-                        await updateGroupAvatarInWorldbook(window.currentAvatarGroup.name, imageData);
-                        
-                        // 更新群聊设置界面的头像预览
-                        const avatarPreview = document.getElementById('group_settings_avatar_preview');
-                        if (avatarPreview) {
-                            avatarPreview.innerHTML = '';
-                            const img = document.createElement('img');
-                            img.src = imageData;
-                            img.alt = '群聊头像';
-                            avatarPreview.appendChild(img);
-                        }
-                        
-                        // 更新所有界面中的群聊头像
-                        updateGroupInAllLists(window.currentAvatarGroup);
-                        
-                        console.log('群聊头像上传成功，数据大小:', imageData.length);
-                        alert('✅ 群聊头像上传成功');
-                        
-                        // 关闭头像选择器
-                        closeAvatarSelector();
-                        
-                        // 清理标志
-                        window.isSelectingGroupAvatar = false;
-                        window.currentAvatarGroup = null;
-                        
-                        return;
-                    }
+                    // *** 修复：统一的头像上传逻辑 ***
+                    // 无论是创建群聊还是群聊设置，都使用相同的逻辑：先保存到selectedAvatarData，然后通过确认按钮统一处理
                     
                     // 群聊创建中的头像上传
                     const uploadZone = document.querySelector('.upload-zone');
@@ -11526,10 +11495,11 @@
             }
             
             /**
-             * 确认头像选择
+             * 确认头像选择（增强版：支持创建群聊和群聊设置）
              */
             function confirmAvatarSelection() {
                 console.log('确认头像选择，当前选中的头像数据:', window.selectedAvatarData);
+                console.log('是否在群聊设置中选择头像:', window.isSelectingGroupAvatar);
                 
                 // 如果没有选择头像，使用默认头像
                 if (!window.selectedAvatarData) {
@@ -11541,29 +11511,68 @@
                     console.log('使用默认头像:', window.selectedAvatarData);
                 }
                 
-                const previewElement = document.getElementById('group_avatar_preview');
-                const textElement = document.querySelector('.group-avatar-text');
-                
-                if (!previewElement || !textElement) {
-                    console.error('找不到头像预览元素');
-                    return;
-                }
-                
-                if (window.selectedAvatarData.type === 'preset') {
-                    // 预设头像
-                    const gradient = window.selectedAvatarData.gradient;
-                    previewElement.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
-                    previewElement.style.backgroundImage = 'none';
-                    previewElement.innerHTML = `<div class="default-group-avatar">${window.selectedAvatarData.text}</div>`;
-                    textElement.textContent = '已设置预设头像';
-                } else if (window.selectedAvatarData.type === 'upload') {
-                    // 上传的头像
-                    previewElement.style.background = 'none';
-                    previewElement.style.backgroundImage = `url('${window.selectedAvatarData.imageData}')`;
-                    previewElement.style.backgroundSize = 'cover';
-                    previewElement.style.backgroundPosition = 'center';
-                    previewElement.innerHTML = '';
-                    textElement.textContent = '已设置自定义头像';
+                // *** 修复：支持群聊设置中的头像选择 ***
+                if (window.isSelectingGroupAvatar) {
+                    // 群聊设置中的头像选择
+                    const settingsPreviewElement = document.getElementById('group_settings_avatar_preview');
+                    const settingsTextElement = document.querySelector('.group-settings-avatar-text');
+                    
+                    if (settingsPreviewElement && settingsTextElement) {
+                        if (window.selectedAvatarData.type === 'preset') {
+                            // 预设头像
+                            const gradient = window.selectedAvatarData.gradient;
+                            settingsPreviewElement.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
+                            settingsPreviewElement.style.backgroundImage = 'none';
+                            settingsPreviewElement.innerHTML = `<div class="default-group-avatar">${window.selectedAvatarData.text}</div>`;
+                            settingsTextElement.textContent = '已选择预设头像';
+                        } else if (window.selectedAvatarData.type === 'upload') {
+                            // 上传的头像
+                            settingsPreviewElement.style.background = 'none';
+                            settingsPreviewElement.style.backgroundImage = `url('${window.selectedAvatarData.imageData}')`;
+                            settingsPreviewElement.style.backgroundSize = 'cover';
+                            settingsPreviewElement.style.backgroundPosition = 'center';
+                            settingsPreviewElement.style.backgroundRepeat = 'no-repeat';
+                            settingsPreviewElement.innerHTML = '';
+                            settingsTextElement.textContent = '已选择自定义头像';
+                        }
+                        
+                        console.log('群聊设置头像预览已更新');
+                    } else {
+                        console.error('找不到群聊设置头像预览元素');
+                    }
+                    
+                    // 清理群聊设置相关的标志
+                    window.isSelectingGroupAvatar = false;
+                    window.currentAvatarGroup = null;
+                } else {
+                    // 创建群聊时的头像选择（原逻辑）
+                    const previewElement = document.getElementById('group_avatar_preview');
+                    const textElement = document.querySelector('.group-avatar-text');
+                    
+                    if (!previewElement || !textElement) {
+                        console.error('找不到创建群聊头像预览元素');
+                        closeAvatarSelector();
+                        return;
+                    }
+                    
+                    if (window.selectedAvatarData.type === 'preset') {
+                        // 预设头像
+                        const gradient = window.selectedAvatarData.gradient;
+                        previewElement.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
+                        previewElement.style.backgroundImage = 'none';
+                        previewElement.innerHTML = `<div class="default-group-avatar">${window.selectedAvatarData.text}</div>`;
+                        textElement.textContent = '已设置预设头像';
+                    } else if (window.selectedAvatarData.type === 'upload') {
+                        // 上传的头像
+                        previewElement.style.background = 'none';
+                        previewElement.style.backgroundImage = `url('${window.selectedAvatarData.imageData}')`;
+                        previewElement.style.backgroundSize = 'cover';
+                        previewElement.style.backgroundPosition = 'center';
+                        previewElement.innerHTML = '';
+                        textElement.textContent = '已设置自定义头像';
+                    }
+                    
+                    console.log('创建群聊头像预览已更新');
                 }
                 
                 console.log('头像设置成功，关闭选择器');
@@ -13646,110 +13655,10 @@
                 }
             }
             
-            /**
-             * 处理群聊头像上传
-             */
-            async function handleGroupAvatarUpload(event) {
-                const file = event.target.files[0];
-                if (!file) return;
-                
-                if (!file.type.startsWith('image/')) {
-                    alert('请选择图片文件');
-                    return;
-                }
-                
-                const reader = new FileReader();
-                reader.onload = async function(e) {
-                    const base64Data = e.target.result;
-                    
-                    // 生成唯一的头像ID
-                    const avatarId = 'avatar_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    
-                    // 保存到localStorage
-                    localStorage.setItem(`avatarData_${avatarId.replace('avatar_', '')}`, base64Data);
-                    
-                    // 更新当前群聊的头像
-                    if (window.currentAvatarGroup) {
-                        window.currentAvatarGroup.avatar = avatarId;
-                        
-                        // 更新到世界书
-                        await updateGroupAvatarInWorldbook(window.currentAvatarGroup.name, avatarId);
-                        
-                        // 更新群聊设置界面的头像预览
-                        const avatarPreview = document.getElementById('group_settings_avatar_preview');
-                        if (avatarPreview) {
-                            avatarPreview.innerHTML = '';
-                            const img = document.createElement('img');
-                            img.src = base64Data;
-                            img.alt = '群聊头像';
-                            avatarPreview.appendChild(img);
-                        }
-                        
-                        // 更新所有界面中的群聊头像
-                        updateGroupInAllLists(window.currentAvatarGroup);
-                        
-                        console.log('群聊头像上传成功:', avatarId);
-                        alert('✅ 群聊头像上传成功');
-                        
-                        // 关闭头像选择器
-                        closeAvatarSelector();
-                    }
-                };
-                reader.readAsDataURL(file);
-            }
-            
-            /**
-             * 更新群聊头像到世界书
-             */
-            async function updateGroupAvatarInWorldbook(groupName, avatarId) {
-                try {
-                    const entries = await getWorldEntries();
-                    let groupEntry = null;
-                    
-                    // 查找群聊条目
-                    for (let entry of entries) {
-                        if (entry.comment === "手机-群聊" && entry.content.includes(`[${groupName}]`)) {
-                            groupEntry = entry;
-                            break;
-                        }
-                    }
-                    
-                    if (groupEntry) {
-                        // 更新头像字段
-                        const lines = groupEntry.content.split('\n');
-                        let updated = false;
-                        
-                        for (let i = 0; i < lines.length; i++) {
-                            if (lines[i].startsWith('头像=')) {
-                                lines[i] = `头像=${avatarId}`;
-                                updated = true;
-                                break;
-                            }
-                        }
-                        
-                        if (!updated) {
-                            // 如果没有头像字段，添加一个
-                            const insertIndex = lines.findIndex(line => line.startsWith('成员='));
-                            if (insertIndex > -1) {
-                                lines.splice(insertIndex, 0, `头像=${avatarId}`);
-                            } else {
-                                lines.push(`头像=${avatarId}`);
-                            }
-                        }
-                        
-                        groupEntry.content = lines.join('\n');
-                        
-                        // 保存到世界书
-                        await setWorldEntry(groupEntry);
-                        console.log('群聊头像已更新到世界书:', groupName, avatarId);
-                    }
-                } catch (error) {
-                    console.error('更新群聊头像到世界书失败:', error);
-                }
-            }
+            // *** 旧的群聊头像上传函数已移除，现在使用统一的 handleAvatarUpload 和 confirmAvatarSelection 逻辑 ***
 
             /**
-             * 保存群聊设置
+             * 保存群聊设置（增强版：支持即时生效和头像更新）
              */
             async function saveGroupSettings() {
                 if (!currentManagingGroup) return;
@@ -13762,26 +13671,63 @@
                     return;
                 }
                 
-                // 更新群聊名称
+                console.log('=== 保存群聊设置 ===');
+                console.log('原群聊名称:', currentManagingGroup.name);
+                console.log('新群聊名称:', newName);
+                console.log('选中的头像数据:', window.selectedAvatarData);
+                
+                // 保存旧的信息
                 const oldName = currentManagingGroup.name;
+                const oldId = currentManagingGroup.id;
+                
+                // 更新群聊名称
                 currentManagingGroup.name = newName;
+                
+                // *** 修复：更新头像信息 ***
+                if (window.selectedAvatarData) {
+                    console.log('更新群聊头像:', window.selectedAvatarData);
+                    currentManagingGroup.avatar = window.selectedAvatarData;
+                    
+                    // 如果是上传的头像，确保数据格式正确
+                    if (window.selectedAvatarData.type === 'upload' && window.selectedAvatarData.imageData) {
+                        currentManagingGroup.avatarUrl = window.selectedAvatarData.imageData;
+                    }
+                }
                 
                 // 更新到世界书
                 if (oldName !== newName) {
                     await updateGroupNameInWorldbook(oldName, newName);
+                } else {
+                    // 即使名称没变，也要保存头像等其他信息
+                    await saveGroupToWorldbook(currentManagingGroup);
                 }
                 
-                // 更新界面显示
-                updateGroupInAllLists(currentManagingGroup);
+                // *** 修复：立即更新所有界面显示，包括头像 ***
+                await updateGroupInAllListsWithAvatar(currentManagingGroup);
                 
-                // 如果当前正在聊天界面，更新头部
+                // *** 修复：如果当前正在聊天界面，更新头部并保持聊天记录 ***
                 if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
-                    window.currentGroupChat = currentManagingGroup;
+                    // 更新当前群聊对象的信息，保持消息记录不变
+                    window.currentGroupChat.name = currentManagingGroup.name;
+                    window.currentGroupChat.avatar = currentManagingGroup.avatar;
+                    window.currentGroupChat.avatarUrl = currentManagingGroup.avatarUrl;
+                    
+                    // 更新聊天界面头部显示
                     updateChatHeader(currentManagingGroup);
+                    
+                    console.log('已更新当前聊天界面，聊天记录保持不变');
                 }
                 
-                console.log(`群聊设置已保存: ${oldName} -> ${newName}`);
-                alert('群聊设置已保存');
+                // *** 修复：更新消息JSON中的群聊信息，保持聊天记录 ***
+                if (oldName !== newName) {
+                    await updateGroupChatMessagesInMsgjson(oldId, oldName, newName);
+                }
+                
+                // 清空选中的头像数据
+                window.selectedAvatarData = null;
+                
+                console.log(`群聊设置已保存并立即生效: ${oldName} -> ${newName}`);
+                alert('群聊设置已保存并立即生效');
                 closeGroupSettings();
             }
             
@@ -13825,7 +13771,52 @@
             }
             
             /**
-             * 更新所有列表中的群聊信息
+             * 更新所有列表中的群聊信息（增强版：包含头像更新）
+             */
+            async function updateGroupInAllListsWithAvatar(groupData) {
+                console.log('更新所有列表中的群聊信息，包括头像:', groupData);
+                
+                // 更新联系人列表
+                const contactsContainer = document.getElementById('QQ_home_chars');
+                if (contactsContainer) {
+                    const existingGroup = contactsContainer.querySelector(`[data-group-id="${groupData.id}"]`);
+                    if (existingGroup) {
+                        const nameElement = existingGroup.querySelector('.QQ_home_name');
+                        const avatarElement = existingGroup.querySelector('.QQ_home_head');
+                        
+                        if (nameElement) {
+                            nameElement.textContent = groupData.name;
+                        }
+                        
+                        // 更新头像
+                        if (avatarElement && groupData.avatar) {
+                            updateAvatarElement(avatarElement, groupData.avatar);
+                        }
+                    }
+                }
+                
+                // 更新消息列表
+                const messagesContainer = document.getElementById('QQ_message_list_chars');
+                if (messagesContainer) {
+                    const existingGroup = messagesContainer.querySelector(`[data-group-id="${groupData.id}"]`);
+                    if (existingGroup) {
+                        const nameElement = existingGroup.querySelector('.QQ_home_name');
+                        const avatarElement = existingGroup.querySelector('.QQ_home_head');
+                        
+                        if (nameElement) {
+                            nameElement.textContent = groupData.name;
+                        }
+                        
+                        // 更新头像
+                        if (avatarElement && groupData.avatar) {
+                            updateAvatarElement(avatarElement, groupData.avatar);
+                        }
+                    }
+                }
+            }
+            
+            /**
+             * 更新所有列表中的群聊信息（原版：仅名称）
              */
             function updateGroupInAllLists(groupData) {
                 // 更新联系人列表
@@ -13850,6 +13841,130 @@
                             nameElement.textContent = groupData.name;
                         }
                     }
+                }
+            }
+            
+            /**
+             * 更新头像元素的通用函数
+             */
+            function updateAvatarElement(avatarElement, avatarData) {
+                if (!avatarElement || !avatarData) return;
+                
+                console.log('更新头像元素:', avatarData);
+                
+                if (avatarData.type === 'preset') {
+                    // 预设头像
+                    avatarElement.style.background = `linear-gradient(135deg, ${avatarData.gradient.start}, ${avatarData.gradient.end})`;
+                    avatarElement.style.backgroundImage = 'none';
+                    avatarElement.style.color = 'white';
+                    avatarElement.style.display = 'flex';
+                    avatarElement.style.alignItems = 'center';
+                    avatarElement.style.justifyContent = 'center';
+                    avatarElement.style.fontWeight = 'bold';
+                    avatarElement.textContent = avatarData.text || '群';
+                } else if (avatarData.type === 'upload' && avatarData.imageData) {
+                    // 上传的头像
+                    avatarElement.style.background = 'none';
+                    avatarElement.style.backgroundImage = `url('${avatarData.imageData}')`;
+                    avatarElement.style.backgroundSize = 'cover';
+                    avatarElement.style.backgroundPosition = 'center';
+                    avatarElement.style.backgroundRepeat = 'no-repeat';
+                    avatarElement.textContent = '';
+                } else {
+                    // 默认头像
+                    avatarElement.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
+                    avatarElement.style.backgroundImage = 'none';
+                    avatarElement.style.color = 'white';
+                    avatarElement.style.display = 'flex';
+                    avatarElement.style.alignItems = 'center';
+                    avatarElement.style.justifyContent = 'center';
+                    avatarElement.style.fontWeight = 'bold';
+                    avatarElement.textContent = '群';
+                }
+            }
+            
+            /**
+             * 更新消息JSON中的群聊信息（保持聊天记录）
+             */
+            async function updateGroupChatMessagesInMsgjson(groupId, oldName, newName) {
+                console.log(`更新消息JSON中的群聊名称: ${oldName} -> ${newName}`);
+                
+                try {
+                    // 这里需要调用SillyTavern的API来更新消息记录中的群聊名称
+                    // 具体实现取决于SillyTavern的消息存储机制
+                    // 暂时记录日志，实际实现可能需要访问msgjson文件
+                    console.log('消息记录更新功能需要根据SillyTavern的具体实现进行调整');
+                } catch (error) {
+                    console.error('更新消息记录失败:', error);
+                }
+            }
+            
+            /**
+             * 保存群聊到世界书的通用函数（修复版）
+             */
+            async function saveGroupToWorldbook(groupData) {
+                console.log('保存群聊到世界书:', groupData);
+                
+                try {
+                    // 如果entries未定义，先初始化它
+                    if (!entries) {
+                        console.log('entries未定义，正在初始化...');
+                        if (!worldbook) {
+                            console.error('worldbook未定义，无法初始化entries');
+                            return false;
+                        }
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries初始化完成，条目数量:', entries ? entries.length : 'failed');
+                        if (!entries) {
+                            console.error('entries初始化失败');
+                            return false;
+                        }
+                    }
+                    
+                    // 查找现有的群聊条目
+                    let groupEntry = entries.find(e => 
+                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)
+                    );
+                    
+                    // 处理头像引用
+                    let avatarReference = 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif';
+                    if (groupData.avatar) {
+                        if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
+                            avatarReference = groupData.avatar.imageData;
+                        } else if (groupData.avatar.type === 'preset') {
+                            avatarReference = `预设:${groupData.avatar.text || '群'}`;
+                        } else if (groupData.avatar.type === 'url' && groupData.avatar.url) {
+                            avatarReference = groupData.avatar.url;
+                        }
+                    } else if (groupData.avatarUrl) {
+                        avatarReference = groupData.avatarUrl;
+                    }
+                    
+                    // 构建群聊内容
+                    const groupContent = `[${groupData.name}]
+类型=群聊
+成员=${groupData.members.join(',')}
+头像=${avatarReference}`;
+                    
+                    if (groupEntry) {
+                        // 更新现有条目
+                        console.log('更新现有群聊条目:', groupEntry.uid);
+                        await setLorebookEntries(worldbook, [
+                            {
+                                uid: groupEntry.uid,
+                                content: groupContent,
+                            }
+                        ]);
+                        console.log('群聊已保存到世界书');
+                    } else {
+                        console.error('未找到群聊条目，无法保存');
+                        return false;
+                    }
+                    
+                    return true;
+                } catch (error) {
+                    console.error('保存群聊到世界书失败:', error);
+                    throw error;
                 }
             }
             

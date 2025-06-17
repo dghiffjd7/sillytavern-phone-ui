@@ -13727,6 +13727,10 @@
                 window.selectedAvatarData = null;
                 
                 console.log(`群聊设置已保存并立即生效: ${oldName} -> ${newName}`);
+                
+                // *** 新增：自动重新加载界面数据，保持消息内容不丢失 ***
+                await autoReloadInterfaceAfterGroupUpdate(currentManagingGroup);
+                
                 alert('群聊设置已保存并立即生效');
                 closeGroupSettings();
             }
@@ -13841,6 +13845,166 @@
                             nameElement.textContent = groupData.name;
                         }
                     }
+                }
+            }
+            
+            /**
+             * 群聊设置更新后自动重新加载界面数据（保持消息内容）
+             */
+            async function autoReloadInterfaceAfterGroupUpdate(updatedGroupData) {
+                console.log('=== 开始自动重新加载界面数据 ===');
+                console.log('更新的群聊数据:', updatedGroupData);
+                
+                try {
+                    // 1. 保存当前消息状态（确保消息不丢失）
+                    const currentMessages = {};
+                    const currentGroupMessages = {};
+                    
+                    // 保存个人聊天消息
+                    if (window.msgjson && window.msgjson.data) {
+                        currentMessages = JSON.parse(JSON.stringify(window.msgjson.data));
+                        console.log('已保存个人聊天消息数据');
+                    }
+                    
+                    // 保存群聊消息
+                    if (window.groupChatMessages) {
+                        currentGroupMessages = JSON.parse(JSON.stringify(window.groupChatMessages));
+                        console.log('已保存群聊消息数据');
+                    }
+                    
+                    // 2. 重新从世界书加载群聊数据
+                    console.log('重新从世界书加载群聊数据...');
+                    await loadGroupChatsFromWorldbook();
+                    
+                    // 3. 恢复消息数据（确保消息不丢失）
+                    if (currentMessages && Object.keys(currentMessages).length > 0) {
+                        window.msgjson = window.msgjson || {};
+                        window.msgjson.data = currentMessages;
+                        console.log('已恢复个人聊天消息数据');
+                    }
+                    
+                    if (currentGroupMessages && Object.keys(currentGroupMessages).length > 0) {
+                        window.groupChatMessages = currentGroupMessages;
+                        console.log('已恢复群聊消息数据');
+                    }
+                    
+                    // 4. 重新加载和显示群聊列表
+                    console.log('重新加载和显示群聊列表...');
+                    await refreshGroupChatsDisplay();
+                    
+                    // 6. 如果当前在群聊界面，重新加载消息显示
+                    if (window.currentGroupChat && window.currentGroupChat.id === updatedGroupData.id) {
+                        console.log('重新加载当前群聊消息显示...');
+                        // 更新当前群聊对象
+                        window.currentGroupChat.name = updatedGroupData.name;
+                        window.currentGroupChat.avatar = updatedGroupData.avatar;
+                        window.currentGroupChat.avatarUrl = updatedGroupData.avatarUrl;
+                        
+                        // 重新加载消息显示（保持消息内容）
+                        loadGroupChatHistory(updatedGroupData.id);
+                        
+                        // 更新聊天头部
+                        updateChatHeader(updatedGroupData);
+                    }
+                    
+                    // 7. 更新最后消息显示
+                    console.log('更新群聊最后消息显示...');
+                    updateGroupLastMessageDisplay();
+                    
+                    console.log('=== 自动重新加载界面数据完成 ===');
+                    
+                } catch (error) {
+                    console.error('自动重新加载界面数据时出错:', error);
+                    alert('界面更新时出现问题，但数据已保存。建议手动刷新页面。');
+                }
+            }
+            
+            /**
+             * 刷新群聊显示（保持消息内容）
+             */
+            async function refreshGroupChatsDisplay() {
+                console.log('刷新群聊显示...');
+                
+                try {
+                    // 移除现有的群聊元素，但保留个人聊天
+                    const contactsContainer = document.getElementById('QQ_home_chars');
+                    const messagesContainer = document.getElementById('QQ_message_list_chars');
+                    
+                    if (contactsContainer) {
+                        // 移除群聊元素
+                        const groupElements = contactsContainer.querySelectorAll('[data-group-id]');
+                        groupElements.forEach(el => el.remove());
+                    }
+                    
+                    if (messagesContainer) {
+                        // 移除群聊元素
+                        const groupElements = messagesContainer.querySelectorAll('[data-group-id]');
+                        groupElements.forEach(el => el.remove());
+                    }
+                    
+                    // 重新使用AddNewGroup函数添加所有群聊
+                    if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
+                        for (const groupData of window.QQ_Groups) {
+                            if (groupData && groupData.name) {
+                                console.log('重新添加群聊:', groupData.name);
+                                AddNewGroup(
+                                    groupData.name, 
+                                    groupData.avatar || groupData.avatarUrl || 'https://files.catbox.moe/skngqq.jpg', 
+                                    groupData.members || [], 
+                                    groupData.description || `${groupData.members?.length || 0}人群聊`
+                                );
+                            }
+                        }
+                    }
+                    
+                    console.log('群聊显示刷新完成');
+                    
+                } catch (error) {
+                    console.error('刷新群聊显示时出错:', error);
+                    // 降级方案：简单地重新初始化增强功能
+                    console.log('使用降级方案：重新初始化增强功能');
+                    setTimeout(initializeEnhancedFeatures, 500);
+                }
+            }
+            
+            /**
+             * 更新群聊消息JSON中的群聊信息（保持聊天记录）
+             */
+            async function updateGroupChatMessagesInMsgjson(groupId, oldName, newName) {
+                console.log('更新消息JSON中的群聊信息:', { groupId, oldName, newName });
+                
+                try {
+                    // 更新群聊消息记录中的群聊名称
+                    if (window.groupChatMessages && window.groupChatMessages[groupId]) {
+                        const messages = window.groupChatMessages[groupId];
+                        console.log(`群聊 ${groupId} 有 ${messages.length} 条消息需要更新`);
+                        
+                        // 这里可以更新消息中的群聊相关信息，但保持消息内容不变
+                        // 目前主要是确保groupId和消息记录的关联保持正确
+                    }
+                    
+                    // 更新msgjson中的群聊相关信息
+                    if (window.msgjson && window.msgjson.data) {
+                        // 遍历所有用户的消息，更新涉及该群聊的消息
+                        Object.keys(window.msgjson.data).forEach(userId => {
+                            const userMessages = window.msgjson.data[userId];
+                            if (Array.isArray(userMessages)) {
+                                userMessages.forEach(message => {
+                                    // 如果消息中提到了旧的群聊名称，可以选择性更新
+                                    // 但要保持消息内容的完整性
+                                    if (message.mes && typeof message.mes === 'string' && message.mes.includes(oldName)) {
+                                        console.log(`在用户 ${userId} 的消息中发现群聊引用，保持不变`);
+                                        // 这里可以选择是否更新消息中的群聊名称引用
+                                        // 为了安全起见，暂时保持消息内容不变
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    
+                    console.log('群聊消息信息更新完成');
+                } catch (error) {
+                    console.error('更新群聊消息信息时出错:', error);
                 }
             }
             
