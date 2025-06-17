@@ -7727,7 +7727,7 @@
 
                 let messages = [];
                 if (isGroup) {
-                    messages = (QQ_msgjson.群聊[name]?.msgs || []).slice(); // 使用slice创建副本
+                    messages = (QQ_msgjson.群聊[name]?.msgs || []).slice();
                 } else {
                     const key1 = `${UserName}和${name}的聊天`;
                     const key2 = `${name}和${UserName}的聊天`;
@@ -7744,10 +7744,16 @@
                     messages.forEach(msg => {
                         QQ_Chat_AddMsg($msgContent[0], msg, name, false);
                     });
+                    
+                    // 从加载的消息中提取最后一条作为预览
+                    const lastMessageRaw = messages[messages.length - 1];
+                    const lastMessageData = QQ_Msg_Get(lastMessageRaw);
+                    QQ_SetHomeTips(name, "0", lastMessageData.message, lastMessageData.time);
+
                 } else {
                     console.log(`[ChangePage] ${name} 没有消息记录可显示。`);
+                    QQ_SetHomeTips(name, "0", "...", ""); // 没有消息时，显示省略号
                 }
-
 
                 if (isGroup) {
                     const groupData = QQ_msgjson.群聊[name];
@@ -7755,13 +7761,11 @@
                     $page.find('#QQ_chat_username').html(`${name} <span style="font-size: 12px; color: #999; font-weight: normal;">(${memberCount}人)</span>`);
                 }
 
-                QQ_SetHomeTips(name, "0"); // 清除红点
                 QQ_HideAllChat();
                 $("#QQ_home_page, #QQ_message_list_page, #QQ_space_page").hide();
                 $(".QQ_bottom_nav").hide();
                 $page.show();
 
-                // 滚动到底部
                 $msgContent.scrollTop($msgContent[0].scrollHeight);
                 
                 const TipsCount = QQ_GetChatShowTipsCount(name);
@@ -7771,7 +7775,6 @@
                 current_chat_name_and_isgroup.name = name;
                 current_chat_name_and_isgroup.isGroup = isGroup;
             }
-
             function QQ_CreatChatPage(name) {
                 console.log(`创建聊天页框架: ${name}`);
                 const isGroup = QQ_Groups.includes(name);
@@ -8655,66 +8658,40 @@
              * @param {*} name - 角色/群聊名称
              * @param {*} isNew - 是否为新消息
              */
-            function QQ_Chat_AddMsg(dom, content, name, isNew) {
-                // *** 核心改造：判断是否为系统消息 ***
-                if (content.startsWith("系统消息--")) {
-                    const sysMsgText = content.split("--")[2]; // 提取真实的消息内容
-                    const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
-                    $(dom).append(msgDiv);
-                } /*se {
-                    // --- 原有的普通消息处理逻辑 ---
-                    let head;
-                    let Class;
-                    let sp = content.split("--");
-                    if (sp[0] == `${UserName}`) {
-                        head = GetCharHead(`${UserName}`);
-                        Class = "my_msg";
-                    } else {
-                        head = GetCharHead(sp[0]);
-                        Class = "user_msg";
-                    }
-                    if (head == "") {
-                        if (sp[0] == `${UserName}`) {
-                            head = "https://files.catbox.moe/koydgy.png";
-                        } else {
-                            head = "https://files.catbox.moe/jct0gf.png";
-                        }
-                    }
-                    if (sp.length >= 2) {
-                        const msgDiv = $("<div>", { class: Class });
-                        const headImg = $("<img>", { src: head });
-                        const bubbleDiv = $("<div>");
-                        bubbleDiv.html(sp[1]);
-                        msgDiv.append(headImg);
-                        msgDiv.append(bubbleDiv);
-
-                        if (sp.length >= 3) {
-                            const timeSpan = $("<span>");
-                            timeSpan.text(sp[2]);
-                            bubbleDiv.append(timeSpan);
-                        }
-                        $(dom).append(msgDiv);
-                    }
-                }*/
-                             
-                // 仅当是新消息时才滚动到底部
-                if (isNew) {
-                    $(dom).scrollTop(dom.scrollHeight);
-                }
-            }
-            function QQ_Chat_AddUserMsg(element, msg) {
-                const match = msg.match(/(.+?)--(.+)/);
-                if (!match) {
+             function QQ_Chat_AddMsg(msgContent, msg, name, isnew) {
+                if (!msgContent) {
+                    console.error("QQ_Chat_AddMsg: msgContent is null or undefined!");
                     return;
                 }
-                const content = QQ_Chat_SpecialMsg(
-                    match[2],
-                    `${UserName}`,
-                    false,
-                    true,
+                const msgData = QQ_Msg_Get(msg);
+                if (!msgData || !msgData.message) {
+                    // 如果消息内容为空，则不添加任何元素
+                    return;
+                }
+
+                // 使用模板创建消息元素
+                const templateId = msgData.isMe ? 'my_msg_template' : 'char_msg_template';
+                const templateHtml = document.getElementById(templateId).innerHTML;
+                const $msgElement = $(
+                    _.template(templateHtml)({
+                        name: msgData.name,
+                        message: msgData.message,
+                        head: msgData.head,
+                        avatar: msgData.isMe ? userAvatarPath : charAvatarPath,
+                    }),
                 );
-                const html = _.template(chat_user_message)({ content });
-                $(element).append(html);
+
+                // 处理图片、假消息等
+                QQ_HandleImages($msgElement, msgData.name);
+                QQ_HandleFakeImg($msgElement);
+
+                // 附加到内容区
+                $(msgContent).append($msgElement);
+
+                // 如果是新消息，则滚动到底部
+                if (isnew) {
+                    $(msgContent).scrollTop(msgContent.scrollHeight);
+                }
             }
             /**
              * 处理特殊格式消息
