@@ -4297,10 +4297,10 @@
                             const compressedDataUrl = canvas.toDataURL('image/jpeg', currentQuality);
                             const sizeKB = (compressedDataUrl.length * 3/4) / 1024; // 粗略估算大小
                             
-                            // console.log(`压缩质量: ${currentQuality}, 大小: ${sizeKB.toFixed(2)}KB`);
+                            console.log(`压缩质量: ${currentQuality}, 大小: ${sizeKB.toFixed(2)}KB`);
                             
                             if (sizeKB <= maxSizeKB || currentQuality <= 0.1) {
-                                // console.log(`压缩完成，最终大小: ${sizeKB.toFixed(2)}KB`);
+                                console.log(`压缩完成，最终大小: ${sizeKB.toFixed(2)}KB`);
                                 resolve(compressedDataUrl);
                             } else {
                                 // 递归降低质量
@@ -4361,7 +4361,7 @@
                         .split(/\n+/)
                         .map((line) => line.trim())
                         .filter((line) => line.length > 0);
-                    // console.log("Parsed lines:", lines.length);
+                    console.log("Parsed lines:", lines.length);
                     return this.loadLines(lines); // 使用this调用类方法
                 }
                 getAllSections() {
@@ -4539,6 +4539,13 @@
             let newgen = true;
             let QQ_CharSettings = new MyINI();
             let Phone_Settings = new MyINI();
+            // *** 新增：动态内容持久化存储 ***
+            let QQ_MomentsData = [];  // 存储所有动态内容的数组
+            window.QQ_MomentsData = QQ_MomentsData;  // 设为全局变量方便调试
+            
+            // *** 新增：聊天消息worldbook备份存储 ***
+            let QQ_ChatBackup = {};  // 聊天消息的worldbook备份
+            window.QQ_ChatBackup = QQ_ChatBackup;  // 设为全局变量方便调试
             let QQ_Music = {
                 audio: new Audio(),
                 lastelement: undefined, // 允许 undefined
@@ -4640,7 +4647,7 @@
              * @returns 生成结果
              */
             async function QQ_Gen(msg) {
-                // console.log(`触发生成  ${msg}`);
+                console.log(`触发生成  ${msg}`);
                 let result;
                 if (newgen) {
                     result = await generate({
@@ -4653,27 +4660,29 @@
                         should_stream: false,
                     });
                 }
-                // console.log(`生成结果:${result}`);
+                console.log(`生成结果:${result}`);
                 return result;
             }
             /**
-             * 保存消息
+             * 保存消息（增强版：原有机制 + worldbook备份）
              * @returns
              */
             async function QQ_Save_Msg() {
                 if (!QQ_msgjson) {
                     return;
                 }
+                
+                // 原有保存机制：保存到SillyTavern消息系统
                 const CurrentMessageId = getCurrentMessageId();
                 const Messages = await getChatMessages(CurrentMessageId);
                 if (!Messages) {
-                    // console.log(`获取楼层记录失败`);
+                    console.log(`获取楼层记录失败`);
                     return;
                 }
                 let msg = Messages[0].message;
                 const match = msg.match(/msg_start[\s\S]+?msg_end/);
                 if (!match) {
-                    // console.log(`匹配楼层记录失败`);
+                    console.log(`匹配楼层记录失败`);
                     return;
                 }
                 msg = msg.replace(
@@ -4683,9 +4692,154 @@
                 setChatMessage({ message: msg }, CurrentMessageId, {
                     refresh: "none",
                 });
+                
+                // *** 新增：worldbook备份机制 ***
+                console.log('开始聊天消息worldbook备份...');
+                await QQ_Save_Chat_Backup();
             }
+            
+            /**
+             * *** 新增：保存聊天消息到worldbook备份 ***
+             * @returns
+             */
+            async function QQ_Save_Chat_Backup() {
+                if (!worldbook || !entries || !QQ_msgjson) {
+                    console.log('聊天备份跳过：缺少worldbook或entries或聊天数据');
+                    return;
+                }
+                
+                try {
+                    // 创建备份数据结构，包含时间戳和完整聊天数据
+                    QQ_ChatBackup = {
+                        lastUpdated: new Date().toISOString(),
+                        data: JSON.parse(JSON.stringify(QQ_msgjson)),  // 深拷贝
+                        version: version || "unknown"
+                    };
+                    
+                    // 查找或创建聊天备份条目
+                    let chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                    
+                    const backupJson = JSON.stringify(QQ_ChatBackup, null, 2);
+                    console.log('准备备份聊天消息:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                    
+                    if (chatBackupEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: chatBackupEntry.uid,
+                            content: backupJson,
+                        }]);
+                        console.log('聊天消息已更新到现有worldbook备份条目');
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: "手机-聊天消息备份",
+                            key: ["此世界书永不触发_聊天备份"],
+                            content: backupJson,
+                            position: "at_depth_as_system", 
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9998,  // 比动态存储优先级稍高
+                            enabled: true,
+                        });
+                        console.log('聊天消息已保存到新worldbook备份条目');
+                        
+                        // 重新获取entries以包含新创建的条目
+                        entries = await getLorebookEntries(worldbook);
+                    }
+                } catch (error) {
+                    console.error('聊天消息备份失败:', error);
+                }
+            }
+
+            /**
+             * *** 新增：保存动态内容到worldbook ***
+             * @returns
+             */
+            async function QQ_Save_Moments() {
+                if (!worldbook || !entries || QQ_MomentsData.length === 0) {
+                    console.log('动态保存跳过：缺少worldbook或entries或无动态数据');
+                    return;
+                }
+                
+                try {
+                    // *** 新增：清理过期动态（保留最近50条） ***
+                    QQ_CleanOldMoments();
+                    
+                    // 查找或创建动态存储条目
+                    let momentEntry = entries.find(entry => entry.comment === "手机-动态内容存储");
+                    
+                    const momentsJson = JSON.stringify(QQ_MomentsData, null, 2);
+                    console.log('准备保存动态内容:', QQ_MomentsData.length, '条动态');
+                    
+                    if (momentEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: momentEntry.uid,
+                            content: momentsJson,
+                        }]);
+                        console.log('动态内容已更新到现有worldbook条目');
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: "手机-动态内容存储",
+                            key: ["此世界书永不触发_动态存储"],
+                            content: momentsJson,
+                            position: "at_depth_as_system",
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9999,
+                            enabled: true,
+                        });
+                        console.log('动态内容已保存到新worldbook条目');
+                        
+                        // 重新获取entries以包含新创建的条目
+                        entries = await getLorebookEntries(worldbook);
+                    }
+                } catch (error) {
+                    console.error('保存动态内容失败:', error);
+                }
+            }
+
+            /**
+             * *** 新增：清理过期动态内容 ***
+             */
+            function QQ_CleanOldMoments() {
+                const MAX_MOMENTS = 50; // 最多保留50条动态
+                
+                if (QQ_MomentsData.length > MAX_MOMENTS) {
+                    // 按时间戳排序，保留最新的动态
+                    QQ_MomentsData.sort((a, b) => {
+                        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+                    });
+                    
+                    const removedCount = QQ_MomentsData.length - MAX_MOMENTS;
+                    QQ_MomentsData.splice(MAX_MOMENTS);
+                    
+                    console.log(`清理了 ${removedCount} 条过期动态，当前保留 ${QQ_MomentsData.length} 条动态`);
+                }
+            }
+            
+            /**
+             * *** 新增：手动强制恢复聊天备份（调试用） ***
+             * 可在控制台调用 window.QQ_Force_Restore_Chat() 来强制恢复备份
+             */
+            window.QQ_Force_Restore_Chat = async function() {
+                console.log('开始强制恢复聊天备份...');
+                const restored = await QQ_Load_Chat_Backup();
+                if (restored) {
+                    console.log('强制恢复成功，正在重新保存到消息系统...');
+                    await QQ_Save_Msg();
+                    console.log('强制恢复完成！');
+                    return true;
+                } else {
+                    console.log('没有可用的备份数据或备份数据不够新');
+                    return false;
+                }
+            };
             function QQ_Json2Text(json) {
-                // console.log(`传进来的json:${JSON.stringify(json)}`);
+                console.log(`传进来的json:${JSON.stringify(json)}`);
                 let result = "";
                 for (const key in json.私聊) {
                     if (json.私聊[key].length == 0) {
@@ -4768,7 +4922,7 @@
                         json.私聊[str] = json.私聊[str].slice(
                             lastSelfMsgIndex + 1,
                         );
-                        // console.log(`删除${name}的重复聊天记录!!!`);
+                        console.log(`删除${name}的重复聊天记录!!!`);
                     }
                 }
                 // 删除群聊的旧内容
@@ -4805,7 +4959,7 @@
                         json.群聊[name].msgs = json.群聊[name].msgs.slice(
                             lastSelfMsgIndex + 1,
                         );
-                        // console.log(`删除${name}的重复聊天记录!!!`);
+                        console.log(`删除${name}的重复聊天记录!!!`);
                     }
                 }
                 // 取char最后一条消息加入到User_LastMsgMap
@@ -4823,9 +4977,9 @@
                             json.群聊[name].msgs[length - 1];
                     }
                 }
-                // console.log(
-                //     `Char_LastMsgMap:\n${JSON.stringify(Char_LastMsgMap)}`,
-                // );
+                console.log(
+                    `Char_LastMsgMap:\n${JSON.stringify(Char_LastMsgMap)}`,
+                );
                 return json;
             }
             // FIXME: 明显 json 的类型可以更准确
@@ -4835,7 +4989,42 @@
              * @param json 消息记录
              * @returns
              */
-
+            // function QQ_MsgDeletOne(type: string, json: Record<string, any>) {
+            //   const reg = new RegExp('${UserName}--');
+            //   for (let name in json[type]) {
+            //     if (type == '群聊') {
+            //       while (true) {
+            //         if (json[type][name]['msgs'].length <= 0) {
+            //           console.log(`数组成员为零,退出循环`);
+            //           break;
+            //         }
+            //         let m = json[type][name]['msgs'][0];
+            //         if (m.match(reg)) {
+            //           console.log(`群聊首句是user,删除`);
+            //           json[type][name]['msgs'].shift();
+            //         } else {
+            //           console.log(`非自己发言,退出循环`);
+            //           break;
+            //         }
+            //       }
+            //     } else if (type == '私聊') {
+            //       while (true) {
+            //         if (json[type][name].length <= 0) {
+            //           break;
+            //         }
+            //         let m = json[type][name][0];
+            //         if (m.match(reg)) {
+            //           console.log(`私聊首句是user,删除`);
+            //           json[type][name].shift();
+            //         } else {
+            //           console.log(`非自己发言,退出循环`);
+            //           break;
+            //         }
+            //       }
+            //     }
+            //   }
+            //   return json;
+            // }
             /**
              * 按下回车键
              * @param e 事件对象
@@ -4863,7 +5052,7 @@
                     content: userContent,
                 });
                 const name = $closest.attr("data-name") ?? "";
-                // console.log(`发送文本:${content} 对象:${name}`);
+                console.log(`发送文本:${content} 对象:${name}`);
                 $msgContent.append(html);
                 $msgContent[0].scrollTop = $msgContent[0].scrollHeight;
                 $(element).val("");
@@ -4872,7 +5061,7 @@
                     QQ_CacheSendMsg += `\n在群聊${name}中发送:${content}`;
                     
                     // 群聊消息处理（简化，避免重复加载）
-                    // console.log(`群聊消息: ${name} - ${content}`);
+                    console.log(`群聊消息: ${name} - ${content}`);
                 } else {
                     QQ_CacheSendMsg += `\n给${name}发消息:${content}`;
                 }
@@ -4893,7 +5082,7 @@
                     return;
                 }
                 const $avatar = $(event.currentTarget);
-                // console.log("点击的头像元素:", $avatar);
+                console.log("点击的头像元素:", $avatar);
                 // 查找父级消息容器
                 const $chatMsg = $avatar.closest(".QQ_chat_mymsg");
                 if ($chatMsg.length === 0) {
@@ -4910,7 +5099,7 @@
                 }
                 // 获取当前消息的索引
                 const index = $chatMsg.index();
-                // console.log(`点击index:${index}`);
+                console.log(`点击index:${index}`);
                 // 获取聊天对象名称
                 const $chatPage = $chatMsg.closest(".QQ_chat_page");
                 if ($chatPage.length === 0) {
@@ -4918,8 +5107,8 @@
                     return;
                 }
                 const name = $chatPage.attr("data-name") ?? "";
-                // console.log("聊天对象:", name);
-                // console.log(`删除前的记录:${YAML.stringify(QQ_msgjson)}`);
+                console.log("聊天对象:", name);
+                console.log(`删除前的记录:${YAML.stringify(QQ_msgjson)}`);
                 if (QQ_Groups.includes(name)) {
                     if (QQ_msgjson.群聊[name].msgs.length > index) {
                         const sp =
@@ -4939,7 +5128,7 @@
                     }
                     QQ_msgjson.私聊[key].length = index;
                 }
-                // console.log(`删除后的记录:${YAML.stringify(QQ_msgjson)}`);
+                console.log(`删除后的记录:${YAML.stringify(QQ_msgjson)}`);
                 // 删除后面所有消息内容
                 $chatMsg.nextAll().remove();
                 await QQ_Save_Msg();
@@ -4954,7 +5143,7 @@
                 const $avatar = $(event.currentTarget);
                 const $tobutton = $avatar.find(".totext");
                 if ($tobutton.length === 0) {
-                    // console.log(`获取转文字按钮失败`);
+                    console.log(`获取转文字按钮失败`);
                 }
                 const $text = $avatar.next();
                 if ($text.css("display") == "block") {
@@ -4975,7 +5164,7 @@
                 let name;
                 let value;
                 if (!SendValue) {
-                    // console.log(`sendvalue为空`);
+                    console.log(`sendvalue为空`);
                     const $container = $(event.target).closest(".QQ_chat_page");
                     const input = $container.find(".userInput");
                     const msgcontent = $container.find(".msgcontent");
@@ -4988,12 +5177,12 @@
                             false,
                             true,
                         );
-                        // console.log(`特殊格式处理后的内容:\n${SpecialHtml}`);
+                        console.log(`特殊格式处理后的内容:\n${SpecialHtml}`);
                         const html = _.template(chat_user_message)({
                             content: SpecialHtml,
                         });
                         name = $container.attr("data-name") || "未知用户";
-                        // console.log(`发送文本:${content} 对象:${name}`);
+                        console.log(`发送文本:${content} 对象:${name}`);
                         msgcontent.append(html);
                         msgcontent.scrollTop(msgcontent[0].scrollHeight);
                         input.val("");
@@ -5001,7 +5190,7 @@
                         name = $container.attr("data-name") || "未知用户";
                         console.warn("发送内容为空");
                     }
-                    // console.log(`缓存消息$:${QQ_CacheSendMsg}`);
+                    console.log(`缓存消息$:${QQ_CacheSendMsg}`);
                     if (QQ_Groups.includes(name)) {
                         if (QQ_CacheSendMsg) {
                             value = `${QQ_CacheSendMsg}`;
@@ -5044,7 +5233,7 @@
                                     QQ_msgjson.群聊[localname].msgs.push(
                                         `${UserName}--${localmsg}`,
                                     );
-                                    // console.log(`加入自己发的群聊消息: ${UserName}--${localmsg}`);
+                                    console.log(`加入自己发的群聊消息: ${UserName}--${localmsg}`);
                                     User_LastMsgMap.群聊[localname] =
                                         `${UserName}--${localmsg}`;
                                     
@@ -5060,7 +5249,7 @@
                                         };
                                         saveGroupMessage(targetGroup.id, messageObj);
                                         await updateGroupLastMessage(targetGroup.id, localmsg);
-                                        // console.log(`群聊消息已同步保存到专用存储: ${localname}`);
+                                        console.log(`群聊消息已同步保存到专用存储: ${localname}`);
                                     }
                                 } else {
                                     const key = `${UserName}和${localname}的聊天`;
@@ -5069,9 +5258,9 @@
                                     QQ_msgjson.私聊[key].push(
                                         `${UserName}--${localmsg}`,
                                     );
-                                    // console.log(
-                                    //     `加入自己发的私聊消息: ${UserName}--${localmsg}`,
-                                    // );
+                                    console.log(
+                                        `加入自己发的私聊消息: ${UserName}--${localmsg}`,
+                                    );
                                     User_LastMsgMap.私聊[localname] =
                                         `${UserName}--${localmsg}`;
                                 }
@@ -5082,7 +5271,7 @@
                         return;
                     }
                 } else {
-                    // console.log(`sendvalue不为空`);
+                    console.log(`sendvalue不为空`);
                     value = SendValue;
                     name = SendName || "未知用户";
                     if (QQ_Groups.includes(name)) {
@@ -5097,9 +5286,9 @@
                     }
                     value += `\n${Request}`;
                 }
-                // console.log(
-                //     `User_LastMsg:\n${JSON.stringify(User_LastMsgMap)}`,
-                // );
+                console.log(
+                    `User_LastMsg:\n${JSON.stringify(User_LastMsgMap)}`,
+                );
                 gening = true;
                 let result;
                 try {
@@ -5107,7 +5296,7 @@
                     result = await QQ_Gen(value);
                 } finally {
                     gening = false;
-                    // console.log(`生成结束`);
+                    console.log(`生成结束`);
                     QQ_Save_Msg();
                 }
                 await ResultHandle(result);
@@ -5430,7 +5619,7 @@
                     LorebookSettings &&
                     LorebookSettings.context_percentage != 100
                 ) {
-                    // console.log(`设置上下文!!!!!!!!!!`);
+                    console.log(`设置上下文!!!!!!!!!!`);
                     await setLorebookSettings({ context_percentage: 100 });
                 }
                 Verify();
@@ -5446,7 +5635,7 @@
                     (await triggerSlashWithResult(
                         "/pass {{userAvatarPath}}",
                     )) ?? "";
-                // console.log(`获取到的user头像:${userAvatarPath}`);
+                console.log(`获取到的user头像:${userAvatarPath}`);
                 charcardname =
                     (await triggerSlashWithResult("/pass {{char}}")) ?? "";
                 console.log(`开始获取世界书配置`);
@@ -5497,10 +5686,15 @@
                 await MiPhone_Merge();
 
                 // 群聊数据已在LoadChars中加载，无需额外恢复
-                // console.log('页面初始化完成');
+                
+                // *** 新增：加载保存的动态内容 ***
+                console.log('开始加载动态内容...');
+                await QQ_Load_Moments();
+                
+                console.log('页面初始化完成');
                 
                 // 为聊天元素绑定点击事件
-                // console.log('绑定底部导航点击事件');
+                console.log('绑定底部导航点击事件');
                 $(document).on("click", "#QQ_message_nav", () => {
                     console.log('点击消息导航');
                     QQ_Nav("message");
@@ -5638,6 +5832,15 @@
                         // 没有有效内容才保存
                         await QQ_Save_Msg();
                     }
+                } else {
+                    // *** 新增：如果没有找到现有聊天记录，尝试从备份恢复 ***
+                    console.log('未找到现有聊天记录，尝试从备份恢复...');
+                    const restored = await QQ_Load_Chat_Backup();
+                    if (restored) {
+                        console.log('成功从备份恢复聊天数据');
+                        // 恢复后保存到消息系统
+                        await QQ_Save_Msg();
+                    }
                 }
                 const matches = message.matchAll(
                     /moment_start([\s\S]+?)moment_end/g,
@@ -5660,16 +5863,16 @@
                 console.log(`群聊列表:${QQ_Groups.join(",")}`);
                 
                 // 设置默认显示联络人页面
-                // console.log('准备设置默认页面为联系人');
+                console.log('准备设置默认页面为联系人');
                 setTimeout(() => {
-                    // console.log('执行默认页面导航');
+                    console.log('执行默认页面导航');
                     QQ_Nav("people");
                     QQ_UpdateMessageList();
                     
                     // 在页面切换和消息列表更新后初始化搜索功能
                     setTimeout(() => {
                         initContactSearch();
-                        // console.log("搜索功能已初始化");
+                        console.log("搜索功能已初始化");
                     }, 300);
                 }, 500);
             }
@@ -5843,7 +6046,7 @@
                 if (!url) {
                     url = QQ_GetRandomHead();
                 }
-                // console.log(`为${name}添加头像${url}`);
+                console.log(`为${name}添加头像${url}`);
                 Npc_Settings[name].head = url;
                 System_UpdateNpcCss();
             }
@@ -6679,10 +6882,147 @@
                 setChatMessage({ message: messages }, CurrentMessageId);
             }
             /**
+             * *** 新增：从worldbook加载动态内容 ***
+             */
+            async function QQ_Load_Moments() {
+                if (!worldbook || !entries) {
+                    console.log('动态加载跳过：缺少worldbook或entries');
+                    return;
+                }
+                
+                try {
+                    const momentEntry = entries.find(entry => entry.comment === "手机-动态内容存储");
+                    
+                    if (momentEntry && momentEntry.content) {
+                        // 解析保存的动态数据
+                        const savedMoments = JSON.parse(momentEntry.content);
+                        QQ_MomentsData = savedMoments;
+                        window.QQ_MomentsData = QQ_MomentsData; // 更新全局引用
+                        
+                        console.log('成功加载动态内容:', QQ_MomentsData.length, '条动态');
+                        
+                        // 重新渲染动态界面
+                        await QQ_Render_Moments();
+                    } else {
+                        console.log('未找到保存的动态内容');
+                    }
+                } catch (error) {
+                    console.error('加载动态内容失败:', error);
+                }
+            }
+            
+            /**
+             * *** 新增：从worldbook加载聊天消息备份 ***
+             */
+            async function QQ_Load_Chat_Backup() {
+                if (!worldbook || !entries) {
+                    console.log('聊天备份加载跳过：缺少worldbook或entries');
+                    return false;
+                }
+                
+                try {
+                    const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                    
+                    if (chatBackupEntry && chatBackupEntry.content) {
+                        // 解析保存的聊天备份数据
+                        const backupData = JSON.parse(chatBackupEntry.content);
+                        
+                        if (backupData.data && (backupData.data.私聊 || backupData.data.群聊)) {
+                            // 检查是否应该使用备份数据
+                            const backupTime = new Date(backupData.lastUpdated);
+                            const timeDiff = Date.now() - backupTime.getTime();
+                            
+                            console.log('找到聊天备份数据，备份时间:', backupData.lastUpdated);
+                            console.log('备份数据包含:', Object.keys(backupData.data.私聊 || {}).length, '个私聊,', Object.keys(backupData.data.群聊 || {}).length, '个群聊');
+                            
+                            // 如果当前QQ_msgjson为空或数据很少，使用备份恢复
+                            const currentPrivateChats = Object.keys(QQ_msgjson?.私聊 || {}).length;
+                            const currentGroupChats = Object.keys(QQ_msgjson?.群聊 || {}).length;
+                            const backupPrivateChats = Object.keys(backupData.data.私聊 || {}).length;
+                            const backupGroupChats = Object.keys(backupData.data.群聊 || {}).length;
+                            
+                            // 如果备份数据比当前数据更丰富，或者时间差不超过1小时，则恢复备份
+                            if ((backupPrivateChats > currentPrivateChats || backupGroupChats > currentGroupChats) && timeDiff < 3600000) {
+                                console.log('恢复聊天备份数据...');
+                                QQ_msgjson = JSON.parse(JSON.stringify(backupData.data)); // 深拷贝
+                                QQ_ChatBackup = backupData;
+                                window.QQ_ChatBackup = QQ_ChatBackup; // 更新全局引用
+                                
+                                console.log('成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                                return true;
+                            } else {
+                                console.log('当前聊天数据较新或更完整，不使用备份');
+                                return false;
+                            }
+                        }
+                    } else {
+                        console.log('未找到聊天备份数据');
+                        return false;
+                    }
+                } catch (error) {
+                    console.error('加载聊天备份失败:', error);
+                    return false;
+                }
+            }
+
+            /**
+             * *** 新增：渲染动态内容到界面 ***
+             */
+            async function QQ_Render_Moments() {
+                const $spaceContents = $("#space_contents");
+                $spaceContents.empty(); // 清空现有内容
+                
+                if (QQ_MomentsData.length === 0) {
+                    console.log('没有动态内容需要渲染');
+                    return;
+                }
+                
+                // 按时间戳倒序排列（最新的在前）
+                const sortedMoments = [...QQ_MomentsData].sort((a, b) => {
+                    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+                });
+                
+                for (const momentData of sortedMoments) {
+                    try {
+                        const momentDiv = $("<div>", { class: "user_moment" });
+                        momentDiv.html(
+                            _.template(moment_page)({
+                                userName: momentData.userName,
+                                message: momentData.message,
+                                timestamp: momentData.timestampText,
+                                additionalInfo: momentData.additionalInfo,
+                                randomPhone: momentData.randomPhone,
+                                extraContent: momentData.extraContent || '',
+                                imgcontent: momentData.imgcontent || '',
+                            })
+                        );
+                        
+                        // 渲染评论
+                        const commentsList = momentDiv.find(".user_leave_message_list");
+                        for (const comment of momentData.comments || []) {
+                            const messageDiv = $("<div>", { class: "user_leave_message" });
+                            messageDiv.html(`<span><strong>${comment.name}</strong>：${comment.content}</span>`);
+                            commentsList.append(messageDiv);
+                        }
+                        
+                        $spaceContents.append(momentDiv);
+                    } catch (error) {
+                        console.error('渲染动态失败:', error, momentData);
+                    }
+                }
+                
+                console.log('动态内容渲染完成，共', sortedMoments.length, '条');
+            }
+
+            /**
              * 初始化动态空间内容
              */
             function space_init() {
                 $("#space_contents").prepend(space_contents);
+                // *** 修改：初始化时加载保存的动态内容 ***
+                setTimeout(() => {
+                    QQ_Load_Moments();
+                }, 500);
             }
             async function GetWorldBookName() {
                 let localbook;
@@ -6731,7 +7071,7 @@
             }
             async function DelPadding() {
                 const message_id = await getCurrentMessageId();
-                // console.log(`开始移除头像和边距:${message_id}`);
+                console.log(`开始移除头像和边距:${message_id}`);
                 $(`div.mes[mesid="${message_id}"]`, window.parent.document)
                     .find(`div.mes_text`)
                     .css("padding-right", "0");
@@ -7262,9 +7602,12 @@
                 $("head").append(style);
                 
                 // 加载保存的群聊数据
-                // 加载群聊数据
+                console.log('LoadChars: 准备加载群聊数据, worldbook状态:', !!worldbook, 'QQ_Groups长度:', QQ_Groups.length);
                 if (worldbook) {
+                    console.log('LoadChars: 开始加载群聊数据');
                     await loadGroupChatsFromWorldbook();
+                } else {
+                    console.log('LoadChars: 跳过群聊加载 - worldbook未初始化');
                 }
                 
                 // 注释：清理重复群聊已移除，避免误删新创建的群聊
@@ -7391,9 +7734,11 @@
              * 添加新群聊（完全基于私聊逻辑）
              */
              function AddNewGroup(name, head, members, description) {
+                console.log(`添加/更新群聊:${name}  |  成员:${members.length}人  |  描述:${description}`);
+
                 const existingElements = $(`.QQ_home_usermsg[data-name='${name}'][data-group-type='true']`);
                 if (existingElements.length > 0) {
-                    // 找到同名群聊，执行更新操作
+                    console.log(`找到同名群聊，执行更新操作`);
                     existingElements.remove();
                 }
 
@@ -7474,7 +7819,7 @@
                     QQ_UpdateMessageList();
                 }, 100);
 
-                // 群聊创建/更新流程完成
+                console.log(`群聊 ${name} 创建/更新流程完成`);
             }
 
             /**
@@ -7784,43 +8129,20 @@
                 // 将新创建的页面添加到DOM中
                 $("#App_QQ").append($page);
                 
-                            // *** 核心修复：创建页面后，立即加载并显示已有消息（使用稳定的ID-based存储） ***
-            const $msgContent = $page.find(".msgcontent");
-            if (isGroup) {
-                // *** 获取群聊ID（稳定标识符） ***
-                let groupId = null;
-                if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
-                    const groupInfo = window.QQ_Groups.find(g => g.name === name);
-                    if (groupInfo && groupInfo.id) {
-                        groupId = groupInfo.id;
-                        console.log(`找到群聊ID: ${name} -> ${groupId}`);
-                    }
-                }
-                
-                // 如果找不到ID，生成稳定的ID
-                if (!groupId) {
-                    groupId = `group_${name.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
-                    console.log(`为群聊生成稳定ID: ${name} -> ${groupId}`);
-                }
-                
-                // *** 使用基于ID的获取方法（支持自动迁移） ***
-                const groupData = getGroupMessagesById(groupId, name);
-                
-                if (groupData && groupData.msgs && groupData.msgs.length > 0) {
-                    console.log(`为群聊 ${name} (ID: ${groupId}) 加载 ${groupData.msgs.length} 条历史消息`);
-                    groupData.msgs.forEach(msg => {
+                // *** 核心修复：创建页面后，立即加载并显示已有消息 ***
+                const $msgContent = $page.find(".msgcontent");
+                if (isGroup && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
+                    console.log(`为新创建的群聊 ${name} 加载 ${QQ_msgjson.群聊[name].msgs.length} 条已有消息`);
+                    QQ_msgjson.群聊[name].msgs.forEach(msg => {
                         QQ_Chat_AddMsg($msgContent[0], msg, name, false); // false表示非新消息，不触发红点
                     });
-                } else {
-                    console.log(`群聊 ${name} (ID: ${groupId}) 没有历史消息`);
+                } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
+                    const privateMsgs = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
+                    console.log(`为新创建的私聊 ${name} 加载 ${privateMsgs.length} 条已有消息`);
+                    privateMsgs.forEach(msg => {
+                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                    });
                 }
-            } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
-                const privateMsgs = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
-                console.log(`为新创建的私聊 ${name} 加载 ${privateMsgs.length} 条已有消息`);
-                privateMsgs.forEach(msg => {
-                    QQ_Chat_AddMsg($msgContent[0], msg, name, false);
-                });
-            }
                 
                 // 滚动到底部
                 $msgContent.scrollTop($msgContent[0].scrollHeight);
@@ -8388,28 +8710,16 @@
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.群聊[name]["msgs"]) {
-                            // *** 优先使用基于ID的存储检查新消息 ***
-                            const groupsForMessage = await loadGroupChatsFromWorldbook();
-                            const currentGroup = groupsForMessage.find(g => g.name === name);
-                            
-                            let isNewMsg = false;
-                            
-                            if (currentGroup && currentGroup.id) {
-                                // 使用基于ID的存储检查
-                                const groupData = getGroupMessagesById(currentGroup.id, name);
-                                isNewMsg = !groupData.msgs.includes(msg);
-                                console.log(`使用ID-based检查新消息: 群聊ID=${currentGroup.id}, 新消息=${isNewMsg}`);
-                            } else {
-                                // 降级到传统检查
-                                isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
-                                console.log(`使用name-based检查新消息: 群聊名称=${name}, 新消息=${isNewMsg}`);
-                            }
-                            
+                            // 检查是否为新消息（不在现有消息列表中）
+                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
                             QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
                             console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
+                            QQ_msgjson.群聊[name]["msgs"].push(msg);
                             
-                            // *** 优先保存到基于ID的存储 ***
-                            if (currentGroup && currentGroup.id) {
+                            // 同时保存到群聊专用的消息存储
+                            const groupsForMessage = await loadGroupChatsFromWorldbook();
+                            const currentGroup = groupsForMessage.find(g => g.name === name);
+                            if (currentGroup) {
                                 const sp = msg.split("--");
                                 if (sp.length >= 2) {
                                     const messageObj = {
@@ -8417,18 +8727,11 @@
                                         content: sp[1],
                                         timestamp: sp.length >= 3 ? sp[2] : new Date().toLocaleTimeString('zh-CN', { hour12: false })
                                     };
-                                    
-                                    // 使用基于ID的保存方法
-                                    saveGroupMessageById(currentGroup.id, name, msg);
+                                    saveGroupMessage(currentGroup.id, messageObj);
                                     
                                     // 更新群聊的最后消息
                                     await updateGroupLastMessage(currentGroup.id, sp[1]);
                                 }
-                            }
-                            
-                            // *** 保持向后兼容的传统存储 ***
-                            if (!QQ_msgjson.群聊[name]["msgs"].includes(msg)) {
-                                QQ_msgjson.群聊[name]["msgs"].push(msg);
                             }
                             
                             let sp = msg.split("--");
@@ -8550,6 +8853,28 @@
                 );
                 list.append(messageDiv);
                 input.val("");
+                
+                // *** 新增：将用户回复添加到对应动态的评论中并保存 ***
+                const userComment = {
+                    name: UserName,
+                    content: value
+                };
+                
+                // 查找对应的动态并添加评论
+                const targetMoment = QQ_MomentsData.find(moment => 
+                    moment.userName === name && moment.message.includes(message.substring(0, 20))
+                );
+                
+                if (targetMoment) {
+                    targetMoment.comments.push(userComment);
+                    console.log('用户回复已添加到动态数据:', userComment);
+                    
+                    // 立即保存更新后的动态数据
+                    await QQ_Save_Moments();
+                } else {
+                    console.warn('未找到对应的动态数据，无法添加用户回复');
+                }
+                
                 const sendvalue = `回复${name}的动态"${message}"\n回复内容:${value}\n<Request:只是在动态里回复,而不是给他发私信>`;
                 console.log(sendvalue);
                 const result = await QQ_Gen(sendvalue);
@@ -8560,6 +8885,8 @@
                 let momentdiv;
                 let list;
                 let count = QQ_NewMsg["moment"] || 0;
+                let currentMomentData = null; // *** 新增：当前动态的数据对象 ***
+                
                 for (const line of lines) {
                     //console.log(`line:${line}`);
                     let match = line.match(
@@ -8567,15 +8894,15 @@
                     );
                     if (match) {
                         // 是新动态内容
-                        // const str = `${match[1]}--${match[2]}`;
-                        // if (str! in QQ_momentjson) {
-                        //   QQ_momentjson[str] = [];
-                        // }
                         console.log(`匹配到动态内容:${match[0]}`);
-                        if (momentdiv) {
+                        
+                        // *** 保存上一个动态数据 ***
+                        if (currentMomentData && momentdiv) {
+                            QQ_MomentsData.unshift(currentMomentData); // 新动态添加到数组开头
                             count += 1;
                             $("#space_contents").prepend(momentdiv);
                         }
+                        
                         let fakeimg = "";
                         let message = match[2];
                         const matches = message.matchAll(/\[img-(.+?)\]/g);
@@ -8585,6 +8912,25 @@
                                 fakeimg += `\n<div class="space_fakeimg">${m[1]}</div>`;
                             }
                         }
+                        
+                        const randomPhone = QQ_CharSettings.readValue(match[1], "手机型号") 
+                            ? QQ_CharSettings.readValue(match[1], "手机型号")
+                            : QQ_GetRandomPhone();
+                        
+                        // *** 新增：创建动态数据对象 ***
+                        currentMomentData = {
+                            id: Date.now() + Math.random(), // 生成唯一ID
+                            userName: match[1],
+                            message: message,
+                            timestampText: match[3],
+                            timestamp: new Date().toISOString(), // 保存完整时间戳用于排序
+                            additionalInfo: match[4],
+                            randomPhone: randomPhone,
+                            extraContent: match[5] || '',
+                            imgcontent: fakeimg,
+                            comments: [] // 初始化评论数组
+                        };
+                        
                         momentdiv = $("<div>", { class: "user_moment" });
                         momentdiv.html(
                             _.template(moment_page)({
@@ -8592,15 +8938,7 @@
                                 message: message,
                                 timestamp: match[3],
                                 additionalInfo: match[4],
-                                randomPhone: QQ_CharSettings.readValue(
-                                    match[1],
-                                    "手机型号",
-                                )
-                                    ? QQ_CharSettings.readValue(
-                                          match[1],
-                                          "手机型号",
-                                      )
-                                    : QQ_GetRandomPhone(),
+                                randomPhone: randomPhone,
                                 extraContent: match[5],
                                 imgcontent: fakeimg,
                             }),
@@ -8609,9 +8947,16 @@
                         continue;
                     }
                     match = line.match(/^\s*(.+?)(?::|：|--)(.+)$/m);
-                    if (match && momentdiv && list) {
+                    if (match && momentdiv && list && currentMomentData) {
                         // 是评论内容
                         //console.log(`评论人:${match[1]}  评论内容:${match[2]}`)
+                        
+                        // *** 新增：保存评论到数据对象 ***
+                        currentMomentData.comments.push({
+                            name: match[1],
+                            content: match[2]
+                        });
+                        
                         let messageDiv = $("<div>", {
                             class: "user_leave_message",
                         });
@@ -8621,12 +8966,23 @@
                         list.append(messageDiv);
                     }
                 }
-                if (momentdiv) {
+                
+                // *** 保存最后一个动态数据 ***
+                if (currentMomentData && momentdiv) {
+                    QQ_MomentsData.unshift(currentMomentData);
                     count += 1;
                     $("#space_contents").prepend(momentdiv);
                 }
+                
                 QQ_NewMsg["moment"] = count;
                 QQ_SetNewTips(count);
+                
+                // *** 新增：自动保存动态内容 ***
+                if (QQ_MomentsData.length > 0) {
+                    setTimeout(() => {
+                        QQ_Save_Moments();
+                    }, 1000); // 延迟保存，确保所有处理完成
+                }
             }
             function QQ_GetRandomHead() {
                 // return `http://sharkpan.xyz/f/${random_head_list[Math.floor(Math.random() * random_head_list.length)]
@@ -10173,16 +10529,28 @@
                                     QQ_Groups.push(groupData.name);
                                 }
                                 
+                                // **修复：检查群聊是否已在界面中存在，避免重复创建**
+                                const existingGroupElement = $(`.QQ_home_usermsg[data-name='${groupData.name}'][data-group-type='true']`);
+                                const groupAlreadyExists = existingGroupElement.length > 0;
+                                
                                 if (!QQ_msgjson.群聊[groupData.name]) {
                                     QQ_msgjson.群聊[groupData.name] = {
                                         members: groupData.members || [],
                                         msgs: []
                                     };
                                     console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupData.name);
+                                } else {
+                                    console.log('群聊数据已存在，更新成员列表:', groupData.name);
+                                    QQ_msgjson.群聊[groupData.name].members = groupData.members || [];
                                 }
                                 
-                                console.log('准备调用AddNewGroup函数添加群聊:', groupData.name);
-                                AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                                // **修复：只有当群聊不存在时才调用AddNewGroup，避免重复创建和系统消息**
+                                if (!groupAlreadyExists) {
+                                    console.log('群聊不存在，调用AddNewGroup函数添加群聊:', groupData.name);
+                                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                                } else {
+                                    console.log('群聊已存在于界面中，跳过AddNewGroup调用:', groupData.name);
+                                }
                                 
                                 // *** 修复：在加载群聊后立即更新最后消息显示 ***
                                 setTimeout(() => {
@@ -11792,6 +12160,9 @@
                         }
                     }
                     
+                    // 定义uniqueComment变量在函数开头，确保在所有分支中都可用
+                    const uniqueComment = `手机-群聊-${groupData.name}`;
+                    
                     // 查找现有的群聊条目
                     let groupEntry = null;
                     const groupEntryKey = `手机-群聊-${groupData.name}`;
@@ -11896,7 +12267,6 @@
                         console.log('创建新的独立群聊条目');
                         
                         // 使用正确的createLorebookEntry函数，遵循项目标准设定
-                        const uniqueComment = `手机-群聊-${groupData.name}`;
                         console.log('准备调用createLorebookEntry，参数:', { worldbook, uniqueComment, groupContent });
                         const createResult = await createLorebookEntry(worldbook, {
                             comment: uniqueComment, // 使用唯一的comment标识群聊
@@ -12461,12 +12831,26 @@
                     // 4. 删除聊天页面
                     $(`.QQ_chat_page[data-name='${groupName}']`).remove();
                     
-                    // 5. 更新消息列表
+                    // 5. 立即刷新entries，确保删除的群聊从界面消失
+                    console.log('刷新entries以移除已删除的群聊');
+                    try {
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                    } catch (e) {
+                        console.warn('刷新entries失败，但群聊已删除:', e);
+                    }
+                    
+                    // 6. 立即重新加载群聊以确保已删除的群聊从界面消失
+                    console.log('立即重新加载群聊数据以移除已删除的群聊');
+                    await loadGroupChatsFromWorldbook();
+                    
+                    // 7. 更新消息列表
                     setTimeout(async () => {
                         await QQ_UpdateMessageList();
                     }, 100);
                     
                     console.log('群聊删除成功:', groupName);
+                    console.log('当前QQ_Groups数组:', QQ_Groups);
                     return true;
                 } catch (error) {
                     console.error('删除群聊失败:', error);
@@ -12476,39 +12860,12 @@
             }
             
             /**
-             * 保存群聊消息到本地存储（使用稳定的ID-based存储）
+             * 保存群聊消息到本地存储
              */
             function saveGroupMessage(groupId, message) {
-                console.log('保存群聊消息（ID-based）:', groupId, message);
-                
-                try {
-                    // 获取群聊名称
-                    let groupName = null;
-                    if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
-                        const groupInfo = window.QQ_Groups.find(g => g.id === groupId);
-                        if (groupInfo) {
-                            groupName = groupInfo.name;
-                        }
-                    }
-                    
-                    // 如果找不到群聊名称，尝试从当前聊天状态获取
-                    if (!groupName && window.currentGroupChat) {
-                        groupName = window.currentGroupChat.name;
-                    }
-                    
-                    // 如果仍然找不到，使用群聊ID作为默认名称
-                    if (!groupName) {
-                        groupName = `群聊_${groupId}`;
-                        console.warn(`使用默认群聊名称: ${groupName}`);
-                    }
-                    
-                    // 使用基于ID的保存方法
-                    saveGroupMessageById(groupId, groupName, message);
-                    
-                    console.log(`群聊消息已保存: ID=${groupId}, Name=${groupName}`);
-                } catch (error) {
-                    console.error('保存群聊消息失败:', error);
-                }
+                // 新版本：群聊消息暂时不持久化，仅在内存中保存
+                console.log('群聊消息（内存）:', message);
+                // 可以在这里添加到QQ_msgjson.群聊中，但暂时简化处理
             }
             
             /**
@@ -13416,24 +13773,9 @@
             if (document.readyState === 'complete' || document.readyState === 'interactive') {
                 setTimeout(initializeEnhancedFeatures, 1000);
             } else {
-                            document.addEventListener('DOMContentLoaded', () => {
-                setTimeout(() => {
-                    initializeEnhancedFeatures();
-                    
-                    // *** 新增：在系统启动时修复数据格式和迁移数据 ***
-                    try {
-                        // 首先修复QQ_Groups数组格式
-                        fixQQGroupsArrayFormat();
-                        
-                        // 然后进行数据迁移
-                        migrateNameBasedToIdBased();
-                        
-                        console.log('✅ 群聊数据格式修复和迁移检查完成');
-                    } catch (error) {
-                        console.error('❌ 群聊数据修复和迁移失败:', error);
-                    }
-                }, 1000);
-            });
+                document.addEventListener('DOMContentLoaded', () => {
+                    setTimeout(initializeEnhancedFeatures, 1000);
+                });
             }
             
         </script>
@@ -14423,37 +14765,9 @@
                     }
                 }
                 
-                // *** 修复：使用稳定的ID-based存储，无需复杂的数据迁移 ***
+                // *** 修复：更新消息JSON中的群聊信息，保持聊天记录 ***
                 if (oldName !== newName) {
-                    console.log(`群聊名称变更: ${oldName} -> ${newName}`);
-                    console.log(`使用稳定ID存储，群聊ID保持不变: ${stableGroupId}`);
-                    
-                    // 更新ID-based存储中的群聊名称（保持历史消息完整）
-                    const groupData = getGroupMessagesById(stableGroupId, newName);
-                    if (groupData) {
-                        groupData.groupName = newName; // 更新名称但保持ID和消息不变
-                        console.log(`✅ ID-based存储中的群聊名称已更新: ${stableGroupId} -> ${newName}, 消息数量: ${groupData.msgs.length}`);
-                    }
-                    
-                    // 保持向后兼容：仍然进行传统的消息迁移（为了确保旧版本数据的兼容性）
                     await updateGroupChatMessagesInMsgjson(stableGroupId, oldName, newName);
-                    
-                    // 同步更新传统的name-based存储（向后兼容）
-                    if (window.QQ_msgjson && window.QQ_msgjson.群聊) {
-                        if (window.QQ_msgjson.群聊[oldName]) {
-                            console.log(`同步更新传统name-based存储: ${oldName} -> ${newName}`);
-                            window.QQ_msgjson.群聊[newName] = window.QQ_msgjson.群聊[oldName];
-                            delete window.QQ_msgjson.群聊[oldName];
-                        }
-                        
-                        // 确保新群聊数据结构正确
-                        if (!window.QQ_msgjson.群聊[newName]) {
-                            window.QQ_msgjson.群聊[newName] = {
-                                msgs: groupData ? groupData.msgs : [],
-                                members: currentManagingGroup.members || []
-                            };
-                        }
-                    }
                 }
                 
                 // 清空选中的头像数据
@@ -14473,33 +14787,119 @@
                 if (confirm(`确定要删除群聊 "${currentManagingGroup.name}" 吗？此操作不可撤销。`)) {
                     console.log('删除群聊:', currentManagingGroup.name);
                     
-                    // 从世界书中删除
-                    await removeGroupFromWorldbook(currentManagingGroup.name);
+                    const deletedGroupId = currentManagingGroup.id;
+                    const deletedGroupName = currentManagingGroup.name;
                     
-                    // 新版本：群聊数据已从世界书中删除，不需要操作localStorage
-                    console.log('群聊已从世界书中删除');
+                    // **关键修复：先关闭模态窗口并立即跳转，避免界面卡死**
+                    closeGroupSettings();
                     
-                    // 从界面中移除
-                    removeGroupFromAllLists(currentManagingGroup.id);
+                    // 记录跳转目标和当前状态
+                    let shouldJumpToPage = null;
+                    let wasInGroupChat = false;
                     
-                    // 如果当前在群聊界面，返回到来源页面
-                    if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
-                        const sourcePage = window.groupChatSourcePage || 'contacts';
-                        console.log('删除群聊后返回到来源页面:', sourcePage);
-                        if (typeof QQ_Nav === 'function') {
-                            if (sourcePage === 'messages') {
-                                QQ_Nav('message');
+                    if (window.currentGroupChat && window.currentGroupChat.id === deletedGroupId) {
+                        shouldJumpToPage = window.groupChatSourcePage || 'people';
+                        wasInGroupChat = true;
+                        console.log('删除群聊后需要跳转到页面:', shouldJumpToPage);
+                        console.log('当前在群聊界面，需要跳转');
+                    } else {
+                        // 即使不在群聊界面，也要确保删除后刷新当前页面
+                        shouldJumpToPage = 'people'; // 默认跳转到联系人页面
+                        console.log('不在群聊界面，但仍需要刷新界面');
+                    }
+                    
+                    // 等待模态窗口关闭后再执行删除操作
+                    setTimeout(async () => {
+                        try {
+                            // 从世界书中删除
+                            await removeGroupFromWorldbook(deletedGroupName);
+                            console.log('群聊已从世界书中删除');
+                            
+                            // 立即刷新entries
+                            console.log('刷新entries以移除已删除的群聊');
+                            entries = await getLorebookEntries(worldbook);
+                            console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                            
+
+                            
+                            // 从数据结构中删除群聊
+                            delete QQ_msgjson.群聊[deletedGroupName];
+                            const index = QQ_Groups.findIndex(g => g.id === deletedGroupId || g.name === deletedGroupName);
+                            if (index > -1) {
+                                QQ_Groups.splice(index, 1);
+                            }
+                            console.log('群聊已从数据结构中删除，当前QQ_Groups:', QQ_Groups.length);
+                            
+                            // **先清除群聊状态，避免跳转时的状态冲突**
+                            if (wasInGroupChat) {
+                                window.currentGroupChat = null;
+                                window.groupChatSourcePage = null;
+                                console.log('已清除群聊状态');
+                            }
+                            
+                            // **立即跳转到目标页面**
+                            console.log('执行页面跳转到:', shouldJumpToPage);
+                            if (typeof QQ_Nav === 'function') {
+                                if (shouldJumpToPage === 'messages') {
+                                    QQ_Nav('message');
+                                } else {
+                                    QQ_Nav('people');
+                                }
+                                console.log('跳转完成');
                             } else {
+                                console.warn('QQ_Nav函数不可用，手动显示联系人页面');
+                                // 手动显示联系人页面
+                                $('.QQ_chat_page').hide();
+                                $('.group-chat-page').hide();
+                                $('#QQ_home_page').show();
+                                $('.QQ_bottom_nav').show();
+                            }
+                            
+                            // **等待跳转完成后再删除界面元素和重新加载数据**
+                            setTimeout(async () => {
+                                // 删除特定的群聊元素
+                                safeRemoveGroupFromInterface(deletedGroupId, deletedGroupName);
+                                
+                                // 重新加载群聊数据
+                                console.log('重新加载群聊数据');
+                                await loadGroupChatsFromWorldbook();
+                                
+                                // 更新消息列表
+                                await QQ_UpdateMessageList();
+                                
+                                console.log('界面数据更新完成');
+                            }, 300);
+                            
+                            console.log('群聊删除完成:', deletedGroupName);
+                            alert('群聊已删除');
+                            
+                        } catch (error) {
+                            console.error('删除群聊时出错:', error);
+                            alert('删除群聊时出现问题，请刷新页面');
+                            
+                            // 出错时确保界面恢复正常
+                            console.log('出错后恢复界面显示');
+                            
+                            // 清除群聊状态
+                            if (wasInGroupChat) {
+                                window.currentGroupChat = null;
+                                window.groupChatSourcePage = null;
+                            }
+                            
+                            // 强制显示联系人页面
+                            $('.QQ_chat_page').hide();
+                            $('.group-chat-page').hide();
+                            $('#QQ_home_page').show();
+                            $('.QQ_bottom_nav').show();
+                            
+                            // 尝试通过QQ_Nav恢复正常状态
+                            if (typeof QQ_Nav === 'function') {
                                 QQ_Nav('people');
                             }
                         }
-                        window.currentGroupChat = null;
-                        window.groupChatSourcePage = null;
-                    }
-                    
-                    alert('群聊已删除');
-                    closeGroupSettings();
-                    currentManagingGroup = null;
+                        
+                        currentManagingGroup = null;
+                    }, 100); // 缩短等待时间
                 }
             }
             
@@ -15205,191 +15605,6 @@
             }
             
             /**
-             * 获取群聊消息数据（基于稳定的ID，支持向后兼容）
-             */
-            function getGroupMessagesById(groupId, groupName) {
-                if (!window.QQ_msgjson) {
-                    window.QQ_msgjson = { 群聊: {}, 群聊_按ID: {} };
-                }
-                
-                // 确保按ID的存储结构存在
-                if (!window.QQ_msgjson.群聊_按ID) {
-                    window.QQ_msgjson.群聊_按ID = {};
-                }
-                
-                // 优先从ID-based存储中获取
-                if (window.QQ_msgjson.群聊_按ID[groupId]) {
-                    console.log(`从ID-based存储获取群聊消息: ${groupId}`);
-                    return window.QQ_msgjson.群聊_按ID[groupId];
-                }
-                
-                // 向后兼容：从name-based存储中查找并迁移
-                if (window.QQ_msgjson.群聊[groupName]) {
-                    console.log(`从name-based存储找到群聊消息，迁移到ID-based: ${groupName} -> ${groupId}`);
-                    const groupData = window.QQ_msgjson.群聊[groupName];
-                    
-                    // 迁移到ID-based存储
-                    window.QQ_msgjson.群聊_按ID[groupId] = {
-                        msgs: groupData.msgs || [],
-                        members: groupData.members || [],
-                        groupName: groupName, // 保留当前名称用于引用
-                        id: groupId
-                    };
-                    
-                    // 可选：删除旧的name-based存储（为了保持兼容性，暂时保留）
-                    // delete window.QQ_msgjson.群聊[groupName];
-                    
-                    return window.QQ_msgjson.群聊_按ID[groupId];
-                }
-                
-                // 如果都没有找到，创建新的数据结构
-                console.log(`创建新的群聊消息数据结构: ${groupId}`);
-                window.QQ_msgjson.群聊_按ID[groupId] = {
-                    msgs: [],
-                    members: [],
-                    groupName: groupName,
-                    id: groupId
-                };
-                
-                return window.QQ_msgjson.群聊_按ID[groupId];
-            }
-            
-            /**
-             * 保存群聊消息（基于稳定的ID）
-             */
-            function saveGroupMessageById(groupId, groupName, message) {
-                const groupData = getGroupMessagesById(groupId, groupName);
-                
-                if (!groupData.msgs.includes(message)) {
-                    groupData.msgs.push(message);
-                    
-                    // 更新群聊名称（支持名称变更）
-                    groupData.groupName = groupName;
-                    
-                    console.log(`保存群聊消息到ID-based存储: ${groupId}, 总消息数: ${groupData.msgs.length}`);
-                    
-                    // 同时保持name-based存储的同步（向后兼容）
-                    if (!window.QQ_msgjson.群聊[groupName]) {
-                        window.QQ_msgjson.群聊[groupName] = { msgs: [], members: [] };
-                    }
-                    if (!window.QQ_msgjson.群聊[groupName].msgs.includes(message)) {
-                        window.QQ_msgjson.群聊[groupName].msgs.push(message);
-                    }
-                }
-            }
-            
-            /**
-             * 修复QQ_Groups数组格式，确保只包含字符串名称
-             */
-            function fixQQGroupsArrayFormat() {
-                console.log('=== 开始修复QQ_Groups数组格式 ===');
-                
-                if (!window.QQ_Groups || !Array.isArray(window.QQ_Groups)) {
-                    console.log('QQ_Groups数组不存在或格式错误，重新初始化');
-                    window.QQ_Groups = [];
-                    return;
-                }
-                
-                let fixedCount = 0;
-                const originalLength = window.QQ_Groups.length;
-                
-                // 检查和修复数组中的每个元素
-                for (let i = 0; i < window.QQ_Groups.length; i++) {
-                    const item = window.QQ_Groups[i];
-                    
-                    if (typeof item === 'object' && item !== null) {
-                        // 如果是对象，提取名称
-                        if (item.name && typeof item.name === 'string') {
-                            console.log(`修复QQ_Groups[${i}]: 对象 -> ${item.name}`);
-                            window.QQ_Groups[i] = item.name;
-                            fixedCount++;
-                        } else {
-                            // 如果对象没有有效名称，移除它
-                            console.log(`移除QQ_Groups[${i}]: 无效对象`);
-                            window.QQ_Groups.splice(i, 1);
-                            i--; // 调整索引
-                            fixedCount++;
-                        }
-                    } else if (typeof item !== 'string') {
-                        // 如果不是字符串也不是对象，移除
-                        console.log(`移除QQ_Groups[${i}]: 非字符串类型 (${typeof item})`);
-                        window.QQ_Groups.splice(i, 1);
-                        i--; // 调整索引
-                        fixedCount++;
-                    }
-                }
-                
-                // 移除重复项
-                const uniqueGroups = [...new Set(window.QQ_Groups)];
-                const duplicateCount = window.QQ_Groups.length - uniqueGroups.length;
-                if (duplicateCount > 0) {
-                    window.QQ_Groups = uniqueGroups;
-                    console.log(`移除 ${duplicateCount} 个重复的群聊名称`);
-                    fixedCount += duplicateCount;
-                }
-                
-                console.log(`=== QQ_Groups数组格式修复完成 ===`);
-                console.log(`原始长度: ${originalLength}, 修复后长度: ${window.QQ_Groups.length}, 修复项目: ${fixedCount}`);
-                console.log('当前QQ_Groups内容:', window.QQ_Groups);
-            }
-
-            /**
-             * 迁移现有的name-based数据到ID-based存储
-             */
-            function migrateNameBasedToIdBased() {
-                console.log('=== 开始迁移name-based群聊数据到ID-based存储 ===');
-                
-                if (!window.QQ_msgjson || !window.QQ_msgjson.群聊) {
-                    console.log('没有name-based群聊数据需要迁移');
-                    return;
-                }
-                
-                // 确保ID-based存储结构存在
-                if (!window.QQ_msgjson.群聊_按ID) {
-                    window.QQ_msgjson.群聊_按ID = {};
-                }
-                
-                let migratedCount = 0;
-                
-                // 获取所有群聊数据，尝试找到对应的ID
-                const groupNames = Object.keys(window.QQ_msgjson.群聊);
-                
-                for (const groupName of groupNames) {
-                    // 尝试从QQ_Groups中找到对应的群聊ID
-                    let groupId = null;
-                    
-                    if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
-                        const groupInfo = window.QQ_Groups.find(g => g.name === groupName);
-                        if (groupInfo && groupInfo.id) {
-                            groupId = groupInfo.id;
-                        }
-                    }
-                    
-                    // 如果找不到ID，生成一个稳定的ID
-                    if (!groupId) {
-                        groupId = `group_${groupName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
-                        console.log(`为群聊 ${groupName} 生成稳定ID: ${groupId}`);
-                    }
-                    
-                    // 检查是否已经迁移
-                    if (!window.QQ_msgjson.群聊_按ID[groupId]) {
-                        const nameBasedData = window.QQ_msgjson.群聊[groupName];
-                        window.QQ_msgjson.群聊_按ID[groupId] = {
-                            msgs: nameBasedData.msgs || [],
-                            members: nameBasedData.members || [],
-                            groupName: groupName,
-                            id: groupId
-                        };
-                        
-                        console.log(`迁移群聊数据: ${groupName} -> ${groupId}, 消息数: ${nameBasedData.msgs ? nameBasedData.msgs.length : 0}`);
-                        migratedCount++;
-                    }
-                }
-                
-                console.log(`=== 迁移完成，共迁移 ${migratedCount} 个群聊的数据 ===`);
-            }
-
-            /**
              * 群聊改名时的完整数据迁移（修复绑定关系）
              */
             async function migrateGroupDataBindings(oldName, newName, groupData) {
@@ -15427,43 +15642,35 @@
                     // *** 2. 确保全局QQ_Groups数组正确更新 ***
                     console.log('检查和更新全局QQ_Groups数组...');
                     
-                    // 确保QQ_Groups数组存在且格式正确
-                    if (!window.QQ_Groups || !Array.isArray(window.QQ_Groups)) {
-                        console.warn('QQ_Groups数组不存在或格式错误，重新初始化');
+                    // 确保QQ_Groups数组存在
+                    if (!window.QQ_Groups) {
+                        console.warn('QQ_Groups数组不存在，重新初始化');
                         window.QQ_Groups = [];
                     }
                     
-                    // *** 修复：QQ_Groups应该只包含群聊名称，保持向后兼容 ***
-                    console.log('QQ_Groups数组格式检查和修复...');
+                    // 查找并更新QQ_Groups中的群聊数据
+                    const groupIndex = window.QQ_Groups.findIndex(g => 
+                        g && (g.id === groupData.id || g.name === oldName || g.name === newName)
+                    );
                     
-                    // 检查数组中是否有非字符串元素（对象）
-                    let hasObjects = false;
-                    for (let i = 0; i < window.QQ_Groups.length; i++) {
-                        if (typeof window.QQ_Groups[i] === 'object' && window.QQ_Groups[i] !== null) {
-                            hasObjects = true;
-                            // 如果是对象，提取名称
-                            if (window.QQ_Groups[i].name) {
-                                window.QQ_Groups[i] = window.QQ_Groups[i].name;
-                            }
-                        }
-                    }
-                    
-                    if (hasObjects) {
-                        console.log('修复QQ_Groups数组格式，转换对象为字符串');
-                    }
-                    
-                    // 查找群聊名称在数组中的位置
-                    const oldNameIndex = window.QQ_Groups.indexOf(oldName);
-                    const newNameIndex = window.QQ_Groups.indexOf(newName);
-                    
-                    if (oldNameIndex > -1) {
-                        console.log(`更新QQ_Groups数组中的群聊名称 [${oldNameIndex}]:`, oldName, '->', newName);
-                        window.QQ_Groups[oldNameIndex] = newName;
+                    if (groupIndex > -1) {
+                        console.log(`更新QQ_Groups数组中的群聊 [${groupIndex}]:`, oldName, '->', newName);
+                        console.log(`头像数据迁移: ${groupData.avatar ? JSON.stringify(groupData.avatar) : 'null'}`);
+                        window.QQ_Groups[groupIndex] = {
+                            ...window.QQ_Groups[groupIndex],
+                            name: groupData.name,
+                            id: groupData.id,
+                            avatar: groupData.avatar,
+                            avatarUrl: groupData.avatarUrl,
+                            members: groupData.members
+                        };
+                        console.log('QQ_Groups数组中的头像已更新:', window.QQ_Groups[groupIndex].avatar);
                         migratedCount++;
-                    } else if (newNameIndex === -1) {
-                        // 如果新名称也不在数组中，添加它
-                        console.log('在QQ_Groups中添加群聊名称:', newName);
-                        window.QQ_Groups.push(newName);
+                    } else {
+                        // 如果在QQ_Groups中找不到，确保群聊数据存在
+                        console.log('在QQ_Groups中未找到群聊，添加新数据');
+                        console.log('新数据头像:', groupData.avatar);
+                        window.QQ_Groups.push(groupData);
                         migratedCount++;
                     }
                     
@@ -16028,6 +16235,110 @@
                     if (existingGroup) {
                         existingGroup.remove();
                     }
+                }
+            }
+            
+            /**
+             * 强制删除群聊界面元素（增强版删除，确保完全清除）
+             */
+            function forceRemoveGroupFromInterface(groupId, groupName) {
+                console.log('强制删除群聊界面元素:', groupId, groupName);
+                
+                // 方法1：通过data-group-id删除
+                const elementsById = document.querySelectorAll(`[data-group-id="${groupId}"]`);
+                elementsById.forEach((element, index) => {
+                    console.log(`通过ID删除元素 ${index + 1}:`, element);
+                    element.remove();
+                });
+                
+                // 方法2：通过群聊名称删除
+                const contactsContainer = document.getElementById('QQ_home_chars');
+                if (contactsContainer) {
+                    const groupElements = contactsContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                    groupElements.forEach(element => {
+                        const nameElement = element.querySelector('.QQ_home_name');
+                        if (nameElement && nameElement.textContent.trim() === groupName) {
+                            console.log('通过名称删除联系人列表中的群聊:', groupName);
+                            element.remove();
+                        }
+                    });
+                }
+                
+                // 方法3：通过群聊名称删除消息列表中的群聊
+                const messagesContainer = document.getElementById('QQ_message_list_chars');
+                if (messagesContainer) {
+                    const groupElements = messagesContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                    groupElements.forEach(element => {
+                        const nameElement = element.querySelector('.QQ_home_name');
+                        if (nameElement && nameElement.textContent.trim() === groupName) {
+                            console.log('通过名称删除消息列表中的群聊:', groupName);
+                            element.remove();
+                        }
+                    });
+                }
+                
+                // 方法4：删除对应的聊天页面
+                const chatPages = document.querySelectorAll(`.QQ_chat_page[data-name='${groupName}']`);
+                chatPages.forEach((page, index) => {
+                    console.log(`删除聊天页面 ${index + 1}:`, groupName);
+                    page.remove();
+                });
+                
+                // 方法5：删除群聊专用页面
+                const groupChatPages = document.querySelectorAll(`.group-chat-page[data-group-id="${groupId}"]`);
+                groupChatPages.forEach((page, index) => {
+                    console.log(`删除群聊专用页面 ${index + 1}:`, groupId);
+                    page.remove();
+                });
+                
+                console.log('强制删除群聊界面元素完成');
+            }
+            
+            /**
+             * 安全删除群聊界面元素（避免过度删除导致空白页面）
+             */
+            function safeRemoveGroupFromInterface(groupId, groupName) {
+                console.log('安全删除群聊界面元素:', groupId, groupName);
+                
+                // 只删除特定的群聊元素，保护主要的界面结构
+                try {
+                    // 删除联系人列表中的群聊
+                    const contactsContainer = document.getElementById('QQ_home_chars');
+                    if (contactsContainer) {
+                        const groupElements = contactsContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                        groupElements.forEach(element => {
+                            const nameElement = element.querySelector('.QQ_home_name');
+                            if (nameElement && nameElement.textContent.trim() === groupName) {
+                                console.log('安全删除联系人列表中的群聊:', groupName);
+                                element.remove();
+                            }
+                        });
+                    }
+                    
+                    // 删除消息列表中的群聊
+                    const messagesContainer = document.getElementById('QQ_message_list_chars');
+                    if (messagesContainer) {
+                        const groupElements = messagesContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                        groupElements.forEach(element => {
+                            const nameElement = element.querySelector('.QQ_home_name');
+                            if (nameElement && nameElement.textContent.trim() === groupName) {
+                                console.log('安全删除消息列表中的群聊:', groupName);
+                                element.remove();
+                            }
+                        });
+                    }
+                    
+                    // 只删除当前群聊的专用页面
+                    const groupChatPages = document.querySelectorAll(`.group-chat-page[data-group-id="${groupId}"]`);
+                    groupChatPages.forEach((page, index) => {
+                        console.log(`安全删除群聊专用页面 ${index + 1}:`, groupId);
+                        page.remove();
+                    });
+                    
+                    console.log('安全删除群聊界面元素完成');
+                    
+                } catch (error) {
+                    console.error('安全删除群聊界面元素时出错:', error);
                 }
             }
             
