@@ -14123,6 +14123,11 @@
                 
                 // 更新群聊名称（保持ID不变）
                 if (newName !== oldName) {
+                    // *** 核心修复：完整的数据绑定迁移 ***
+                    console.log('=== 执行完整数据绑定迁移 ===');
+                    const migratedCount = await migrateGroupDataBindings(oldName, newName, currentManagingGroup);
+                    console.log(`数据绑定迁移完成，共迁移 ${migratedCount} 项`);
+                    
                     currentManagingGroup.name = newName;
                     currentManagingGroup.id = stableGroupId;
                     changes.push({
@@ -15232,6 +15237,112 @@
                 chatPage.style.position = 'relative';
                 
                 console.log('背景应用完成');
+            }
+            
+            /**
+             * 群聊改名时的完整数据迁移（修复绑定关系）
+             */
+            async function migrateGroupDataBindings(oldName, newName, groupData) {
+                console.log('*** 开始群聊改名数据迁移 ***');
+                console.log(`迁移: "${oldName}" -> "${newName}"`);
+                
+                try {
+                    let migratedCount = 0;
+                    
+                    // *** 1. 迁移壁纸绑定数据（如果存在以群聊名称为key的绑定）***
+                    if (window.wallpaperurl) {
+                        // 检查是否有以旧群聊名称为key的壁纸设置
+                        if (window.wallpaperurl[oldName]) {
+                            console.log(`发现以群聊名称为key的壁纸设置: ${oldName}`);
+                            window.wallpaperurl[newName] = window.wallpaperurl[oldName];
+                            delete window.wallpaperurl[oldName];
+                            console.log(`壁纸绑定已迁移: ${oldName} -> ${newName}`);
+                            migratedCount++;
+                        }
+                        
+                        // 确保群聊成员的壁纸绑定完整
+                        if (groupData.members && groupData.members.length > 0) {
+                            const firstMember = groupData.members[0];
+                            if (window.wallpaperurl[firstMember]) {
+                                console.log(`确认成员壁纸绑定存在: ${firstMember} -> ${window.wallpaperurl[firstMember]}`);
+                            } else {
+                                // 如果成员没有壁纸设置，使用默认的群聊壁纸
+                                window.wallpaperurl[firstMember] = 'https://files.catbox.moe/9fdwty.jpg';
+                                console.log(`为成员设置默认群聊壁纸: ${firstMember}`);
+                                migratedCount++;
+                            }
+                        }
+                    }
+                    
+                    // *** 2. 迁移其他可能的名称绑定数据 ***
+                    
+                    // 迁移localStorage中可能的群聊相关数据
+                    try {
+                        const storageKeys = Object.keys(localStorage);
+                        for (const key of storageKeys) {
+                            if (key.includes(oldName)) {
+                                const value = localStorage.getItem(key);
+                                const newKey = key.replace(oldName, newName);
+                                localStorage.setItem(newKey, value);
+                                localStorage.removeItem(key);
+                                console.log(`localStorage数据迁移: ${key} -> ${newKey}`);
+                                migratedCount++;
+                            }
+                        }
+                    } catch (storageError) {
+                        console.warn('localStorage数据迁移时出错:', storageError);
+                    }
+                    
+                    // *** 3. 迁移window全局对象中的群聊相关数据 ***
+                    if (window.groups) {
+                        const groupIndex = window.groups.findIndex(g => g.name === oldName || g.name === newName);
+                        if (groupIndex !== -1) {
+                            window.groups[groupIndex].name = newName;
+                            console.log(`window.groups数据已更新`);
+                            migratedCount++;
+                        }
+                    }
+                    
+                    // *** 4. 确保CSS类名和样式的数据绑定 ***
+                    // 更新所有可能包含旧名称的data属性
+                    const elementsWithOldName = document.querySelectorAll(`[data-name="${oldName}"]`);
+                    elementsWithOldName.forEach(el => {
+                        el.setAttribute('data-name', newName);
+                        console.log('已更新元素data-name属性');
+                        migratedCount++;
+                    });
+                    
+                    // *** 5. 迁移可能的聊天历史绑定 ***
+                    if (window.groupChats && window.groupChats[oldName]) {
+                        window.groupChats[newName] = window.groupChats[oldName];
+                        delete window.groupChats[oldName];
+                        console.log(`群聊历史数据已迁移: ${oldName} -> ${newName}`);
+                        migratedCount++;
+                    }
+                    
+                    console.log(`*** 数据迁移完成，共迁移 ${migratedCount} 项数据绑定 ***`);
+                    
+                    // *** 6. 强制刷新相关组件以应用新的绑定关系 ***
+                    setTimeout(() => {
+                        console.log('强制刷新组件以应用新的数据绑定...');
+                        
+                        // 强制重新应用壁纸
+                        forceRestoreChatBackground(groupData);
+                        
+                        // 触发界面重新渲染
+                        const event = new CustomEvent('groupDataMigrated', {
+                            detail: { oldName, newName, groupData }
+                        });
+                        window.dispatchEvent(event);
+                        
+                    }, 100);
+                    
+                    return migratedCount;
+                    
+                } catch (error) {
+                    console.error('群聊数据迁移时出错:', error);
+                    return 0;
+                }
             }
             
             /**
