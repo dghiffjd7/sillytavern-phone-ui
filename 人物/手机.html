@@ -5531,6 +5531,68 @@
                 
                 console.log('=== 检查完成 ===');
             };
+
+            /**
+             * *** 新增：查看分组备份状态 ***
+             * 可在控制台调用 window.QQ_Show_Groups_Stats() 来查看分组备份统计
+             */
+            window.QQ_Show_Groups_Stats = function() {
+                const charId = getCurrentCharacterId();
+                
+                if (!worldbook || !entries) {
+                    console.log('📊 分组备份统计：世界书未初始化');
+                    return;
+                }
+                
+                const groupsKey = `QQ_分组备份_${charId}`;
+                const groupsEntry = entries.find(entry => 
+                    entry.keys.includes(groupsKey)
+                );
+                
+                let worldbookGroups = 0;
+                let lastUpdate = null;
+                
+                if (groupsEntry && groupsEntry.content) {
+                    try {
+                        const groupsData = JSON.parse(groupsEntry.content);
+                        worldbookGroups = groupsData.groups ? groupsData.groups.length : 0;
+                        lastUpdate = groupsData.lastUpdate;
+                    } catch (e) {
+                        console.error('解析世界书分组数据失败:', e);
+                    }
+                }
+                
+                // 检查localStorage中的旧数据
+                const localKey = getCharacterGroupsKey();
+                const localStored = localStorage.getItem(localKey);
+                let localGroups = 0;
+                if (localStored) {
+                    try {
+                        const localData = JSON.parse(localStored);
+                        localGroups = localData.length || 0;
+                    } catch (e) {}
+                }
+                
+                console.log(`📊 分组备份统计 (角色: ${charId})：
+                当前内存中分组: ${contactGroups.length}个
+                世界书中分组: ${worldbookGroups}个
+                localStorage中分组: ${localGroups}个
+                最后保存时间: ${lastUpdate ? new Date(lastUpdate).toLocaleString() : '未知'}
+                存储位置: ${worldbookGroups > 0 ? '世界书' : (localGroups > 0 ? 'localStorage' : '无数据')}`);
+                
+                if (localGroups > 0 && worldbookGroups === 0) {
+                    console.log('💡 提示：检测到localStorage中有旧的分组数据，建议创建新分组以迁移到世界书');
+                }
+                
+                return {
+                    characterId: charId,
+                    memoryGroups: contactGroups.length,
+                    worldbookGroups: worldbookGroups,
+                    localStorageGroups: localGroups,
+                    lastUpdate: lastUpdate,
+                    storageLocation: worldbookGroups > 0 ? 'worldbook' : (localGroups > 0 ? 'localStorage' : 'none')
+                };
+            };
             
             /**
              * *** 新增：动态删除功能 ***
@@ -12935,18 +12997,55 @@
             }
             
             /**
-             * 从本地存储加载分组（按角色隔离）
+             * 从世界书加载分组（按角色隔离）
              */
             function loadGroupsFromStorage() {
                 try {
-                    const charGroupsKey = getCharacterGroupsKey();
-                    const stored = localStorage.getItem(charGroupsKey);
-                    if (stored) {
-                        contactGroups = JSON.parse(stored);
-                        console.log(`加载角色(${getCurrentCharacterId()})分组数据:`, contactGroups.length, '个分组');
+                    if (!worldbook || !entries) {
+                        console.warn('loadGroupsFromStorage: worldbook未初始化，尝试从localStorage加载');
+                        // 作为备用方案，尝试从localStorage加载
+                        const charGroupsKey = getCharacterGroupsKey();
+                        const stored = localStorage.getItem(charGroupsKey);
+                        if (stored) {
+                            contactGroups = JSON.parse(stored);
+                            console.log(`从localStorage加载角色(${getCurrentCharacterId()})分组数据:`, contactGroups.length, '个分组');
+                        } else {
+                            contactGroups = [];
+                        }
+                        return;
+                    }
+                    
+                    const charId = getCurrentCharacterId();
+                    const groupsKey = `QQ_分组备份_${charId}`;
+                    
+                    const groupsEntry = entries.find(entry => 
+                        entry.keys.includes(groupsKey)
+                    );
+                    
+                    if (groupsEntry && groupsEntry.content) {
+                        const groupsData = JSON.parse(groupsEntry.content);
+                        
+                        // 验证数据完整性
+                        if (groupsData.groups && Array.isArray(groupsData.groups)) {
+                            contactGroups = groupsData.groups;
+                            console.log(`从世界书加载角色(${charId})分组数据:`, contactGroups.length, '个分组');
+                        } else {
+                            contactGroups = [];
+                            console.log(`角色(${charId})的世界书分组数据格式错误，初始化为空数组`);
+                        }
                     } else {
-                        contactGroups = [];
-                        console.log(`角色(${getCurrentCharacterId()})没有找到存储的分组数据，初始化为空数组`);
+                        // 尝试从localStorage迁移数据
+                        const charGroupsKey = getCharacterGroupsKey();
+                        const localStored = localStorage.getItem(charGroupsKey);
+                        if (localStored) {
+                            contactGroups = JSON.parse(localStored);
+                            console.log(`从localStorage迁移角色(${charId})分组数据:`, contactGroups.length, '个分组');
+                            // 立即保存到世界书
+                            setTimeout(() => saveGroupsToStorage(), 1000);
+                        } else {
+                            contactGroups = [];
+                            console.log(`角色(${charId})没有找到分组数据，初始化为空数组`);
+                        }
                     }
                 } catch (error) {
                     console.error('加载分组数据失败:', error);
@@ -12958,13 +13057,55 @@
             loadGroupsFromStorage();
             
             /**
-             * 保存分组到本地存储（按角色隔离）
+             * 保存分组到世界书（按角色隔离）
              */
-            function saveGroupsToStorage() {
+            async function saveGroupsToStorage() {
                 try {
-                    const charGroupsKey = getCharacterGroupsKey();
-                    localStorage.setItem(charGroupsKey, JSON.stringify(contactGroups));
-                    console.log(`角色(${getCurrentCharacterId()})分组数据已保存`);
+                    if (!worldbook || !entries) {
+                        console.warn('saveGroupsToStorage: worldbook未初始化');
+                        return;
+                    }
+                    
+                    const charId = getCurrentCharacterId();
+                    const groupsKey = `QQ_分组备份_${charId}`;
+                    
+                    const groupsData = {
+                        characterId: charId,
+                        lastUpdate: Date.now(),
+                        groups: contactGroups
+                    };
+                    
+                    // 查找或创建分组存储条目
+                    let groupsEntry = entries.find(entry => 
+                        entry.keys.includes(groupsKey)
+                    );
+                    
+                    if (groupsEntry) {
+                        groupsEntry.content = JSON.stringify(groupsData, null, 2);
+                    } else {
+                        const newEntry = {
+                            keys: [groupsKey],
+                            content: JSON.stringify(groupsData, null, 2),
+                            enabled: true,
+                            constant: true,
+                            comment: `手机界面分组备份 - 角色${charId} - 自动生成`,
+                            depth: 0,
+                            selectiveLogic: 0,
+                            order: 9998
+                        };
+                        entries.push(newEntry);
+                    }
+                    
+                    // 保存到世界书
+                    if (typeof saveWorldInfo === 'function') {
+                        console.log('触发saveWorldInfo保存分组数据...');
+                        await saveWorldInfo();
+                    } else {
+                        console.log('saveWorldInfo函数不可用，依赖SillyTavern自动保存机制');
+                    }
+                    
+                    console.log(`角色(${charId})分组数据已保存到世界书，共${contactGroups.length}个分组`);
+                    
                 } catch (error) {
                     console.error('保存分组数据失败:', error);
                 }
@@ -13029,7 +13170,7 @@
             /**
              * 创建新的联系人分组
              */
-            function createNewContactGroup() {
+            async function createNewContactGroup() {
                 console.log('开始创建新分组...');
                 const input = document.getElementById('new_group_name_input');
                 if (!input) {
@@ -13060,7 +13201,7 @@
                 };
                 
                 contactGroups.push(newGroup);
-                saveGroupsToStorage();
+                await saveGroupsToStorage();
                 renderContactGroups();
                 closeNewGroupModal();
                 
@@ -13190,12 +13331,12 @@
             /**
              * 切换分组折叠状态
              */
-            function toggleGroup(groupId) {
+            async function toggleGroup(groupId) {
                 const group = contactGroups.find(g => g.id === groupId);
                 if (!group) return;
                 
                 group.collapsed = !group.collapsed;
-                saveGroupsToStorage();
+                await saveGroupsToStorage();
                 
                 const groupElement = document.querySelector(`[data-group-id="${groupId}"]`);
                 const toggle = groupElement.querySelector('.group-toggle');
@@ -13248,7 +13389,7 @@
                         const group = contactGroups.find(g => g.id === groupId);
                         if (group) {
                             group.name = newName;
-                            saveGroupsToStorage();
+                            setTimeout(() => saveGroupsToStorage(), 100);
                         }
                     }
                     
@@ -13280,7 +13421,7 @@
             /**
              * 删除联系人分组
              */
-            function deleteContactGroup(event, groupId) {
+            async function deleteContactGroup(event, groupId) {
                 event.stopPropagation();
                 
                 const group = contactGroups.find(g => g.id === groupId);
@@ -13289,7 +13430,7 @@
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
                     // 移除分组
                     contactGroups = contactGroups.filter(g => g.id !== groupId);
-                    saveGroupsToStorage();
+                    await saveGroupsToStorage();
                     renderContactGroups();
                 }
             }
@@ -13399,7 +13540,7 @@
                 }
                 
                 // 保存并重新渲染
-                saveGroupsToStorage();
+                setTimeout(() => saveGroupsToStorage(), 100);
                 renderContactGroups();
                 
                 // 重新初始化拖拽功能

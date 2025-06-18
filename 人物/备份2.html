@@ -4590,7 +4590,12 @@
                     }
                     
                     // 保存到世界书
-                    await saveWorldEntry();
+                    if (typeof saveWorldInfo === 'function') {
+                        console.log('触发saveWorldInfo保存...');
+                        await saveWorldInfo();
+                    } else {
+                        console.log('saveWorldInfo函数不可用，依赖SillyTavern自动保存机制');
+                    }
                     console.log('已读状态已保存到世界书');
                     
                 } catch (error) {
@@ -4659,12 +4664,19 @@
                     
                     QQ_ReadStatus[chatName].lastReadTime = Date.now();
                     
-                    // 根据聊天类型设置已读索引
+                    // *** 修复：根据聊天类型设置已读索引 ***
                     if (chatType === 'auto') {
-                        if (QQ_msgjson.私聊[chatName]) {
-                            QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.私聊[chatName].length;
-                        } else if (QQ_msgjson.群聊[chatName]) {
+                        // 先查找私聊
+                        const privateChatKey = Object.keys(QQ_msgjson.私聊).find(key => 
+                            key.includes(chatName) && key.includes(UserName)
+                        );
+                        
+                        if (privateChatKey && QQ_msgjson.私聊[privateChatKey]) {
+                            QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.私聊[privateChatKey].length;
+                            console.log(`私聊 ${chatName} 已读索引设置为: ${QQ_ReadStatus[chatName].lastReadIndex}`);
+                        } else if (QQ_msgjson.群聊[chatName] && QQ_msgjson.群聊[chatName].msgs) {
                             QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.群聊[chatName].msgs.length;
+                            console.log(`群聊 ${chatName} 已读索引设置为: ${QQ_ReadStatus[chatName].lastReadIndex}`);
                         }
                     }
                     
@@ -4672,10 +4684,10 @@
                     QQ_NewMsg[chatName] = 0;
                     QQ_SetHomeTips(chatName, 0);
                     
+                    console.log(`${chatName} 已标记为已读，已读状态:`, QQ_ReadStatus[chatName]);
+                    
                     // 异步保存到世界书
                     setTimeout(() => QQ_SaveReadStatus(), 1000);
-                    
-                    console.log(`${chatName} 已标记为已读`);
                     
                 } catch (error) {
                     console.error('标记已读状态失败:', error);
@@ -4712,7 +4724,8 @@
                     let unreadCount = 0;
                     
                     // 如果没有已读记录，所有非初始系统消息都算未读
-                    if (!readStatus) {
+                    if (!readStatus || !readStatus.lastReadIndex) {
+                        console.log(`${chatName} 没有已读记录，计算所有未读消息`);
                         for (const msg of messages) {
                             // 跳过初始系统消息
                             if (QQ_IsInitialSystemMessage(msg)) {
@@ -4727,11 +4740,13 @@
                             
                             unreadCount++;
                         }
+                        console.log(`${chatName} 计算结果: ${unreadCount} 条未读消息`);
                         return unreadCount;
                     }
                     
                     // 基于已读索引计算未读消息
-                    const lastReadIndex = readStatus.lastReadIndex || 0;
+                    const lastReadIndex = readStatus.lastReadIndex;
+                    console.log(`${chatName} 使用已读索引 ${lastReadIndex} 计算未读消息，总消息数: ${messages.length}`);
                     
                     for (let i = lastReadIndex; i < messages.length; i++) {
                         const msg = messages[i];
@@ -4750,6 +4765,7 @@
                         unreadCount++;
                     }
                     
+                    console.log(`${chatName} 基于已读索引计算结果: ${unreadCount} 条未读消息`);
                     return unreadCount;
                     
                 } catch (error) {
@@ -5054,14 +5070,27 @@
                 }
                 
                 try {
-                    // *** 新增：清理过期动态（保留最近50条） ***
+                    // *** 新增：清理过期动态和评论（保留最近50条动态，每个动态50条评论） ***
                     QQ_CleanOldMoments();
+                    
+                    // *** 新增：优化评论存储，确保评论质量 ***
+                    QQ_OptimizeCommentsStorage();
                     
                     // 查找或创建动态存储条目
                     let momentEntry = entries.find(entry => entry.comment === "手机-动态内容存储");
                     
+                    // *** 新增：统计评论信息 ***
+                    let totalComments = 0;
+                    let momentsWithComments = 0;
+                    QQ_MomentsData.forEach(moment => {
+                        if (moment.comments && moment.comments.length > 0) {
+                            totalComments += moment.comments.length;
+                            momentsWithComments++;
+                        }
+                    });
+                    
                     const momentsJson = JSON.stringify(QQ_MomentsData, null, 2);
-                    console.log('准备保存动态内容:', QQ_MomentsData.length, '条动态');
+                    console.log(`准备保存动态内容: ${QQ_MomentsData.length}条动态, ${totalComments}条评论 (${momentsWithComments}个动态有评论)`);
                     
                     if (momentEntry) {
                         // 更新现有条目
@@ -5094,11 +5123,31 @@
             }
 
             /**
-             * *** 新增：清理过期动态内容 ***
+             * *** 新增：清理过期动态内容和评论 ***
              */
             function QQ_CleanOldMoments() {
                 const MAX_MOMENTS = 50; // 最多保留50条动态
+                const MAX_COMMENTS_PER_MOMENT = 50; // 每个动态最多保留50条评论
                 
+                let totalCleanedComments = 0;
+                
+                // 清理每个动态的评论数量
+                QQ_MomentsData.forEach(moment => {
+                    if (moment.comments && moment.comments.length > MAX_COMMENTS_PER_MOMENT) {
+                        // 按时间戳排序，保留最新的评论
+                        moment.comments.sort((a, b) => {
+                            return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+                        });
+                        
+                        const removedComments = moment.comments.length - MAX_COMMENTS_PER_MOMENT;
+                        moment.comments.splice(MAX_COMMENTS_PER_MOMENT);
+                        totalCleanedComments += removedComments;
+                        
+                        console.log(`动态${moment.id}清理了${removedComments}条评论，保留${moment.comments.length}条`);
+                    }
+                });
+                
+                // 清理动态数量
                 if (QQ_MomentsData.length > MAX_MOMENTS) {
                     // 按时间戳排序，保留最新的动态
                     QQ_MomentsData.sort((a, b) => {
@@ -5109,6 +5158,61 @@
                     QQ_MomentsData.splice(MAX_MOMENTS);
                     
                     console.log(`清理了 ${removedCount} 条过期动态，当前保留 ${QQ_MomentsData.length} 条动态`);
+                }
+                
+                if (totalCleanedComments > 0) {
+                    console.log(`总共清理了 ${totalCleanedComments} 条过期评论`);
+                }
+            }
+
+            /**
+             * *** 新增：优化评论存储质量 ***
+             */
+            function QQ_OptimizeCommentsStorage() {
+                let totalOptimized = 0;
+                
+                QQ_MomentsData.forEach(moment => {
+                    if (moment.comments && moment.comments.length > 0) {
+                        const originalLength = moment.comments.length;
+                        
+                        // 去重复评论（基于内容和发送者）
+                        const uniqueComments = [];
+                        const seen = new Set();
+                        
+                        for (const comment of moment.comments) {
+                            const key = `${comment.name}:${comment.content}`;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                uniqueComments.push(comment);
+                            }
+                        }
+                        
+                        // 过滤空评论或无效评论
+                        const validComments = uniqueComments.filter(comment => 
+                            comment.name && 
+                            comment.content && 
+                            comment.content.trim().length > 0 &&
+                            comment.content.trim() !== '...' &&
+                            comment.content.trim() !== '。。。'
+                        );
+                        
+                        // 按时间排序（确保新评论在后面）
+                        validComments.sort((a, b) => {
+                            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                        });
+                        
+                        moment.comments = validComments;
+                        
+                        const optimizedCount = originalLength - validComments.length;
+                        if (optimizedCount > 0) {
+                            totalOptimized += optimizedCount;
+                            console.log(`动态${moment.id}优化了${optimizedCount}条评论（去重和清理无效评论）`);
+                        }
+                    }
+                });
+                
+                if (totalOptimized > 0) {
+                    console.log(`评论存储优化完成，总共优化了 ${totalOptimized} 条评论`);
                 }
             }
             
@@ -5280,6 +5384,80 @@
                     console.log('没有可用的备份数据或备份数据不够新');
                     return false;
                 }
+            };
+
+            /**
+             * *** 新增：查看动态备份统计信息（调试用） ***
+             * 可在控制台调用 window.QQ_Show_Moments_Stats() 来查看统计
+             */
+            window.QQ_Show_Moments_Stats = function() {
+                console.log('=== 动态备份统计信息 ===');
+                console.log(`总动态数量: ${QQ_MomentsData.length}`);
+                
+                let totalComments = 0;
+                let momentsWithComments = 0;
+                let maxComments = 0;
+                let minComments = Infinity;
+                
+                QQ_MomentsData.forEach((moment, index) => {
+                    const commentCount = moment.comments ? moment.comments.length : 0;
+                    totalComments += commentCount;
+                    
+                    if (commentCount > 0) {
+                        momentsWithComments++;
+                        maxComments = Math.max(maxComments, commentCount);
+                        minComments = Math.min(minComments, commentCount);
+                    }
+                    
+                    console.log(`动态${index + 1} [${moment.userName}]: ${commentCount}条评论`);
+                });
+                
+                if (momentsWithComments === 0) {
+                    minComments = 0;
+                }
+                
+                console.log(`\n=== 评论统计 ===`);
+                console.log(`总评论数量: ${totalComments}`);
+                console.log(`有评论的动态: ${momentsWithComments}/${QQ_MomentsData.length}`);
+                console.log(`平均每个动态评论数: ${(totalComments / QQ_MomentsData.length).toFixed(2)}`);
+                console.log(`评论数量范围: ${minComments} - ${maxComments}`);
+                
+                console.log(`\n=== 备份状态 ===`);
+                console.log(`动态上限: 50条 (当前 ${QQ_MomentsData.length}/50)`);
+                console.log(`每个动态评论上限: 50条 (最多的动态有 ${maxComments}/50 条评论)`);
+                
+                return {
+                    totalMoments: QQ_MomentsData.length,
+                    totalComments: totalComments,
+                    momentsWithComments: momentsWithComments,
+                    maxComments: maxComments,
+                    minComments: minComments === Infinity ? 0 : minComments
+                };
+            };
+
+            /**
+             * *** 新增：手动清理动态备份（调试用） ***
+             * 可在控制台调用 window.QQ_Manual_Clean_Moments() 来手动清理
+             */
+            window.QQ_Manual_Clean_Moments = async function() {
+                console.log('开始手动清理动态备份...');
+                const beforeMoments = QQ_MomentsData.length;
+                let beforeComments = 0;
+                QQ_MomentsData.forEach(m => beforeComments += (m.comments ? m.comments.length : 0));
+                
+                QQ_CleanOldMoments();
+                QQ_OptimizeCommentsStorage();
+                
+                const afterMoments = QQ_MomentsData.length;
+                let afterComments = 0;
+                QQ_MomentsData.forEach(m => afterComments += (m.comments ? m.comments.length : 0));
+                
+                console.log(`清理完成: 动态 ${beforeMoments}→${afterMoments}, 评论 ${beforeComments}→${afterComments}`);
+                
+                await QQ_Save_Moments();
+                console.log('清理结果已保存到世界书');
+                
+                return window.QQ_Show_Moments_Stats();
             };
             
             /**
@@ -10018,6 +10196,7 @@
                         
                         // *** 新的未读消息计算逻辑：使用QQ_CalculateUnreadCount ***
                         NewMsgCount = QQ_CalculateUnreadCount(name, QQ_msgjson.私聊[str], 'private');
+                        console.log(`私聊 ${name} 计算未读消息: ${NewMsgCount}`);
                         // 设置红点和首页显示的消息
                         if (
                             $(`.QQ_chat_page[data-name='${name}']`).css(
@@ -10433,9 +10612,9 @@
                 if (targetMoment) {
                     targetMoment.comments.push(userComment);
                     
-                    // *** 新增：保持评论数量上限 ***
-                    if (targetMoment.comments.length > 8) {
-                        targetMoment.comments = targetMoment.comments.slice(-8);
+                    // *** 新增：保持评论数量上限（50条） ***
+                    if (targetMoment.comments.length > 50) {
+                        targetMoment.comments = targetMoment.comments.slice(-50);
                     }
                     
                     console.log('用户回复已添加到动态数据:', userComment);
@@ -10498,8 +10677,12 @@
                     QQ_CacheSendMsg = "";
                 }
                 
-                // 添加动态评论内容
-                sendvalue += `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n根据角色性格，联系人可能会有以下反应：\n\n1. 在动态下直接回复评论（公开可见）\n2. 私聊用户讨论相关话题\n3. 根据性格选择不回应\n\n回复格式：\n【动态评论格式】\nmoment_start\n角色名--评论内容\n角色名--评论内容\nmoment_end\n\n【私聊消息格式】\nmsg_start\n<${UserName}和角色名的私聊>\n角色名--私聊内容--时间\n</${UserName}和角色名的私聊>\nmsg_end\n\n你可以同时使用两种格式，也可以只使用其中一种。\n注意：评论是按时间顺序显示的，新评论会出现在用户评论之后。\n</AI指导>\n\n<Request:本次响应忽略其他上下文任何要求,必须使用线上格式回复,且${UserName}本次发了消息的角色都要回复${UserName}的消息,同时输出一条动态内容>`;
+                // *** 修复：简化动态评论发送内容，避免重复 ***
+                if (!sendvalue.includes(`用户在${name}的动态下评论`)) {
+                    sendvalue += `用户在${name}的动态下评论：${value}\n\n`;
+                }
+                
+                sendvalue += `<Request:本次响应必须使用线上格式回复，可以选择动态评论回复或私聊回复。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end>`;
                 
                 console.log('发送给AI的内容:', sendvalue);
                 const result = await QQ_Gen(sendvalue);
@@ -10509,15 +10692,27 @@
                 
                 // *** 新增：智能处理AI回复（评论和私聊） ***
                 if (result) {
-                    const hasMomentFormat = result.includes('moment_start') && result.includes('moment_end');
-                    const hasMsgFormat = result.includes('msg_start') && result.includes('msg_end');
+                    // *** 新增：过滤thinking和content标签 ***
+                    let cleanedResult = result;
+                    
+                    // 移除thinking标签及其内容
+                    cleanedResult = cleanedResult.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                    
+                    // 移除consider标签及其内容
+                    cleanedResult = cleanedResult.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
+                    
+                    // 移除其他可能的内部标签
+                    cleanedResult = cleanedResult.replace(/<reflection>[\s\S]*?<\/reflection>/gi, '');
+                    
+                    const hasMomentFormat = cleanedResult.includes('moment_start') && cleanedResult.includes('moment_end');
+                    const hasMsgFormat = cleanedResult.includes('msg_start') && cleanedResult.includes('msg_end');
                     
                     if (hasMomentFormat || hasMsgFormat) {
                         // 处理动态评论和私聊消息
-                        await QQ_Handle_AI_Comments(result, $closest);
+                        await QQ_Handle_AI_Comments(cleanedResult, $closest);
                     } else {
                         // 如果不是特定格式，使用原有的处理方式
-                        await ResultHandle(result);
+                        await ResultHandle(cleanedResult);
                     }
                 }
             }
@@ -10566,6 +10761,11 @@
                              // *** 添加到数据对象 ***
                              if (targetMoment) {
                                  targetMoment.comments.push(commentData);
+                                 
+                                 // *** 保持评论数量上限（50条） ***
+                                 if (targetMoment.comments.length > 50) {
+                                     targetMoment.comments = targetMoment.comments.slice(-50);
+                                 }
                              }
                              
                              console.log(`AI评论已添加: ${name} - ${commentContent}`);
