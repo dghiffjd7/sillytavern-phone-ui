@@ -7784,20 +7784,43 @@
                 // 将新创建的页面添加到DOM中
                 $("#App_QQ").append($page);
                 
-                // *** 核心修复：创建页面后，立即加载并显示已有消息 ***
-                const $msgContent = $page.find(".msgcontent");
-                if (isGroup && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
-                    console.log(`为新创建的群聊 ${name} 加载 ${QQ_msgjson.群聊[name].msgs.length} 条已有消息`);
-                    QQ_msgjson.群聊[name].msgs.forEach(msg => {
+                            // *** 核心修复：创建页面后，立即加载并显示已有消息（使用稳定的ID-based存储） ***
+            const $msgContent = $page.find(".msgcontent");
+            if (isGroup) {
+                // *** 获取群聊ID（稳定标识符） ***
+                let groupId = null;
+                if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
+                    const groupInfo = window.QQ_Groups.find(g => g.name === name);
+                    if (groupInfo && groupInfo.id) {
+                        groupId = groupInfo.id;
+                        console.log(`找到群聊ID: ${name} -> ${groupId}`);
+                    }
+                }
+                
+                // 如果找不到ID，生成稳定的ID
+                if (!groupId) {
+                    groupId = `group_${name.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
+                    console.log(`为群聊生成稳定ID: ${name} -> ${groupId}`);
+                }
+                
+                // *** 使用基于ID的获取方法（支持自动迁移） ***
+                const groupData = getGroupMessagesById(groupId, name);
+                
+                if (groupData && groupData.msgs && groupData.msgs.length > 0) {
+                    console.log(`为群聊 ${name} (ID: ${groupId}) 加载 ${groupData.msgs.length} 条历史消息`);
+                    groupData.msgs.forEach(msg => {
                         QQ_Chat_AddMsg($msgContent[0], msg, name, false); // false表示非新消息，不触发红点
                     });
-                } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
-                    const privateMsgs = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
-                    console.log(`为新创建的私聊 ${name} 加载 ${privateMsgs.length} 条已有消息`);
-                    privateMsgs.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
-                    });
+                } else {
+                    console.log(`群聊 ${name} (ID: ${groupId}) 没有历史消息`);
                 }
+            } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
+                const privateMsgs = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
+                console.log(`为新创建的私聊 ${name} 加载 ${privateMsgs.length} 条已有消息`);
+                privateMsgs.forEach(msg => {
+                    QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                });
+            }
                 
                 // 滚动到底部
                 $msgContent.scrollTop($msgContent[0].scrollHeight);
@@ -8365,16 +8388,28 @@
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.群聊[name]["msgs"]) {
-                            // 检查是否为新消息（不在现有消息列表中）
-                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
-                            console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
-                            QQ_msgjson.群聊[name]["msgs"].push(msg);
-                            
-                            // 同时保存到群聊专用的消息存储
+                            // *** 优先使用基于ID的存储检查新消息 ***
                             const groupsForMessage = await loadGroupChatsFromWorldbook();
                             const currentGroup = groupsForMessage.find(g => g.name === name);
-                            if (currentGroup) {
+                            
+                            let isNewMsg = false;
+                            
+                            if (currentGroup && currentGroup.id) {
+                                // 使用基于ID的存储检查
+                                const groupData = getGroupMessagesById(currentGroup.id, name);
+                                isNewMsg = !groupData.msgs.includes(msg);
+                                console.log(`使用ID-based检查新消息: 群聊ID=${currentGroup.id}, 新消息=${isNewMsg}`);
+                            } else {
+                                // 降级到传统检查
+                                isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
+                                console.log(`使用name-based检查新消息: 群聊名称=${name}, 新消息=${isNewMsg}`);
+                            }
+                            
+                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
+                            
+                            // *** 优先保存到基于ID的存储 ***
+                            if (currentGroup && currentGroup.id) {
                                 const sp = msg.split("--");
                                 if (sp.length >= 2) {
                                     const messageObj = {
@@ -8382,11 +8417,18 @@
                                         content: sp[1],
                                         timestamp: sp.length >= 3 ? sp[2] : new Date().toLocaleTimeString('zh-CN', { hour12: false })
                                     };
-                                    saveGroupMessage(currentGroup.id, messageObj);
+                                    
+                                    // 使用基于ID的保存方法
+                                    saveGroupMessageById(currentGroup.id, name, msg);
                                     
                                     // 更新群聊的最后消息
                                     await updateGroupLastMessage(currentGroup.id, sp[1]);
                                 }
+                            }
+                            
+                            // *** 保持向后兼容的传统存储 ***
+                            if (!QQ_msgjson.群聊[name]["msgs"].includes(msg)) {
+                                QQ_msgjson.群聊[name]["msgs"].push(msg);
                             }
                             
                             let sp = msg.split("--");
@@ -12434,12 +12476,39 @@
             }
             
             /**
-             * 保存群聊消息到本地存储
+             * 保存群聊消息到本地存储（使用稳定的ID-based存储）
              */
             function saveGroupMessage(groupId, message) {
-                // 新版本：群聊消息暂时不持久化，仅在内存中保存
-                console.log('群聊消息（内存）:', message);
-                // 可以在这里添加到QQ_msgjson.群聊中，但暂时简化处理
+                console.log('保存群聊消息（ID-based）:', groupId, message);
+                
+                try {
+                    // 获取群聊名称
+                    let groupName = null;
+                    if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
+                        const groupInfo = window.QQ_Groups.find(g => g.id === groupId);
+                        if (groupInfo) {
+                            groupName = groupInfo.name;
+                        }
+                    }
+                    
+                    // 如果找不到群聊名称，尝试从当前聊天状态获取
+                    if (!groupName && window.currentGroupChat) {
+                        groupName = window.currentGroupChat.name;
+                    }
+                    
+                    // 如果仍然找不到，使用群聊ID作为默认名称
+                    if (!groupName) {
+                        groupName = `群聊_${groupId}`;
+                        console.warn(`使用默认群聊名称: ${groupName}`);
+                    }
+                    
+                    // 使用基于ID的保存方法
+                    saveGroupMessageById(groupId, groupName, message);
+                    
+                    console.log(`群聊消息已保存: ID=${groupId}, Name=${groupName}`);
+                } catch (error) {
+                    console.error('保存群聊消息失败:', error);
+                }
             }
             
             /**
@@ -13347,9 +13416,24 @@
             if (document.readyState === 'complete' || document.readyState === 'interactive') {
                 setTimeout(initializeEnhancedFeatures, 1000);
             } else {
-                document.addEventListener('DOMContentLoaded', () => {
-                    setTimeout(initializeEnhancedFeatures, 1000);
-                });
+                            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(() => {
+                    initializeEnhancedFeatures();
+                    
+                    // *** 新增：在系统启动时修复数据格式和迁移数据 ***
+                    try {
+                        // 首先修复QQ_Groups数组格式
+                        fixQQGroupsArrayFormat();
+                        
+                        // 然后进行数据迁移
+                        migrateNameBasedToIdBased();
+                        
+                        console.log('✅ 群聊数据格式修复和迁移检查完成');
+                    } catch (error) {
+                        console.error('❌ 群聊数据修复和迁移失败:', error);
+                    }
+                }, 1000);
+            });
             }
             
         </script>
@@ -14339,9 +14423,37 @@
                     }
                 }
                 
-                // *** 修复：更新消息JSON中的群聊信息，保持聊天记录 ***
+                // *** 修复：使用稳定的ID-based存储，无需复杂的数据迁移 ***
                 if (oldName !== newName) {
+                    console.log(`群聊名称变更: ${oldName} -> ${newName}`);
+                    console.log(`使用稳定ID存储，群聊ID保持不变: ${stableGroupId}`);
+                    
+                    // 更新ID-based存储中的群聊名称（保持历史消息完整）
+                    const groupData = getGroupMessagesById(stableGroupId, newName);
+                    if (groupData) {
+                        groupData.groupName = newName; // 更新名称但保持ID和消息不变
+                        console.log(`✅ ID-based存储中的群聊名称已更新: ${stableGroupId} -> ${newName}, 消息数量: ${groupData.msgs.length}`);
+                    }
+                    
+                    // 保持向后兼容：仍然进行传统的消息迁移（为了确保旧版本数据的兼容性）
                     await updateGroupChatMessagesInMsgjson(stableGroupId, oldName, newName);
+                    
+                    // 同步更新传统的name-based存储（向后兼容）
+                    if (window.QQ_msgjson && window.QQ_msgjson.群聊) {
+                        if (window.QQ_msgjson.群聊[oldName]) {
+                            console.log(`同步更新传统name-based存储: ${oldName} -> ${newName}`);
+                            window.QQ_msgjson.群聊[newName] = window.QQ_msgjson.群聊[oldName];
+                            delete window.QQ_msgjson.群聊[oldName];
+                        }
+                        
+                        // 确保新群聊数据结构正确
+                        if (!window.QQ_msgjson.群聊[newName]) {
+                            window.QQ_msgjson.群聊[newName] = {
+                                msgs: groupData ? groupData.msgs : [],
+                                members: currentManagingGroup.members || []
+                            };
+                        }
+                    }
                 }
                 
                 // 清空选中的头像数据
@@ -15093,6 +15205,191 @@
             }
             
             /**
+             * 获取群聊消息数据（基于稳定的ID，支持向后兼容）
+             */
+            function getGroupMessagesById(groupId, groupName) {
+                if (!window.QQ_msgjson) {
+                    window.QQ_msgjson = { 群聊: {}, 群聊_按ID: {} };
+                }
+                
+                // 确保按ID的存储结构存在
+                if (!window.QQ_msgjson.群聊_按ID) {
+                    window.QQ_msgjson.群聊_按ID = {};
+                }
+                
+                // 优先从ID-based存储中获取
+                if (window.QQ_msgjson.群聊_按ID[groupId]) {
+                    console.log(`从ID-based存储获取群聊消息: ${groupId}`);
+                    return window.QQ_msgjson.群聊_按ID[groupId];
+                }
+                
+                // 向后兼容：从name-based存储中查找并迁移
+                if (window.QQ_msgjson.群聊[groupName]) {
+                    console.log(`从name-based存储找到群聊消息，迁移到ID-based: ${groupName} -> ${groupId}`);
+                    const groupData = window.QQ_msgjson.群聊[groupName];
+                    
+                    // 迁移到ID-based存储
+                    window.QQ_msgjson.群聊_按ID[groupId] = {
+                        msgs: groupData.msgs || [],
+                        members: groupData.members || [],
+                        groupName: groupName, // 保留当前名称用于引用
+                        id: groupId
+                    };
+                    
+                    // 可选：删除旧的name-based存储（为了保持兼容性，暂时保留）
+                    // delete window.QQ_msgjson.群聊[groupName];
+                    
+                    return window.QQ_msgjson.群聊_按ID[groupId];
+                }
+                
+                // 如果都没有找到，创建新的数据结构
+                console.log(`创建新的群聊消息数据结构: ${groupId}`);
+                window.QQ_msgjson.群聊_按ID[groupId] = {
+                    msgs: [],
+                    members: [],
+                    groupName: groupName,
+                    id: groupId
+                };
+                
+                return window.QQ_msgjson.群聊_按ID[groupId];
+            }
+            
+            /**
+             * 保存群聊消息（基于稳定的ID）
+             */
+            function saveGroupMessageById(groupId, groupName, message) {
+                const groupData = getGroupMessagesById(groupId, groupName);
+                
+                if (!groupData.msgs.includes(message)) {
+                    groupData.msgs.push(message);
+                    
+                    // 更新群聊名称（支持名称变更）
+                    groupData.groupName = groupName;
+                    
+                    console.log(`保存群聊消息到ID-based存储: ${groupId}, 总消息数: ${groupData.msgs.length}`);
+                    
+                    // 同时保持name-based存储的同步（向后兼容）
+                    if (!window.QQ_msgjson.群聊[groupName]) {
+                        window.QQ_msgjson.群聊[groupName] = { msgs: [], members: [] };
+                    }
+                    if (!window.QQ_msgjson.群聊[groupName].msgs.includes(message)) {
+                        window.QQ_msgjson.群聊[groupName].msgs.push(message);
+                    }
+                }
+            }
+            
+            /**
+             * 修复QQ_Groups数组格式，确保只包含字符串名称
+             */
+            function fixQQGroupsArrayFormat() {
+                console.log('=== 开始修复QQ_Groups数组格式 ===');
+                
+                if (!window.QQ_Groups || !Array.isArray(window.QQ_Groups)) {
+                    console.log('QQ_Groups数组不存在或格式错误，重新初始化');
+                    window.QQ_Groups = [];
+                    return;
+                }
+                
+                let fixedCount = 0;
+                const originalLength = window.QQ_Groups.length;
+                
+                // 检查和修复数组中的每个元素
+                for (let i = 0; i < window.QQ_Groups.length; i++) {
+                    const item = window.QQ_Groups[i];
+                    
+                    if (typeof item === 'object' && item !== null) {
+                        // 如果是对象，提取名称
+                        if (item.name && typeof item.name === 'string') {
+                            console.log(`修复QQ_Groups[${i}]: 对象 -> ${item.name}`);
+                            window.QQ_Groups[i] = item.name;
+                            fixedCount++;
+                        } else {
+                            // 如果对象没有有效名称，移除它
+                            console.log(`移除QQ_Groups[${i}]: 无效对象`);
+                            window.QQ_Groups.splice(i, 1);
+                            i--; // 调整索引
+                            fixedCount++;
+                        }
+                    } else if (typeof item !== 'string') {
+                        // 如果不是字符串也不是对象，移除
+                        console.log(`移除QQ_Groups[${i}]: 非字符串类型 (${typeof item})`);
+                        window.QQ_Groups.splice(i, 1);
+                        i--; // 调整索引
+                        fixedCount++;
+                    }
+                }
+                
+                // 移除重复项
+                const uniqueGroups = [...new Set(window.QQ_Groups)];
+                const duplicateCount = window.QQ_Groups.length - uniqueGroups.length;
+                if (duplicateCount > 0) {
+                    window.QQ_Groups = uniqueGroups;
+                    console.log(`移除 ${duplicateCount} 个重复的群聊名称`);
+                    fixedCount += duplicateCount;
+                }
+                
+                console.log(`=== QQ_Groups数组格式修复完成 ===`);
+                console.log(`原始长度: ${originalLength}, 修复后长度: ${window.QQ_Groups.length}, 修复项目: ${fixedCount}`);
+                console.log('当前QQ_Groups内容:', window.QQ_Groups);
+            }
+
+            /**
+             * 迁移现有的name-based数据到ID-based存储
+             */
+            function migrateNameBasedToIdBased() {
+                console.log('=== 开始迁移name-based群聊数据到ID-based存储 ===');
+                
+                if (!window.QQ_msgjson || !window.QQ_msgjson.群聊) {
+                    console.log('没有name-based群聊数据需要迁移');
+                    return;
+                }
+                
+                // 确保ID-based存储结构存在
+                if (!window.QQ_msgjson.群聊_按ID) {
+                    window.QQ_msgjson.群聊_按ID = {};
+                }
+                
+                let migratedCount = 0;
+                
+                // 获取所有群聊数据，尝试找到对应的ID
+                const groupNames = Object.keys(window.QQ_msgjson.群聊);
+                
+                for (const groupName of groupNames) {
+                    // 尝试从QQ_Groups中找到对应的群聊ID
+                    let groupId = null;
+                    
+                    if (window.QQ_Groups && Array.isArray(window.QQ_Groups)) {
+                        const groupInfo = window.QQ_Groups.find(g => g.name === groupName);
+                        if (groupInfo && groupInfo.id) {
+                            groupId = groupInfo.id;
+                        }
+                    }
+                    
+                    // 如果找不到ID，生成一个稳定的ID
+                    if (!groupId) {
+                        groupId = `group_${groupName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
+                        console.log(`为群聊 ${groupName} 生成稳定ID: ${groupId}`);
+                    }
+                    
+                    // 检查是否已经迁移
+                    if (!window.QQ_msgjson.群聊_按ID[groupId]) {
+                        const nameBasedData = window.QQ_msgjson.群聊[groupName];
+                        window.QQ_msgjson.群聊_按ID[groupId] = {
+                            msgs: nameBasedData.msgs || [],
+                            members: nameBasedData.members || [],
+                            groupName: groupName,
+                            id: groupId
+                        };
+                        
+                        console.log(`迁移群聊数据: ${groupName} -> ${groupId}, 消息数: ${nameBasedData.msgs ? nameBasedData.msgs.length : 0}`);
+                        migratedCount++;
+                    }
+                }
+                
+                console.log(`=== 迁移完成，共迁移 ${migratedCount} 个群聊的数据 ===`);
+            }
+
+            /**
              * 群聊改名时的完整数据迁移（修复绑定关系）
              */
             async function migrateGroupDataBindings(oldName, newName, groupData) {
@@ -15130,35 +15427,43 @@
                     // *** 2. 确保全局QQ_Groups数组正确更新 ***
                     console.log('检查和更新全局QQ_Groups数组...');
                     
-                    // 确保QQ_Groups数组存在
-                    if (!window.QQ_Groups) {
-                        console.warn('QQ_Groups数组不存在，重新初始化');
+                    // 确保QQ_Groups数组存在且格式正确
+                    if (!window.QQ_Groups || !Array.isArray(window.QQ_Groups)) {
+                        console.warn('QQ_Groups数组不存在或格式错误，重新初始化');
                         window.QQ_Groups = [];
                     }
                     
-                    // 查找并更新QQ_Groups中的群聊数据
-                    const groupIndex = window.QQ_Groups.findIndex(g => 
-                        g && (g.id === groupData.id || g.name === oldName || g.name === newName)
-                    );
+                    // *** 修复：QQ_Groups应该只包含群聊名称，保持向后兼容 ***
+                    console.log('QQ_Groups数组格式检查和修复...');
                     
-                    if (groupIndex > -1) {
-                        console.log(`更新QQ_Groups数组中的群聊 [${groupIndex}]:`, oldName, '->', newName);
-                        console.log(`头像数据迁移: ${groupData.avatar ? JSON.stringify(groupData.avatar) : 'null'}`);
-                        window.QQ_Groups[groupIndex] = {
-                            ...window.QQ_Groups[groupIndex],
-                            name: groupData.name,
-                            id: groupData.id,
-                            avatar: groupData.avatar,
-                            avatarUrl: groupData.avatarUrl,
-                            members: groupData.members
-                        };
-                        console.log('QQ_Groups数组中的头像已更新:', window.QQ_Groups[groupIndex].avatar);
+                    // 检查数组中是否有非字符串元素（对象）
+                    let hasObjects = false;
+                    for (let i = 0; i < window.QQ_Groups.length; i++) {
+                        if (typeof window.QQ_Groups[i] === 'object' && window.QQ_Groups[i] !== null) {
+                            hasObjects = true;
+                            // 如果是对象，提取名称
+                            if (window.QQ_Groups[i].name) {
+                                window.QQ_Groups[i] = window.QQ_Groups[i].name;
+                            }
+                        }
+                    }
+                    
+                    if (hasObjects) {
+                        console.log('修复QQ_Groups数组格式，转换对象为字符串');
+                    }
+                    
+                    // 查找群聊名称在数组中的位置
+                    const oldNameIndex = window.QQ_Groups.indexOf(oldName);
+                    const newNameIndex = window.QQ_Groups.indexOf(newName);
+                    
+                    if (oldNameIndex > -1) {
+                        console.log(`更新QQ_Groups数组中的群聊名称 [${oldNameIndex}]:`, oldName, '->', newName);
+                        window.QQ_Groups[oldNameIndex] = newName;
                         migratedCount++;
-                    } else {
-                        // 如果在QQ_Groups中找不到，确保群聊数据存在
-                        console.log('在QQ_Groups中未找到群聊，添加新数据');
-                        console.log('新数据头像:', groupData.avatar);
-                        window.QQ_Groups.push(groupData);
+                    } else if (newNameIndex === -1) {
+                        // 如果新名称也不在数组中，添加它
+                        console.log('在QQ_Groups中添加群聊名称:', newName);
+                        window.QQ_Groups.push(newName);
                         migratedCount++;
                     }
                     
