@@ -4542,6 +4542,10 @@
             // *** 新增：动态内容持久化存储 ***
             let QQ_MomentsData = [];  // 存储所有动态内容的数组
             window.QQ_MomentsData = QQ_MomentsData;  // 设为全局变量方便调试
+            
+            // *** 新增：聊天消息worldbook备份存储 ***
+            let QQ_ChatBackup = {};  // 聊天消息的worldbook备份
+            window.QQ_ChatBackup = QQ_ChatBackup;  // 设为全局变量方便调试
             let QQ_Music = {
                 audio: new Audio(),
                 lastelement: undefined, // 允许 undefined
@@ -4660,13 +4664,15 @@
                 return result;
             }
             /**
-             * 保存消息
+             * 保存消息（增强版：原有机制 + worldbook备份）
              * @returns
              */
             async function QQ_Save_Msg() {
                 if (!QQ_msgjson) {
                     return;
                 }
+                
+                // 原有保存机制：保存到SillyTavern消息系统
                 const CurrentMessageId = getCurrentMessageId();
                 const Messages = await getChatMessages(CurrentMessageId);
                 if (!Messages) {
@@ -4686,6 +4692,64 @@
                 setChatMessage({ message: msg }, CurrentMessageId, {
                     refresh: "none",
                 });
+                
+                // *** 新增：worldbook备份机制 ***
+                console.log('开始聊天消息worldbook备份...');
+                await QQ_Save_Chat_Backup();
+            }
+            
+            /**
+             * *** 新增：保存聊天消息到worldbook备份 ***
+             * @returns
+             */
+            async function QQ_Save_Chat_Backup() {
+                if (!worldbook || !entries || !QQ_msgjson) {
+                    console.log('聊天备份跳过：缺少worldbook或entries或聊天数据');
+                    return;
+                }
+                
+                try {
+                    // 创建备份数据结构，包含时间戳和完整聊天数据
+                    QQ_ChatBackup = {
+                        lastUpdated: new Date().toISOString(),
+                        data: JSON.parse(JSON.stringify(QQ_msgjson)),  // 深拷贝
+                        version: version || "unknown"
+                    };
+                    
+                    // 查找或创建聊天备份条目
+                    let chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                    
+                    const backupJson = JSON.stringify(QQ_ChatBackup, null, 2);
+                    console.log('准备备份聊天消息:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                    
+                    if (chatBackupEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: chatBackupEntry.uid,
+                            content: backupJson,
+                        }]);
+                        console.log('聊天消息已更新到现有worldbook备份条目');
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: "手机-聊天消息备份",
+                            key: ["此世界书永不触发_聊天备份"],
+                            content: backupJson,
+                            position: "at_depth_as_system", 
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9998,  // 比动态存储优先级稍高
+                            enabled: true,
+                        });
+                        console.log('聊天消息已保存到新worldbook备份条目');
+                        
+                        // 重新获取entries以包含新创建的条目
+                        entries = await getLorebookEntries(worldbook);
+                    }
+                } catch (error) {
+                    console.error('聊天消息备份失败:', error);
+                }
             }
 
             /**
@@ -4756,6 +4820,24 @@
                     console.log(`清理了 ${removedCount} 条过期动态，当前保留 ${QQ_MomentsData.length} 条动态`);
                 }
             }
+            
+            /**
+             * *** 新增：手动强制恢复聊天备份（调试用） ***
+             * 可在控制台调用 window.QQ_Force_Restore_Chat() 来强制恢复备份
+             */
+            window.QQ_Force_Restore_Chat = async function() {
+                console.log('开始强制恢复聊天备份...');
+                const restored = await QQ_Load_Chat_Backup();
+                if (restored) {
+                    console.log('强制恢复成功，正在重新保存到消息系统...');
+                    await QQ_Save_Msg();
+                    console.log('强制恢复完成！');
+                    return true;
+                } else {
+                    console.log('没有可用的备份数据或备份数据不够新');
+                    return false;
+                }
+            };
             function QQ_Json2Text(json) {
                 console.log(`传进来的json:${JSON.stringify(json)}`);
                 let result = "";
@@ -5748,6 +5830,15 @@
                     console.log(`转回文本的结果`, QQ_Json2Text(QQ_msgjson));
                     if (!match[1].match(/\S/)) {
                         // 没有有效内容才保存
+                        await QQ_Save_Msg();
+                    }
+                } else {
+                    // *** 新增：如果没有找到现有聊天记录，尝试从备份恢复 ***
+                    console.log('未找到现有聊天记录，尝试从备份恢复...');
+                    const restored = await QQ_Load_Chat_Backup();
+                    if (restored) {
+                        console.log('成功从备份恢复聊天数据');
+                        // 恢复后保存到消息系统
                         await QQ_Save_Msg();
                     }
                 }
@@ -6817,6 +6908,60 @@
                     }
                 } catch (error) {
                     console.error('加载动态内容失败:', error);
+                }
+            }
+            
+            /**
+             * *** 新增：从worldbook加载聊天消息备份 ***
+             */
+            async function QQ_Load_Chat_Backup() {
+                if (!worldbook || !entries) {
+                    console.log('聊天备份加载跳过：缺少worldbook或entries');
+                    return false;
+                }
+                
+                try {
+                    const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                    
+                    if (chatBackupEntry && chatBackupEntry.content) {
+                        // 解析保存的聊天备份数据
+                        const backupData = JSON.parse(chatBackupEntry.content);
+                        
+                        if (backupData.data && (backupData.data.私聊 || backupData.data.群聊)) {
+                            // 检查是否应该使用备份数据
+                            const backupTime = new Date(backupData.lastUpdated);
+                            const timeDiff = Date.now() - backupTime.getTime();
+                            
+                            console.log('找到聊天备份数据，备份时间:', backupData.lastUpdated);
+                            console.log('备份数据包含:', Object.keys(backupData.data.私聊 || {}).length, '个私聊,', Object.keys(backupData.data.群聊 || {}).length, '个群聊');
+                            
+                            // 如果当前QQ_msgjson为空或数据很少，使用备份恢复
+                            const currentPrivateChats = Object.keys(QQ_msgjson?.私聊 || {}).length;
+                            const currentGroupChats = Object.keys(QQ_msgjson?.群聊 || {}).length;
+                            const backupPrivateChats = Object.keys(backupData.data.私聊 || {}).length;
+                            const backupGroupChats = Object.keys(backupData.data.群聊 || {}).length;
+                            
+                            // 如果备份数据比当前数据更丰富，或者时间差不超过1小时，则恢复备份
+                            if ((backupPrivateChats > currentPrivateChats || backupGroupChats > currentGroupChats) && timeDiff < 3600000) {
+                                console.log('恢复聊天备份数据...');
+                                QQ_msgjson = JSON.parse(JSON.stringify(backupData.data)); // 深拷贝
+                                QQ_ChatBackup = backupData;
+                                window.QQ_ChatBackup = QQ_ChatBackup; // 更新全局引用
+                                
+                                console.log('成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                                return true;
+                            } else {
+                                console.log('当前聊天数据较新或更完整，不使用备份');
+                                return false;
+                            }
+                        }
+                    } else {
+                        console.log('未找到聊天备份数据');
+                        return false;
+                    }
+                } catch (error) {
+                    console.error('加载聊天备份失败:', error);
+                    return false;
                 }
             }
 
