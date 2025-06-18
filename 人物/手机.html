@@ -5853,15 +5853,30 @@
                 ];
                 
                 if (matches.length == 0) {
-                    // 没有回复线上格式 - 使用重试机制
+                    // 没有回复线上格式 - 先检查是否有content标签的互动内容
+                    if (QQ_HasContentTag(result)) {
+                        // 有content标签，直接显示互动空间
+                        console.log("检测到content标签包裹的互动内容，显示互动空间");
+                        QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                        QQ_ResetRetry();
+                        return;
+                    }
+                    
+                    // 使用重试机制
                     if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                         QQ_RetryCount++;
                         console.log(`AI没有回复线上格式，开始第${QQ_RetryCount}次重试`);
                         triggerSlash(`/echo AI格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
                         if (QQ_LastRequest) {
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
+                            // 重要：设置gening状态和异步执行重试
+                            gening = true;
+                            try {
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
                         }
                     } else {
                         // 重试用完，判断是否为互动内容
@@ -5883,8 +5898,14 @@
                         triggerSlash(`/echo AI回复多个格式，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
                         if (QQ_LastRequest) {
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
+                            // 重要：设置gening状态和异步执行重试
+                            gening = true;
+                            try {
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
                         }
                     } else {
                         // 重试用完，判断是否为互动内容
@@ -5986,11 +6007,52 @@
             }
 
             /**
+             * 检查是否包含content标签
+             * @param {string} content - AI回复的内容
+             * @returns {boolean} 是否包含content标签
+             */
+            function QQ_HasContentTag(content) {
+                return /<content>[\s\S]*?<\/content>/i.test(content);
+            }
+
+            /**
+             * 清理content标签和consider标签
+             * @param {string} content - 原始内容
+             * @returns {string} 清理后的内容
+             */
+            function QQ_CleanContentTags(content) {
+                // 提取content标签内的内容
+                const contentMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
+                if (contentMatch) {
+                    let cleanContent = contentMatch[1];
+                    
+                    // 移除consider标签及其内容
+                    cleanContent = cleanContent.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
+                    
+                    // 移除其他可能的标签
+                    cleanContent = cleanContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                    
+                    // 清理多余的空白
+                    cleanContent = cleanContent.replace(/\n\s*\n/g, '\n').trim();
+                    
+                    return cleanContent;
+                }
+                
+                // 如果没有content标签，返回原内容
+                return content;
+            }
+
+            /**
              * 判断是否为互动内容
              * @param {string} content - AI回复的内容
              * @returns {boolean} 是否为互动内容
              */
             function QQ_IsInteractiveContent(content) {
+                // 如果有content标签，直接认为是互动内容
+                if (QQ_HasContentTag(content)) {
+                    return true;
+                }
+                
                 // 移除格式标签后的内容
                 const cleanContent = content
                     .replace(/MiPhone_start/g, "")
@@ -6048,11 +6110,16 @@
              * @param {string} characterName - 角色名称
              */
             function QQ_ShowInteractiveSpace(content, characterName = "") {
-                // 清理内容
-                const cleanContent = content
-                    .replace(/MiPhone_start/g, "")
-                    .replace(/MiPhone_end/g, "")
-                    .trim();
+                // 清理内容 - 优先处理content标签
+                let cleanContent;
+                if (QQ_HasContentTag(content)) {
+                    cleanContent = QQ_CleanContentTags(content);
+                } else {
+                    cleanContent = content
+                        .replace(/MiPhone_start/g, "")
+                        .replace(/MiPhone_end/g, "")
+                        .trim();
+                }
                 
                 // 移除现有的互动空间
                 $('.QQ_interactive_space').remove();
