@@ -7583,15 +7583,9 @@
                             })
                         );
                         
-                        // *** 渲染评论（应用8条上限） ***
+                        // *** 渲染评论（使用新的折叠系统） ***
                         const commentsList = momentDiv.find(".user_leave_message_list");
-                        const comments = (momentData.comments || []).slice(-8); // 只取最新的8条评论
-                        
-                        for (const comment of comments) {
-                            const messageDiv = $("<div>", { class: "user_leave_message" });
-                            messageDiv.html(`<span><strong>${comment.name}</strong>：${comment.content}</span>`);
-                            commentsList.append(messageDiv);
-                        }
+                        QQ_Render_Comments(momentData, commentsList);
                         
                         $spaceContents.append(momentDiv);
                     } catch (error) {
@@ -9665,14 +9659,181 @@
                     console.warn('未找到对应的动态数据，无法添加用户回复');
                 }
                 
-                // *** 增强版AI引导内容 ***
-                const sendvalue = `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n1. 联系人可能看到这条动态并选择性回应\n2. 可能会有人私聊用户或在群聊中@用户讨论\n3. 根据角色性格决定是否回应以及回应方式\n4. 输出格式必须使用moment_start/moment_end包裹\n</AI指导>`;
+                // *** 增强版AI引导内容 - 支持评论和私聊 ***
+                const sendvalue = `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n根据角色性格，联系人可能会有以下反应：\n\n1. 在动态下直接回复评论（公开可见）\n2. 私聊用户讨论相关话题\n3. 根据性格选择不回应\n\n回复格式：\n【动态评论格式】\nmoment_start\n角色名--评论内容\n角色名--评论内容\nmoment_end\n\n【私聊消息格式】\nmsg_start\n<${UserName}和角色名的私聊>\n角色名--私聊内容--时间\n</${UserName}和角色名的私聊>\nmsg_end\n\n你可以同时使用两种格式，也可以只使用其中一种。\n注意：评论是按时间顺序显示的，新评论会出现在用户评论之后。\n</AI指导>`;
                 
                 console.log('发送给AI的内容:', sendvalue);
                 const result = await QQ_Gen(sendvalue);
-                await ResultHandle(result);
+                
+                // *** 新增：智能处理AI回复（评论和私聊） ***
+                if (result) {
+                    const hasMomentFormat = result.includes('moment_start') && result.includes('moment_end');
+                    const hasMsgFormat = result.includes('msg_start') && result.includes('msg_end');
+                    
+                    if (hasMomentFormat || hasMsgFormat) {
+                        // 处理动态评论和私聊消息
+                        await QQ_Handle_AI_Comments(result, $closest);
+                    } else {
+                        // 如果不是特定格式，使用原有的处理方式
+                        await ResultHandle(result);
+                    }
+                }
             }
-            function QQ_Moment_Parse(content) {
+            
+                         /**
+              * *** 重新设计：处理AI回复的评论，支持折叠和私聊 ***
+              * @param {string} content - AI返回的内容
+              * @param {jQuery} $momentDiv - 目标动态的jQuery对象
+              */
+             async function QQ_Handle_AI_Comments(content, $momentDiv) {
+                 try {
+                     // 提取moment_start和moment_end之间的内容
+                     const momentMatch = content.match(/moment_start([\s\S]*?)moment_end/);
+                     if (!momentMatch) {
+                         console.log('未找到有效的moment格式');
+                         return;
+                     }
+                     
+                     const momentContent = momentMatch[1].trim();
+                     const lines = momentContent.split(/\r?\n/g);
+                     const commentsList = $momentDiv.find('.user_leave_message_list');
+                     const momentId = $momentDiv.attr('data-moment-id');
+                     
+                     // 查找对应的动态数据对象
+                     const targetMoment = QQ_MomentsData.find(moment => moment.id === momentId);
+                     
+                     // *** 新增AI评论到数据中（不删除旧评论） ***
+                     const newComments = [];
+                     for (const line of lines) {
+                         const trimmedLine = line.trim();
+                         if (!trimmedLine) continue;
+                         
+                         // 匹配评论格式：角色名--评论内容
+                         const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
+                         if (commentMatch) {
+                             const [, name, commentContent] = commentMatch;
+                             
+                             const commentData = {
+                                 name: name,
+                                 content: commentContent,
+                                 timestamp: new Date().toISOString()
+                             };
+                             
+                             newComments.push(commentData);
+                             
+                             // *** 添加到数据对象 ***
+                             if (targetMoment) {
+                                 targetMoment.comments.push(commentData);
+                             }
+                             
+                             console.log(`AI评论已添加: ${name} - ${commentContent}`);
+                         }
+                     }
+                     
+                     // *** 重新渲染整个评论区域，支持折叠 ***
+                     if (targetMoment && newComments.length > 0) {
+                         QQ_Render_Comments(targetMoment, commentsList);
+                         QQ_Save_Moments();
+                     }
+                     
+                     // *** 处理私聊消息 ***
+                     await QQ_Handle_Private_Messages(content);
+                     
+                 } catch (error) {
+                     console.error('处理AI评论时出错:', error);
+                 }
+             }
+             
+             /**
+              * *** 新增：渲染评论区域，支持折叠功能 ***
+              * @param {Object} momentData - 动态数据对象
+              * @param {jQuery} $commentsList - 评论列表容器
+              */
+             function QQ_Render_Comments(momentData, $commentsList) {
+                 $commentsList.empty();
+                 
+                 const comments = momentData.comments || [];
+                 const VISIBLE_COMMENTS = 8;
+                 
+                 if (comments.length <= VISIBLE_COMMENTS) {
+                     // 评论数量未超过限制，直接显示所有评论
+                     for (const comment of comments) {
+                         const messageDiv = $("<div>", { class: "user_leave_message" });
+                         messageDiv.html(`<span><strong>${comment.name}</strong>：${comment.content}</span>`);
+                         $commentsList.append(messageDiv);
+                     }
+                 } else {
+                     // 评论数量超过限制，需要折叠
+                     const hiddenCommentsCount = comments.length - VISIBLE_COMMENTS;
+                     const visibleComments = comments.slice(-VISIBLE_COMMENTS);
+                     
+                     // 添加展开按钮
+                     const expandButton = $("<div>", { 
+                         class: "comments-expand-btn",
+                         style: "text-align: center; color: #999; padding: 5px; cursor: pointer; border-bottom: 1px solid #eee;"
+                     });
+                     expandButton.html(`<span>展开查看更多评论 (${hiddenCommentsCount}条)</span>`);
+                     expandButton.on('click', function() {
+                         // 展开所有评论
+                         $commentsList.empty();
+                         for (const comment of comments) {
+                             const messageDiv = $("<div>", { class: "user_leave_message" });
+                             messageDiv.html(`<span><strong>${comment.name}</strong>：${comment.content}</span>`);
+                             $commentsList.append(messageDiv);
+                         }
+                         
+                         // 添加收起按钮
+                         const collapseButton = $("<div>", { 
+                             class: "comments-collapse-btn",
+                             style: "text-align: center; color: #999; padding: 5px; cursor: pointer; border-top: 1px solid #eee;"
+                         });
+                         collapseButton.html(`<span>收起评论</span>`);
+                         collapseButton.on('click', function() {
+                             QQ_Render_Comments(momentData, $commentsList);
+                         });
+                         $commentsList.append(collapseButton);
+                         
+                         // 滚动到新评论
+                         $commentsList.scrollTop($commentsList[0].scrollHeight);
+                     });
+                     
+                     $commentsList.append(expandButton);
+                     
+                     // 显示最新的8条评论
+                     for (const comment of visibleComments) {
+                         const messageDiv = $("<div>", { class: "user_leave_message" });
+                         messageDiv.html(`<span><strong>${comment.name}</strong>：${comment.content}</span>`);
+                         $commentsList.append(messageDiv);
+                     }
+                 }
+                 
+                 // 滚动到最新评论
+                 if ($commentsList.length > 0) {
+                     $commentsList.scrollTop($commentsList[0].scrollHeight);
+                 }
+             }
+             
+             /**
+              * *** 新增：处理AI返回的私聊消息 ***
+              * @param {string} content - AI返回的完整内容
+              */
+             async function QQ_Handle_Private_Messages(content) {
+                 try {
+                     // 检查是否包含私聊消息格式
+                     const msgMatch = content.match(/msg_start([\s\S]*?)msg_end/);
+                     if (msgMatch) {
+                         console.log('检测到私聊消息，开始处理...');
+                         const msgContent = msgMatch[1].trim();
+                         
+                         // 处理私聊消息
+                         await QQ_Msg_Parse(msgContent);
+                         console.log('私聊消息处理完成');
+                     }
+                 } catch (error) {
+                     console.error('处理私聊消息时出错:', error);
+                 }
+             }
+             function QQ_Moment_Parse(content) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
                 let list;
