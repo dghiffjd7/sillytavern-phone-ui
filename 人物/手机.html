@@ -11893,12 +11893,12 @@
                         // 创建新的独立群聊条目
                         console.log('创建新的独立群聊条目');
                         
-                        // 使用正确的createLorebookEntry函数，遵循项目标准设定
+                        // 使用新的createLorebookEntries函数，代替已弃用的createLorebookEntry
                         const uniqueComment = `手机-群聊-${groupData.name}`;
-                        console.log('准备调用createLorebookEntry，参数:', { worldbook, uniqueComment, groupContent });
-                        const createResult = await createLorebookEntry(worldbook, {
+                        console.log('准备调用createLorebookEntries，参数:', { worldbook, comment: uniqueComment, groupContent });
+                        const createResult = await createLorebookEntries(worldbook, [{
                             comment: uniqueComment, // 使用唯一的comment标识群聊
-                            key: ["此世界书永不触发"], // 使用标准的永不触发关键词，与手机-角色保持一致
+                            keys: ["此世界书永不触发"], // 注意：应该是keys而不是key
                             content: groupContent,
                             position: "at_depth_as_system",
                             type: "selective", // 绿灯：选择性触发
@@ -11906,8 +11906,17 @@
                             exclude_recursion: true, // 排除递归，遵循项目标准
                             order: 6000, // 顺序6000，高于格式条目（5560-5564）
                             enabled: true,
-                        });
-                        console.log('createLorebookEntry调用结果:', createResult);
+                        }]);
+                        console.log('createLorebookEntries调用结果:', createResult);
+                        
+                        // 从返回值中提取新条目的UID
+                        if (createResult && createResult.new_uids && createResult.new_uids.length > 0) {
+                            console.log('成功创建新条目，uid:', createResult.new_uids[0]);
+                            // 更新entries引用以包含新创建的条目
+                            entries = createResult.entries;
+                        } else {
+                            console.warn('创建条目成功但无法获取新uid');
+                        }
                         
                         // 尝试触发世界书保存（如果有相关函数的话）
                         if (typeof saveWorldInfo === 'function') {
@@ -11921,19 +11930,27 @@
                     console.log('群聊已成功添加到独立的世界书条目');
                     
                     // 验证条目是否真的被添加了
-                    console.log('验证：重新获取世界书条目...');
-                    const updatedEntries = await getLorebookEntries(worldbook);
-                    const verifyEntry = updatedEntries.find(e => e.comment === uniqueComment);
+                    // 如果是通过createLorebookEntries创建的，entries已经在上面更新过了
+                    // 但为了安全，依然进行验证
+                    console.log('验证：检查条目是否存在...');
+                    const verifyEntry = entries.find(e => e.comment === uniqueComment);
                     console.log('验证结果 - 找到新条目:', !!verifyEntry);
+                    
                     if (verifyEntry) {
                         console.log('新条目内容:', verifyEntry.content);
-                        // 更新全局entries数组
-                        entries = updatedEntries;
-                        console.log('已更新全局entries数组，当前总数:', entries.length);
+                        console.log('当前entries总数:', entries.length);
                     } else {
-                        console.error('❌ 世界书条目创建失败！条目未在世界书中找到');
+                        console.error('❌ 世界书条目创建失败或未找到！尝试重新获取entries...');
                         // 尝试再次获取entries以确保同步
-                        entries = updatedEntries;
+                        entries = await getLorebookEntries(worldbook);
+                        
+                        // 再次验证条目是否存在
+                        const retryVerify = entries.find(e => e.comment === uniqueComment);
+                        if (retryVerify) {
+                            console.log('重新获取后找到条目:', retryVerify.content);
+                        } else {
+                            console.error('即使重新获取entries也无法找到创建的条目');
+                        }
                         console.log('已重新同步entries数组，当前总数:', entries.length);
                     }
                     
