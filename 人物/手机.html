@@ -14423,11 +14423,19 @@
                     // **关键修复：先关闭模态窗口并立即跳转，避免界面卡死**
                     closeGroupSettings();
                     
-                    // 记录跳转目标，但先不立即跳转
+                    // 记录跳转目标和当前状态
                     let shouldJumpToPage = null;
+                    let wasInGroupChat = false;
+                    
                     if (window.currentGroupChat && window.currentGroupChat.id === deletedGroupId) {
                         shouldJumpToPage = window.groupChatSourcePage || 'people';
+                        wasInGroupChat = true;
                         console.log('删除群聊后需要跳转到页面:', shouldJumpToPage);
+                        console.log('当前在群聊界面，需要跳转');
+                    } else {
+                        // 即使不在群聊界面，也要确保删除后刷新当前页面
+                        shouldJumpToPage = 'people'; // 默认跳转到联系人页面
+                        console.log('不在群聊界面，但仍需要刷新界面');
                     }
                     
                     // 等待模态窗口关闭后再执行删除操作
@@ -14450,40 +14458,45 @@
                             }
                             console.log('群聊已从数据结构中删除，当前QQ_Groups:', QQ_Groups.length);
                             
-                            // **只删除特定的群聊元素，不要过度删除**
-                            safeRemoveGroupFromInterface(deletedGroupId, deletedGroupName);
-                            
-                            // 立即重新加载群聊数据
-                            console.log('重新加载群聊数据');
-                            await loadGroupChatsFromWorldbook();
-                            
-                            // 更新消息列表
-                            await QQ_UpdateMessageList();
-                            
-                            // 如果需要跳转，现在执行跳转
-                            if (shouldJumpToPage) {
-                                console.log('执行页面跳转到:', shouldJumpToPage);
-                                
-                                // 清除群聊状态
+                            // **先清除群聊状态，避免跳转时的状态冲突**
+                            if (wasInGroupChat) {
                                 window.currentGroupChat = null;
                                 window.groupChatSourcePage = null;
-                                
-                                // 安全跳转
-                                if (typeof QQ_Nav === 'function') {
-                                    if (shouldJumpToPage === 'messages') {
-                                        QQ_Nav('message');
-                                    } else {
-                                        QQ_Nav('people');
-                                    }
-                                } else {
-                                    console.warn('QQ_Nav函数不可用，手动显示联系人页面');
-                                    // 手动显示联系人页面
-                                    $('.QQ_chat_page').hide();
-                                    $('.group-chat-page').hide();
-                                    $('#QQ_home_page').show();
-                                    $('.QQ_bottom_nav').show();
-                                }
+                                console.log('已清除群聊状态');
                             }
+                            
+                            // **立即跳转到目标页面**
+                            console.log('执行页面跳转到:', shouldJumpToPage);
+                            if (typeof QQ_Nav === 'function') {
+                                if (shouldJumpToPage === 'messages') {
+                                    QQ_Nav('message');
+                                } else {
+                                    QQ_Nav('people');
+                                }
+                                console.log('跳转完成');
+                            } else {
+                                console.warn('QQ_Nav函数不可用，手动显示联系人页面');
+                                // 手动显示联系人页面
+                                $('.QQ_chat_page').hide();
+                                $('.group-chat-page').hide();
+                                $('#QQ_home_page').show();
+                                $('.QQ_bottom_nav').show();
+                            }
+                            
+                            // **等待跳转完成后再删除界面元素和重新加载数据**
+                            setTimeout(async () => {
+                                // 删除特定的群聊元素
+                                safeRemoveGroupFromInterface(deletedGroupId, deletedGroupName);
+                                
+                                // 重新加载群聊数据
+                                console.log('重新加载群聊数据');
+                                await loadGroupChatsFromWorldbook();
+                                
+                                // 更新消息列表
+                                await QQ_UpdateMessageList();
+                                
+                                console.log('界面数据更新完成');
+                            }, 300);
                             
                             console.log('群聊删除完成:', deletedGroupName);
                             alert('群聊已删除');
@@ -14493,12 +14506,23 @@
                             alert('删除群聊时出现问题，请刷新页面');
                             
                             // 出错时确保界面恢复正常
-                            if (shouldJumpToPage) {
-                                console.log('出错后恢复界面显示');
-                                $('.QQ_chat_page').hide();
-                                $('.group-chat-page').hide();
-                                $('#QQ_home_page').show();
-                                $('.QQ_bottom_nav').show();
+                            console.log('出错后恢复界面显示');
+                            
+                            // 清除群聊状态
+                            if (wasInGroupChat) {
+                                window.currentGroupChat = null;
+                                window.groupChatSourcePage = null;
+                            }
+                            
+                            // 强制显示联系人页面
+                            $('.QQ_chat_page').hide();
+                            $('.group-chat-page').hide();
+                            $('#QQ_home_page').show();
+                            $('.QQ_bottom_nav').show();
+                            
+                            // 尝试通过QQ_Nav恢复正常状态
+                            if (typeof QQ_Nav === 'function') {
+                                QQ_Nav('people');
                             }
                         }
                         
