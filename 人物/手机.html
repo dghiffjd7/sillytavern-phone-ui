@@ -3729,8 +3729,9 @@
                     "
                 >
                     <span
-                        style="font-size: 15px"
+                        style="font-size: 15px; cursor: pointer;"
                         id="QQ_message_list_UserName"
+                        onclick="QQ_ToggleUserMenu()"
                         ><strong>{{user}}</strong></span
                     >
                     <div
@@ -7109,9 +7110,16 @@
                 
                 $('body').append(spiritHtml);
                 
-                // 绑定点击事件
-                $('.QQ_spirit_button').on('click', function(e) {
+                // 绑定点击事件（支持触摸设备）
+                $('.QQ_spirit_button').on('click touchend', function(e) {
+                    // *** 新增：检查是否正在拖拽，如果是则不响应点击 ***
+                    if ($(this).hasClass('dragging')) {
+                        return;
+                    }
+                    
                     e.stopPropagation();
+                    e.preventDefault();
+                    console.log('精灵按钮点击事件触发');
                     QQ_ShowSpiritPanel();
                 });
                 
@@ -7137,10 +7145,13 @@
              */
             function QQ_MakeSpiritDraggable() {
                 let isDragging = false;
+                let dragStarted = false;
                 let startX, startY, initialX, initialY;
+                let dragTimer;
                 
                 $('.QQ_spirit_button').on('mousedown touchstart', function(e) {
-                    isDragging = true;
+                    e.preventDefault();
+                    dragStarted = false;
                     
                     // 获取初始位置
                     const rect = this.getBoundingClientRect();
@@ -7154,14 +7165,20 @@
                     startX = clientX - initialX;
                     startY = clientY - initialY;
                     
-                    // 改变样式
-                    $(this).css({
-                        'cursor': 'grabbing',
-                        'z-index': '10001',
-                        'animation': 'none'
-                    });
-                    
-                    e.preventDefault();
+                    // *** 新增：延迟开始拖拽，允许点击事件 ***
+                    dragTimer = setTimeout(() => {
+                        isDragging = true;
+                        dragStarted = true;
+                        
+                        // 改变样式
+                        $('.QQ_spirit_button').addClass('dragging').css({
+                            'cursor': 'grabbing',
+                            'z-index': '10001',
+                            'animation': 'none'
+                        });
+                        
+                        console.log('开始拖拽精灵按钮');
+                    }, 150); // 150ms延迟，给点击事件留时间
                 });
                 
                 $(document).on('mousemove touchmove', function(e) {
@@ -7191,11 +7208,24 @@
                 });
                 
                 $(document).on('mouseup touchend', function(e) {
+                    // 清除拖拽定时器
+                    if (dragTimer) {
+                        clearTimeout(dragTimer);
+                        dragTimer = null;
+                    }
+                    
+                    if (!isDragging && !dragStarted) {
+                        // 这是一个点击事件，不是拖拽
+                        console.log('精灵按钮被点击（非拖拽）');
+                        return;
+                    }
+                    
                     if (!isDragging) return;
                     isDragging = false;
+                    dragStarted = false;
                     
                     // 恢复样式
-                    $('.QQ_spirit_button').css({
+                    $('.QQ_spirit_button').removeClass('dragging').css({
                         'cursor': 'move',
                         'z-index': '9999',
                         'animation': 'spiritPulse 2s infinite'
@@ -7209,6 +7239,7 @@
                             top: spirit.css('top')
                         };
                         localStorage.setItem('QQ_spirit_position', JSON.stringify(position));
+                        console.log('精灵按钮位置已保存');
                     }
                 });
             }
@@ -12033,7 +12064,9 @@ ${index + 1}. ${space.name}
                      // *** 重新渲染整个评论区域，支持折叠 ***
                      if (targetMoment && newComments.length > 0) {
                          QQ_Render_Comments(targetMoment, commentsList);
-                         QQ_Save_Moments();
+                         // *** 确保立即保存动态数据 ***
+                         await QQ_Save_Moments();
+                         console.log('AI评论已保存到动态备份');
                      }
                      
                      // *** 处理私聊消息 ***
