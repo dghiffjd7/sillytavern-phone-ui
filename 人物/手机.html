@@ -12953,7 +12953,7 @@
                         });
                         
                         const msgDiv = document.createElement('div');
-                        msgDiv.className = 'QQ_home_lastmsg';
+                        msgDiv.className = 'QQ_home_lastmsg group-member-count';
                         msgDiv.style.cssText = 'font-size: 12px; color: #666; margin-top: 2px;';
                         msgDiv.textContent = `群聊 · ${groupData.members.length}人`;
                         
@@ -13083,12 +13083,32 @@
                     console.log('  - 目标名称:', groupData.name);
                     console.log('  - 成员数量:', groupData.members.length);
                     
-                    // *** 核心修复：正确设置群聊标题格式 ***
-                    if (groupData.members && groupData.members.length > 1) {
-                        // 群聊格式：名称 + 人数
-                        const groupTitle = `${groupData.name} (${groupData.members.length}人)`;
-                        headerName.innerHTML = groupTitle;
-                        console.log('已设置群聊标题:', groupTitle);
+                    // *** 修复：正确设置群聊标题格式 ***
+                    if (groupData.members && groupData.members.length >= 1) {
+                        // 群聊格式：只显示名称，人数在副标题中显示
+                        headerName.textContent = groupData.name;
+                        console.log('已设置群聊标题:', groupData.name);
+                        
+                        // *** 重要修复：更新人数显示 ***
+                        const memberCountElement = chatHeader.querySelector('.QQ_home_lastmsg, .group-member-count');
+                        if (memberCountElement) {
+                            const memberCount = groupData.members.length;
+                            const countText = `群聊 · ${memberCount}人`;
+                            memberCountElement.textContent = countText;
+                            console.log('✅ 群聊人数已更新:', countText);
+                        } else {
+                            console.log('未找到人数显示元素，尝试创建...');
+                            // 如果没有找到人数显示元素，创建一个
+                            const nameContainer = headerName.parentElement;
+                            if (nameContainer) {
+                                const memberCountDiv = document.createElement('div');
+                                memberCountDiv.className = 'QQ_home_lastmsg group-member-count';
+                                memberCountDiv.style.cssText = 'font-size: 12px; color: #666; margin-top: 2px;';
+                                memberCountDiv.textContent = `群聊 · ${groupData.members.length}人`;
+                                nameContainer.appendChild(memberCountDiv);
+                                console.log('✅ 已创建群聊人数显示元素');
+                            }
+                        }
                     } else {
                         // 私聊或无成员信息时，只显示名称
                         headerName.textContent = groupData.name;
@@ -14020,18 +14040,22 @@
                             console.log('群聊界面头部已立即更新，人数:', currentManagingGroup.members.length);
                         }
                         
-                        // *** 添加系统消息并立即显示 ***
+                        // *** 修复：添加系统消息并立即显示 ***
                         const systemMessage = `群主将${memberName}移出了群聊`;
                         
                         // *** 修复：总是显示系统消息，不依赖界面状态检查 ***
                         console.log('显示移除成员系统消息:', systemMessage);
                         await addSystemMessageToGroup(currentManagingGroup.id, systemMessage);
                         
-                        // 如果当前在群聊界面，立即显示系统消息
-                        if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
-                            console.log('当前在群聊界面，立即显示系统消息');
+                        // *** 修复：强制立即显示系统消息 ***
+                        console.log('强制立即显示移除成员系统消息:', systemMessage);
+                        displaySystemMessage(systemMessage, currentManagingGroup.id);
+                        
+                        // *** 修复：延迟再次确保系统消息显示 ***
+                        setTimeout(() => {
+                            console.log('延迟确保移除成员系统消息显示:', systemMessage);
                             displaySystemMessage(systemMessage, currentManagingGroup.id);
-                        }
+                        }, 100);
                         
                                 // *** 立即更新所有界面中的群聊显示 ***
         console.log('立即更新联系人列表中的群聊显示（移除成员后）...');
@@ -14795,7 +14819,7 @@
             }
             
             /**
-             * 在聊天界面显示系统消息（灰色小字）- 简化强化版
+             * 在聊天界面显示系统消息（灰色小字）- 修复版
              */
             function displaySystemMessage(message, targetGroupId = null) {
                 try {
@@ -14806,95 +14830,105 @@
                     
                     let msgContent = null;
                     
-                    // *** 简化策略：直接查找当前可见的消息容器 ***
+                    // *** 修复：更准确的消息容器查找策略 ***
                     const containerSelectors = [
-                        '.msgcontent', // 最常用的消息容器
-                        '#QQ_chat_msgs', // 备用消息容器
+                        '.QQ_chat_page[style*="display:block"] .msgcontent',
                         '.QQ_chat_page:not([style*="display:none"]) .msgcontent',
-                        '.QQ_chat_page .msgcontent:not([style*="display:none"])'
+                        '.msgcontent:not([style*="display:none"])',
+                        '.msgcontent',
+                        '#QQ_chat_msgs'
                     ];
                     
+                    // 按优先级查找可见的消息容器
                     for (const selector of containerSelectors) {
-                        const element = document.querySelector(selector);
-                        if (element && element.offsetParent !== null) {
-                            msgContent = element;
-                            console.log('✅ 找到消息容器，使用选择器:', selector);
-                            break;
+                        const elements = document.querySelectorAll(selector);
+                        for (const element of elements) {
+                            if (element && element.offsetParent !== null && 
+                                element.offsetWidth > 0 && element.offsetHeight > 0) {
+                                msgContent = element;
+                                console.log('✅ 找到可见的消息容器，使用选择器:', selector);
+                                break;
+                            }
                         }
+                        if (msgContent) break;
                     }
                     
-                    // 如果还是没找到，直接查找所有可能的容器
+                    // *** 修复：如果还是没找到，强制查找当前活跃的聊天页面 ***
                     if (!msgContent) {
-                        console.log('尝试查找所有可能的消息容器...');
-                        const allContainers = document.querySelectorAll('div');
-                        for (const container of allContainers) {
-                            if (container.className.includes('msgcontent') || 
-                                container.id === 'QQ_chat_msgs' ||
-                                (container.style.height && container.style.overflowY === 'auto')) {
-                                if (container.offsetParent !== null) {
-                                    msgContent = container;
-                                    console.log('✅ 通过特征匹配找到消息容器:', container.className || container.id);
-                                    break;
-                                }
+                        console.log('尝试在当前活跃的聊天页面中查找消息容器...');
+                        
+                        // 查找当前显示的聊天页面
+                        const activeChatPage = document.querySelector('.QQ_chat_page[style*="display:block"]') ||
+                                              document.querySelector('.QQ_chat_page:not([style*="display:none"])');
+                        
+                        if (activeChatPage) {
+                            console.log('找到活跃的聊天页面，创建临时消息容器');
+                            
+                            // 在活跃聊天页面中创建或查找消息容器
+                            msgContent = activeChatPage.querySelector('.msgcontent');
+                            if (!msgContent) {
+                                msgContent = document.createElement('div');
+                                msgContent.className = 'msgcontent';
+                                msgContent.style.cssText = `
+                                    flex: 1;
+                                    overflow-y: auto;
+                                    box-sizing: border-box;
+                                    margin-bottom: 50px;
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    scrollbar-width: none;
+                                    -ms-overflow-style: none;
+                                    height: calc(100% - 120px);
+                                    position: relative;
+                                `;
+                                activeChatPage.appendChild(msgContent);
                             }
                         }
                     }
                     
-                    // *** 最终兜底策略：如果还没找到，就强制创建 ***
                     if (!msgContent) {
-                        console.warn('无法找到现有的消息容器，准备创建新的');
-                        
-                        // 查找任何可能的聊天页面
-                        const chatPage = document.querySelector('.QQ_chat_page') || 
-                                        document.querySelector('[class*="chat"]') ||
-                                        document.querySelector('#QQ_chat') ||
-                                        document.body;
-                        
-                        if (chatPage) {
-                            console.log('找到聊天页面，创建新的消息容器');
-                            msgContent = document.createElement('div');
-                            msgContent.id = 'temp_system_msg_container';
-                            msgContent.className = 'msgcontent';
-                            msgContent.style.cssText = `
-                                position: fixed;
-                                top: 60px;
-                                left: 0;
-                                right: 0;
-                                bottom: 60px;
-                                overflow-y: auto;
-                                z-index: 9999;
-                                background: rgba(255,255,255,0.9);
-                                pointer-events: none;
-                                padding: 20px;
-                            `;
-                            chatPage.appendChild(msgContent);
-                        } else {
-                            console.error('无法找到任何容器来显示系统消息');
-                            // 直接用alert作为最后兜底
-                            alert(`系统消息: ${message}`);
-                            return;
-                        }
+                        console.error('无法找到任何消息容器来显示系统消息');
+                        // 作为最后的兜底方案，直接在页面中显示
+                        const fallbackMsg = document.createElement('div');
+                        fallbackMsg.style.cssText = `
+                            position: fixed;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%);
+                            background: rgba(0,0,0,0.8);
+                            color: white;
+                            padding: 10px 20px;
+                            border-radius: 5px;
+                            z-index: 999999;
+                            font-size: 14px;
+                        `;
+                        fallbackMsg.textContent = message;
+                        document.body.appendChild(fallbackMsg);
+                        setTimeout(() => fallbackMsg.remove(), 3000);
+                        return;
                     }
                     
                     console.log('准备添加系统消息到容器:', msgContent.tagName, msgContent.className || msgContent.id);
                     
-                    // 创建系统消息元素（完全按照用户截图的样式：灰色小字，居中显示）
+                    // *** 修复：创建更可靠的系统消息元素 ***
                     const systemMsgDiv = document.createElement('div');
                     systemMsgDiv.className = 'system-message-chat';
+                    systemMsgDiv.setAttribute('data-message-type', 'system');
+                    systemMsgDiv.setAttribute('data-timestamp', Date.now());
                     
-                    // 使用与截图一致的样式：灰色小字，居中，无背景
+                    // *** 修复：使用更强制的样式，确保显示 ***
                     systemMsgDiv.style.cssText = `
                         text-align: center !important;
                         color: #999999 !important;
                         font-size: 12px !important;
                         margin: 10px auto !important;
-                        padding: 0 !important;
-                        line-height: 1.2 !important;
+                        padding: 5px 10px !important;
+                        line-height: 1.4 !important;
                         background: transparent !important;
                         border: none !important;
-                        max-width: 100% !important;
+                        max-width: 90% !important;
                         position: relative !important;
-                        z-index: 1000 !important;
+                        z-index: 10 !important;
                         word-wrap: break-word !important;
                         white-space: normal !important;
                         display: block !important;
@@ -14903,48 +14937,47 @@
                         opacity: 1 !important;
                         visibility: visible !important;
                         box-sizing: border-box !important;
-                        width: 100% !important;
+                        width: auto !important;
+                        min-height: 20px !important;
+                        font-family: inherit !important;
                     `;
                     systemMsgDiv.textContent = message;
                     
                     console.log('*** 系统消息元素已创建 ***:', {
                         message: message,
                         element: systemMsgDiv,
-                        parent: msgContent.tagName
+                        parent: msgContent.tagName,
+                        parentVisible: msgContent.offsetParent !== null
                     });
                     
-                    // 添加到消息容器末尾
+                    // *** 修复：立即添加并强制显示 ***
                     msgContent.appendChild(systemMsgDiv);
                     
-                    // 确保系统消息可见并滚动到底部
-                    setTimeout(() => {
-                        // 滚动到最新消息
-                        if (msgContent.scrollTo) {
-                            msgContent.scrollTo(0, msgContent.scrollHeight);
-                        } else {
-                            msgContent.scrollTop = msgContent.scrollHeight;
-                        }
-                        
-                        // 确保消息元素可见
-                        if (systemMsgDiv.scrollIntoView) {
-                            systemMsgDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                        }
-                        
-                        console.log('系统消息已成功显示并滚动到可见位置');
-                    }, 100);
+                    // 强制刷新布局
+                    systemMsgDiv.offsetHeight;
                     
-                    // 额外的延迟检查
+                    // 立即滚动到底部
                     setTimeout(() => {
-                        if (systemMsgDiv.parentNode && document.contains(systemMsgDiv)) {
-                            console.log('系统消息确认已成功添加到DOM中，元素可见性:', {
-                                inDOM: document.contains(systemMsgDiv),
+                        msgContent.scrollTop = msgContent.scrollHeight;
+                        console.log('系统消息已显示，容器高度:', msgContent.scrollHeight);
+                    }, 50);
+                    
+                    // *** 修复：添加验证检查 ***
+                    setTimeout(() => {
+                        if (document.contains(systemMsgDiv)) {
+                            const computedStyle = window.getComputedStyle(systemMsgDiv);
+                            console.log('✅ 系统消息显示成功:', {
+                                inDOM: true,
                                 visible: systemMsgDiv.offsetParent !== null,
-                                style: systemMsgDiv.style.cssText.substring(0, 100) + '...'
+                                display: computedStyle.display,
+                                visibility: computedStyle.visibility,
+                                opacity: computedStyle.opacity,
+                                height: systemMsgDiv.offsetHeight
                             });
                         } else {
-                            console.error('系统消息未能成功添加到DOM中');
+                            console.error('❌ 系统消息未能添加到DOM中');
                         }
-                    }, 500);
+                    }, 200);
                     
                 } catch (error) {
                     console.error('显示系统消息时出错:', error);
@@ -16157,7 +16190,7 @@
                     console.log('群聊界面头部已立即更新，人数:', currentManagingGroup.members.length);
                 }
                 
-                // *** 为每个新成员添加系统消息并立即显示 ***
+                // *** 修复：为每个新成员添加系统消息并立即显示 ***
                 if (newMembers.length > 0) {
                     console.log('添加成员系统消息:', newMembers);
                     
@@ -16168,12 +16201,19 @@
                         console.log('保存添加成员系统消息:', systemMessage);
                         await addSystemMessageToGroup(currentManagingGroup.id, systemMessage);
                         
-                        // 如果当前在群聊界面，立即显示系统消息
-                        if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
-                            console.log('当前在群聊界面，立即显示系统消息');
+                        // *** 修复：强制立即显示系统消息 ***
+                        console.log('强制立即显示添加成员系统消息:', systemMessage);
+                        displaySystemMessage(systemMessage, currentManagingGroup.id);
+                    }
+                    
+                    // *** 修复：延迟再次确保系统消息显示 ***
+                    setTimeout(() => {
+                        for (const memberName of newMembers) {
+                            const systemMessage = `群主邀请${memberName}加入群聊`;
+                            console.log('延迟确保系统消息显示:', systemMessage);
                             displaySystemMessage(systemMessage, currentManagingGroup.id);
                         }
-                    }
+                    }, 100);
                 }
                 
                         // *** 立即更新所有界面中的群聊显示 ***
