@@ -13669,156 +13669,42 @@
             let currentManagingGroup = null;
             
             /**
-             * 从真实的界面元素和数据源获取完整的群聊数据（包括真实头像）
-             */
-            function getRealGroupData(groupName) {
-                console.log('=== getRealGroupData 开始获取真实群聊数据 ===');
-                console.log('目标群聊名称:', groupName);
-                
-                try {
-                    // 方法1：从QQ_Groups数组中查找（优先级最高）
-                    if (window.QQ_Groups && window.QQ_Groups.length > 0) {
-                        const foundGroup = window.QQ_Groups.find(group => group.name === groupName);
-                        if (foundGroup && foundGroup.avatar) {
-                            console.log('从QQ_Groups中找到群聊数据:', foundGroup);
-                            console.log('QQ_Groups中的头像数据:', foundGroup.avatar);
-                            return foundGroup;
-                        }
-                    }
-                    
-                    // 方法2：从世界书中获取群聊头像数据
-                    let worldbookAvatar = null;
-                    try {
-                        const worldbookGroupAvatar = getGroupAvatarFromWorldbook(groupName);
-                        if (worldbookGroupAvatar && worldbookGroupAvatar.backgroundImage) {
-                            // 从backgroundImage中提取URL
-                            const match = worldbookGroupAvatar.backgroundImage.match(/url\(['"]?([^'"]+)['"]?\)/);
-                            if (match) {
-                                worldbookAvatar = match[1];
-                                console.log('从世界书获取到群聊头像URL:', worldbookAvatar);
-                            }
-                        }
-                    } catch (error) {
-                        console.warn('从世界书获取头像失败:', error);
-                    }
-                    
-                    // 方法3：从联系人列表界面元素中获取（包含真实的头像状态）
-                    const contactsContainer = document.getElementById('QQ_home_chars');
-                    if (contactsContainer) {
-                        const groupElements = contactsContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
-                        for (let element of groupElements) {
-                            const nameElement = element.querySelector('.QQ_home_name');
-                            if (nameElement && nameElement.textContent.trim() === groupName) {
-                                console.log('从联系人列表中找到群聊元素');
-                                
-                                // 构建群聊数据对象
-                                const realGroupData = {
-                                    name: groupName,
-                                    id: element.getAttribute('data-group-id') || `group_${groupName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`,
-                                    members: [], // 稍后从其他地方获取
-                                    avatar: null
-                                };
-                                
-                                // 获取真实的头像数据
-                                const avatarElement = element.querySelector('.QQ_home_head');
-                                if (avatarElement) {
-                                    const style = avatarElement.style;
-                                    
-                                    // 检查是否为上传的图片头像
-                                    if (style.backgroundImage && style.backgroundImage !== 'none') {
-                                        const imageUrl = style.backgroundImage.replace(/url\(['"]?([^'"]+)['"]?\)/, '$1');
-                                        console.log('检测到背景图片头像:', imageUrl);
-                                        
-                                        // 如果是base64数据，说明是上传的头像
-                                        if (imageUrl.startsWith('data:')) {
-                                            realGroupData.avatar = {
-                                                type: 'upload',
-                                                imageData: imageUrl,
-                                                dataSize: Math.round(imageUrl.length * 0.75) // 估算大小
-                                            };
-                                            console.log('检测到上传的头像，大小约:', realGroupData.avatar.dataSize);
-                                        } else {
-                                            // URL头像
-                                            realGroupData.avatar = imageUrl;
-                                            console.log('检测到URL头像:', imageUrl);
-                                        }
-                                    }
-                                    // 检查是否为预设头像（渐变背景+文字）
-                                    else if (style.background && style.background.includes('gradient') && avatarElement.textContent) {
-                                        const gradientMatch = style.background.match(/linear-gradient\([^,]+,\s*([^,]+),\s*([^)]+)\)/);
-                                        if (gradientMatch) {
-                                            realGroupData.avatar = {
-                                                type: 'preset',
-                                                text: avatarElement.textContent.trim(),
-                                                gradient: {
-                                                    start: gradientMatch[1].trim(),
-                                                    end: gradientMatch[2].trim()
-                                                }
-                                            };
-                                            console.log('检测到预设头像:', realGroupData.avatar);
-                                        }
-                                    }
-                                }
-                                
-                                // 如果还没有头像数据，使用世界书中的头像
-                                if (!realGroupData.avatar && worldbookAvatar) {
-                                    if (worldbookAvatar.startsWith('data:')) {
-                                        realGroupData.avatar = {
-                                            type: 'upload',
-                                            imageData: worldbookAvatar,
-                                            dataSize: Math.round(worldbookAvatar.length * 0.75)
-                                        };
-                                        console.log('使用世界书中的上传头像');
-                                    } else {
-                                        realGroupData.avatar = worldbookAvatar;
-                                        console.log('使用世界书中的URL头像');
-                                    }
-                                }
-                                
-                                // 尝试获取成员列表
-                                try {
-                                    const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-                                    const storedGroup = storedGroups.find(g => g.name === groupName);
-                                    if (storedGroup && storedGroup.members) {
-                                        realGroupData.members = storedGroup.members;
-                                        console.log('从localStorage获取到成员列表:', realGroupData.members);
-                                    }
-                                } catch (error) {
-                                    console.warn('获取成员列表失败:', error);
-                                }
-                                
-                                console.log('构建的真实群聊数据:', realGroupData);
-                                return realGroupData;
-                            }
-                        }
-                    }
-                    
-                    console.log('未找到真实群聊数据，返回null');
-                    return null;
-                    
-                } catch (error) {
-                    console.error('获取真实群聊数据时出错:', error);
-                    return null;
-                }
-            }
-            
-            /**
              * 显示群聊管理下拉菜单
              */
             function showGroupManagementMenu(groupData, triggerElement) {
                 console.log('=== showGroupManagementMenu 被调用 ===');
                 console.log('显示群聊管理菜单:', groupData.name);
                 
-                // *** 关键修复：从真实的界面元素获取完整的群聊数据，包括真实头像 ***
+                // *** 关键修复：直接从世界书获取最新的头像数据 ***
                 console.log('原始groupData:', JSON.stringify(groupData, null, 2));
-                const realGroupData = getRealGroupData(groupData.name);
                 
-                if (realGroupData) {
-                    console.log('使用从界面获取的真实群聊数据');
-                    currentManagingGroup = realGroupData;
-                } else {
-                    console.log('未找到真实数据，使用原始groupData');
-                    currentManagingGroup = groupData;
+                currentManagingGroup = Object.assign({}, groupData); // 创建副本
+                
+                // 从世界书获取最新的头像数据
+                try {
+                    const worldbookAvatar = getGroupAvatarFromWorldbook(groupData.name);
+                    if (worldbookAvatar && worldbookAvatar.avatarUrl) {
+                        console.log('从世界书获取到最新头像数据:', worldbookAvatar.avatarUrl);
+                        
+                        // 根据头像数据类型构建正确的格式
+                        if (worldbookAvatar.avatarUrl.startsWith('data:')) {
+                            // Base64数据，构建为上传格式
+                            currentManagingGroup.avatar = {
+                                type: 'upload',
+                                imageData: worldbookAvatar.avatarUrl,
+                                dataSize: Math.round(worldbookAvatar.avatarUrl.length * 0.75)
+                            };
+                            console.log('世界书头像为Base64格式，已转换为对象格式');
+                        } else {
+                            // URL格式，直接使用
+                            currentManagingGroup.avatar = worldbookAvatar.avatarUrl;
+                            console.log('世界书头像为URL格式，直接使用');
+                        }
+                    } else {
+                        console.log('世界书中未找到头像数据，保持原始头像');
+                    }
+                } catch (error) {
+                    console.error('从世界书获取头像失败:', error);
                 }
                 
                 console.log('currentManagingGroup 已设置为:', currentManagingGroup);
