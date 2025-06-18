@@ -1646,7 +1646,7 @@
             }
             
             .add-member-contact-item.disabled {
-                opacity: 0.5;
+                /* 移除 opacity: 0.5; 避免分组中角色变灰 */
                 cursor: not-allowed;
             }
             
@@ -12607,17 +12607,91 @@
             var draggedFromGroup = null;
             
             /**
-             * 从本地存储加载分组
+             * 获取当前角色ID用于数据隔离
+             */
+            function getCurrentCharacterId() {
+                try {
+                    // 方式1：优先使用SillyTavern的characterId
+                    if (window.SillyTavern && window.SillyTavern.characterId !== undefined) {
+                        return window.SillyTavern.characterId;
+                    }
+                    
+                    // 方式2：尝试调用SillyTavern的getContext方法
+                    if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
+                        const context = window.SillyTavern.getContext();
+                        if (context && context.characterId !== undefined) {
+                            return context.characterId;
+                        }
+                    }
+                    
+                    // 方式3：从window.this_chid获取（酒馆内部变量）
+                    if (window.this_chid !== undefined) {
+                        return window.this_chid;
+                    }
+                    
+                    // 方式4：从URL参数获取
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const charId = urlParams.get('charId') || urlParams.get('characterId');
+                    if (charId) {
+                        return charId;
+                    }
+                    
+                    // 方式5：使用当前角色名
+                    if (window.currentCharacterName) {
+                        return window.currentCharacterName;
+                    }
+                    
+                    // 方式6：从header中的角色名获取
+                    const headerName = document.querySelector('.QQ_home_nick')?.textContent?.trim();
+                    if (headerName) {
+                        return headerName;
+                    }
+                    
+                    // 最后的备用方案
+                    return 'default';
+                } catch (error) {
+                    console.warn('获取角色ID失败，使用默认值:', error);
+                    return 'default';
+                }
+            }
+            
+            // 全局变量记录当前角色ID，用于检测角色切换
+            let currentCharId = null;
+            
+            /**
+             * 检测角色是否切换，如果切换则重新加载分组数据
+             */
+            function checkCharacterChange() {
+                const newCharId = getCurrentCharacterId();
+                if (currentCharId !== newCharId) {
+                    console.log(`检测到角色切换: ${currentCharId} -> ${newCharId}`);
+                    currentCharId = newCharId;
+                    loadGroupsFromStorage();
+                    renderContactGroups();
+                }
+            }
+            
+            /**
+             * 获取角色专属的分组存储key
+             */
+            function getCharacterGroupsKey() {
+                const charId = getCurrentCharacterId();
+                return `contactGroups_${charId}`;
+            }
+            
+            /**
+             * 从本地存储加载分组（按角色隔离）
              */
             function loadGroupsFromStorage() {
                 try {
-                    const stored = localStorage.getItem('contactGroups');
+                    const charGroupsKey = getCharacterGroupsKey();
+                    const stored = localStorage.getItem(charGroupsKey);
                     if (stored) {
                         contactGroups = JSON.parse(stored);
-                        console.log('加载分组数据:', contactGroups.length, '个分组');
+                        console.log(`加载角色(${getCurrentCharacterId()})分组数据:`, contactGroups.length, '个分组');
                     } else {
                         contactGroups = [];
-                        console.log('没有找到存储的分组数据，初始化为空数组');
+                        console.log(`角色(${getCurrentCharacterId()})没有找到存储的分组数据，初始化为空数组`);
                     }
                 } catch (error) {
                     console.error('加载分组数据失败:', error);
@@ -12629,12 +12703,13 @@
             loadGroupsFromStorage();
             
             /**
-             * 保存分组到本地存储
+             * 保存分组到本地存储（按角色隔离）
              */
             function saveGroupsToStorage() {
                 try {
-                    localStorage.setItem('contactGroups', JSON.stringify(contactGroups));
-                    console.log('分组数据已保存');
+                    const charGroupsKey = getCharacterGroupsKey();
+                    localStorage.setItem(charGroupsKey, JSON.stringify(contactGroups));
+                    console.log(`角色(${getCurrentCharacterId()})分组数据已保存`);
                 } catch (error) {
                     console.error('保存分组数据失败:', error);
                 }
@@ -12644,9 +12719,17 @@
              * 初始化分组功能
              */
             function initContactGroups() {
+                // 初始化当前角色ID
+                currentCharId = getCurrentCharacterId();
+                
                 loadGroupsFromStorage();
                 renderContactGroups();
                 initGroupDragAndDrop();
+                
+                // 启动角色切换检测
+                setInterval(checkCharacterChange, 1000); // 每秒检测一次角色切换
+                
+                console.log(`分组功能已初始化，当前角色ID: ${currentCharId}`);
             }
             
             /**
