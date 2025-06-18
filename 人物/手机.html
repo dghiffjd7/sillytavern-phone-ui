@@ -14277,14 +14277,9 @@
                             console.log('*** 显示系统消息 ***:', systemMessage);
                             console.log('当前聊天页面状态检查...');
                             
-                            // 额外检查：确保当前在聊天界面
-                            const currentChatPage = document.querySelector('.QQ_chat_page:not([style*="display: none"]):not([style*="display:none"])');
-                            if (currentChatPage) {
-                                console.log('找到当前聊天页面，显示系统消息');
-                                displaySystemMessage(systemMessage);
-                            } else {
-                                console.log('当前没有打开的聊天页面，跳过系统消息显示');
-                            }
+                            // 显示系统消息到正确的群聊
+                            console.log('显示系统消息到当前操作的群聊:', currentManagingGroup.id);
+                            displaySystemMessage(systemMessage, currentManagingGroup.id);
                         }
                     }
                 }
@@ -14491,9 +14486,14 @@
                 console.log('更新现有群聊元素...');
                 
                 try {
-                    // 获取最新的群聊数据
-                    const latestGroups = await loadGroupsFromStorage();
-                    console.log('获取到的最新群聊数据:', latestGroups.length, '个');
+                    // *** 关键修复：使用当前内存中的QQ_Groups数据，不重新加载 ***
+                    const latestGroups = window.QQ_Groups || [];
+                    console.log('使用当前内存中的群聊数据:', latestGroups.length, '个');
+                    
+                    if (latestGroups.length === 0) {
+                        console.warn('内存中没有群聊数据，跳过更新');
+                        return;
+                    }
                     
                     const contactsContainer = document.getElementById('QQ_home_chars');
                     const messagesContainer = document.getElementById('QQ_message_list_chars');
@@ -14507,7 +14507,7 @@
                                     console.log('更新现有群聊元素:', groupData.name);
                                     updateGroupElement(existingElement, groupData);
                                 } else {
-                                    console.log('群聊元素不存在，需要重新创建:', groupData.name);
+                                    console.log('群聊元素不存在，保持现状:', groupData.name);
                                 }
                             }
                         }
@@ -14521,6 +14521,8 @@
                                 if (existingElement) {
                                     console.log('更新消息列表中的群聊元素:', groupData.name);
                                     updateGroupElement(existingElement, groupData);
+                                } else {
+                                    console.log('消息列表中群聊元素不存在，保持现状:', groupData.name);
                                 }
                             }
                         }
@@ -14628,7 +14630,7 @@
                     
                     // 如果当前正在查看这个群聊，立即显示系统消息
                     if (window.currentGroupChat && window.currentGroupChat.id === groupId) {
-                        displaySystemMessage(systemMessage);
+                        displaySystemMessage(systemMessage, groupId);
                     }
                     
                     console.log('系统消息已添加到群聊');
@@ -14641,62 +14643,82 @@
             /**
              * 在聊天界面显示系统消息（灰色小字）- 增强版
              */
-            function displaySystemMessage(message) {
+            function displaySystemMessage(message, targetGroupId = null) {
                 try {
                     console.log('=== 尝试显示系统消息 ===');
                     console.log('消息内容:', message);
-                    
-                    // 更全面的消息容器查找策略
-                    const containerSelectors = [
-                        '#QQ_chat_msgs',
-                        '.msgcontent', 
-                        '.QQ_chat_page[style*="display:block"] .msgcontent',
-                        '.QQ_chat_page:not([style*="display:none"]) .msgcontent',
-                        '.QQ_chat_page[style*="display:block"] #QQ_chat_msgs',
-                        '.QQ_chat_page:not([style*="display:none"]) #QQ_chat_msgs',
-                        '.QQ_chat_page[style*="display:block"]',
-                        '.QQ_chat_page:not([style*="display:none"])'
-                    ];
+                    console.log('目标群聊ID:', targetGroupId);
+                    console.log('当前群聊:', window.currentGroupChat);
                     
                     let msgContent = null;
-                    for (const selector of containerSelectors) {
-                        const element = document.querySelector(selector);
-                        if (element && (element.offsetParent !== null || element.style.display !== 'none')) {
-                            msgContent = element;
-                            console.log('找到消息容器，使用选择器:', selector);
-                            break;
+                    
+                    // 如果指定了目标群聊ID，优先查找对应的聊天页面
+                    if (targetGroupId) {
+                        const targetPage = document.querySelector(`.QQ_chat_page[data-group-id="${targetGroupId}"]`);
+                        if (targetPage && targetPage.style.display !== 'none') {
+                            msgContent = targetPage.querySelector('.msgcontent') || targetPage.querySelector('#QQ_chat_msgs');
+                            console.log('找到目标群聊的聊天页面:', targetGroupId);
                         }
                     }
                     
+                    // 如果没有找到指定的群聊页面，检查当前活跃的群聊
+                    if (!msgContent && window.currentGroupChat) {
+                        const currentPage = document.querySelector(`.QQ_chat_page[data-group-id="${window.currentGroupChat.id}"]`);
+                        if (currentPage && currentPage.style.display !== 'none') {
+                            msgContent = currentPage.querySelector('.msgcontent') || currentPage.querySelector('#QQ_chat_msgs');
+                            console.log('找到当前群聊的聊天页面:', window.currentGroupChat.id);
+                        }
+                    }
+                    
+                    // 如果仍然没有找到，使用传统的搜索策略（但更加严格）
                     if (!msgContent) {
-                        console.log('找不到标准消息容器，尝试查找所有可能的容器');
+                        console.log('使用传统搜索策略查找消息容器');
+                        const containerSelectors = [
+                            '.QQ_chat_page:not([style*="display:none"]) .msgcontent',
+                            '.QQ_chat_page[style*="display:block"] .msgcontent',
+                            '.QQ_chat_page:not([style*="display:none"]) #QQ_chat_msgs',
+                            '.QQ_chat_page[style*="display:block"] #QQ_chat_msgs'
+                        ];
                         
-                        // 查找所有可能的聊天页面
+                        for (const selector of containerSelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.offsetParent !== null) {
+                                msgContent = element;
+                                console.log('找到消息容器，使用选择器:', selector);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 如果还是没有找到，尝试查找当前可见的聊天页面
+                    if (!msgContent) {
+                        console.log('查找当前可见的聊天页面');
+                        
                         const allChatPages = document.querySelectorAll('.QQ_chat_page');
                         console.log('找到的聊天页面数量:', allChatPages.length);
                         
-                        // 查找当前可见的聊天页面
                         for (const page of allChatPages) {
-                            if (page.style.display !== 'none') {
-                                msgContent = page.querySelector('.msgcontent') || page.querySelector('#QQ_chat_msgs') || page;
+                            const computedStyle = getComputedStyle(page);
+                            if (computedStyle.display !== 'none' && page.offsetParent !== null) {
+                                msgContent = page.querySelector('.msgcontent') || page.querySelector('#QQ_chat_msgs');
                                 if (msgContent) {
-                                    console.log('找到可见的聊天页面中的容器');
+                                    console.log('找到可见的聊天页面中的容器，群聊ID:', page.getAttribute('data-group-id'));
                                     break;
                                 }
                             }
                         }
                     }
                     
+                    // 如果仍然找不到容器，尝试创建或警告
                     if (!msgContent) {
-                        console.warn('仍然找不到消息容器，尝试创建容器');
+                        console.warn('无法找到合适的消息容器来显示系统消息');
                         
-                        // 查找任何可见的聊天页面
+                        // 最后尝试：查找任何可见的聊天页面并创建容器
                         const visiblePage = document.querySelector('.QQ_chat_page:not([style*="display: none"])') || 
-                                           document.querySelector('.QQ_chat_page[style*="display:block"]') ||
-                                           document.querySelector('.QQ_chat_page');
+                                           document.querySelector('.QQ_chat_page[style*="display:block"]');
                         
                         if (visiblePage) {
-                            // 创建消息容器
+                            console.log('为可见页面创建消息容器');
                             msgContent = document.createElement('div');
                             msgContent.id = 'QQ_chat_msgs';
                             msgContent.className = 'msgcontent';
@@ -14709,9 +14731,8 @@
                                 z-index: 1;
                             `;
                             visiblePage.appendChild(msgContent);
-                            console.log('已创建新的消息容器');
                         } else {
-                            console.error('无法找到任何聊天页面来显示系统消息');
+                            console.error('无法找到任何可见的聊天页面来显示系统消息');
                             return;
                         }
                     }
@@ -15205,10 +15226,10 @@
             /**
              * 保护性联系人列表更新（防止格式破坏）
              */
-            async function protectedContactListUpdate(groupData, oldName) {
+            async function protectedContactListUpdate(groupData, operation = 'group_update') {
                 console.log('*** 开始保护性联系人列表更新 ***');
                 console.log('群聊数据:', groupData);
-                console.log('旧名称:', oldName);
+                console.log('操作类型:', operation);
                 
                 try {
                     const contactsContainer = document.getElementById('QQ_home_chars');
@@ -15229,11 +15250,11 @@
                         console.log(`方法1(data-group-id)找到 ${byGroupId.length} 个元素`);
                     }
                     
-                    // 方法2：使用旧名称的data-name查找
-                    if (oldName && targetElements.length === 0) {
-                        const byOldName = contactsContainer.querySelectorAll(`[data-name="${oldName}"]`);
+                    // 方法2：如果operation包含旧名称信息，使用它查找
+                    if (operation && operation !== 'group_update' && targetElements.length === 0) {
+                        const byOldName = contactsContainer.querySelectorAll(`[data-name="${operation}"]`);
                         targetElements.push(...byOldName);
-                        console.log(`方法2(data-name旧名称)找到 ${byOldName.length} 个元素`);
+                        console.log(`方法2(data-name操作参数)找到 ${byOldName.length} 个元素`);
                     }
                     
                     // 方法3：使用新名称的data-name查找
