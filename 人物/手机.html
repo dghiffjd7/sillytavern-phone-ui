@@ -4546,6 +4546,16 @@
             // *** 新增：聊天消息worldbook备份存储 ***
             let QQ_ChatBackup = {};  // 聊天消息的worldbook备份
             window.QQ_ChatBackup = QQ_ChatBackup;  // 设为全局变量方便调试
+            
+            // *** 新增：分页显示配置 ***
+            const MOMENTS_DISPLAY_LIMIT = 5;  // 动态显示上限
+            const CHAT_DISPLAY_LIMIT = 100;   // 聊天消息显示上限
+            const CHAT_LOAD_INCREMENT = 50;   // 聊天消息每次加载数量
+            const MOMENTS_LOAD_INCREMENT = 5; // 动态每次加载数量
+            
+            // 分页状态
+            let momentsDisplayCount = 0;      // 当前显示的动态数量
+            let chatDisplayCounts = {};       // 各个聊天的显示消息数量
             let QQ_Music = {
                 audio: new Audio(),
                 lastelement: undefined, // 允许 undefined
@@ -7371,23 +7381,34 @@
             }
 
             /**
-             * *** 新增：渲染动态内容到界面 ***
+             * *** 新增：渲染动态内容到界面 (支持分页) ***
              */
-            async function QQ_Render_Moments() {
+            async function QQ_Render_Moments(loadMore = false) {
                 const $spaceContents = $("#space_contents");
-                $spaceContents.empty(); // 清空现有内容
                 
                 if (QQ_MomentsData.length === 0) {
                     console.log('没有动态内容需要渲染');
+                    momentsDisplayCount = 0;
                     return;
+                }
+
+                // 首次加载或非加载更多时清空内容
+                if (!loadMore) {
+                    $spaceContents.empty();
+                    momentsDisplayCount = 0;
                 }
                 
                 // 按时间戳倒序排列（最新的在前）
                 const sortedMoments = [...QQ_MomentsData].sort((a, b) => {
                     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
                 });
+
+                // 确定要显示的动态范围
+                const startIndex = momentsDisplayCount;
+                const endIndex = Math.min(startIndex + (loadMore ? MOMENTS_LOAD_INCREMENT : MOMENTS_DISPLAY_LIMIT), sortedMoments.length);
+                const momentsToShow = sortedMoments.slice(startIndex, endIndex);
                 
-                for (const momentData of sortedMoments) {
+                for (const momentData of momentsToShow) {
                     try {
                         const momentDiv = $("<div>", { 
                             class: "user_moment",
@@ -7419,8 +7440,154 @@
                         console.error('渲染动态失败:', error, momentData);
                     }
                 }
+
+                // 更新显示计数
+                momentsDisplayCount = endIndex;
+
+                // 添加或更新"查看更多"按钮
+                QQ_Update_Moments_LoadMore(sortedMoments.length);
                 
-                console.log('动态内容渲染完成，共', sortedMoments.length, '条');
+                console.log(`动态内容渲染完成，显示 ${momentsDisplayCount}/${sortedMoments.length} 条`);
+            }
+
+            /**
+             * *** 更新动态"查看更多"按钮 ***
+             */
+            function QQ_Update_Moments_LoadMore(totalMoments) {
+                const $spaceContents = $("#space_contents");
+                const loadMoreId = 'moments-load-more';
+                
+                // 移除旧的加载更多按钮
+                $(`#${loadMoreId}`).remove();
+                
+                // 如果还有更多动态需要显示，添加按钮
+                if (momentsDisplayCount < totalMoments) {
+                    const loadMoreBtn = $(`
+                        <div id="${loadMoreId}" style="text-align: center; padding: 20px 0; color: #999; font-size: 12px; cursor: pointer; border-top: 1px solid #e5e5e5; margin-top: 10px;">
+                            --点击查看更多--
+                        </div>
+                    `);
+                    
+                    loadMoreBtn.on('click', async function() {
+                        $(this).text('加载中...');
+                        try {
+                            await QQ_Render_Moments(true);  // 加载更多
+                        } catch (error) {
+                            console.error('加载更多动态失败:', error);
+                            $(this).text('加载失败，点击重试');
+                        }
+                    });
+                    
+                    $spaceContents.append(loadMoreBtn);
+                }
+            }
+
+            /**
+             * *** 聊天消息分页加载函数 ***
+             */
+            async function QQ_Load_Chat_History(chatName, msgContainer) {
+                const isGroup = QQ_Groups.includes(chatName);
+                let allMessages = [];
+                
+                // 获取所有历史消息
+                if (isGroup && QQ_msgjson.群聊[chatName] && QQ_msgjson.群聊[chatName].msgs) {
+                    allMessages = [...QQ_msgjson.群聊[chatName].msgs];
+                } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${chatName}的聊天`]) {
+                    allMessages = [...QQ_msgjson.私聊[`${UserName}和${chatName}的聊天`]];
+                }
+                
+                // 获取当前显示的消息数量
+                const currentDisplayed = chatDisplayCounts[chatName] || 0;
+                const totalMessages = allMessages.length;
+                
+                if (currentDisplayed >= totalMessages) {
+                    console.log('没有更多历史消息');
+                    return false;
+                }
+                
+                // 计算要加载的消息范围（从历史往前倒推）
+                const loadCount = Math.min(CHAT_LOAD_INCREMENT, totalMessages - currentDisplayed);
+                const startIndex = Math.max(0, totalMessages - currentDisplayed - loadCount);
+                const endIndex = totalMessages - currentDisplayed;
+                const messagesToLoad = allMessages.slice(startIndex, endIndex);
+                
+                console.log(`准备加载历史消息: ${startIndex}-${endIndex}, 共${loadCount}条`);
+                
+                // 获取当前第一个消息元素，用于插入位置
+                const $firstMsg = $(msgContainer).children().not('.load-more-messages').first();
+                
+                // 倒序添加消息到顶部（保持时间顺序）
+                for (let i = messagesToLoad.length - 1; i >= 0; i--) {
+                    const msg = messagesToLoad[i];
+                    const tempDiv = $('<div>');
+                    
+                    // 使用修改后的QQ_Chat_AddMsg添加消息，跳过滚动和计数
+                    QQ_Chat_AddMsg(tempDiv[0], msg, chatName, false, true);
+                    
+                    // 将消息插入到容器顶部
+                    if ($firstMsg.length > 0) {
+                        $firstMsg.before(tempDiv.html());
+                    } else {
+                        $(msgContainer).prepend(tempDiv.html());
+                    }
+                }
+                
+                // 更新显示计数
+                chatDisplayCounts[chatName] = (chatDisplayCounts[chatName] || 0) + loadCount;
+                
+                console.log(`历史消息加载完成，当前显示: ${chatDisplayCounts[chatName]}/${totalMessages}`);
+                return chatDisplayCounts[chatName] < totalMessages; // 返回是否还有更多消息
+            }
+
+            /**
+             * *** 更新聊天"加载更多"按钮 ***
+             */
+            function QQ_Update_Chat_LoadMore(chatName, msgContainer) {
+                const $container = $(msgContainer);
+                const loadMoreId = `chat-load-more-${chatName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                
+                // 移除旧的加载更多按钮
+                $(`.load-more-messages`).remove();
+                
+                // 检查是否需要显示加载更多按钮
+                const isGroup = QQ_Groups.includes(chatName);
+                let totalMessages = 0;
+                
+                if (isGroup && QQ_msgjson.群聊[chatName] && QQ_msgjson.群聊[chatName].msgs) {
+                    totalMessages = QQ_msgjson.群聊[chatName].msgs.length;
+                } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${chatName}的聊天`]) {
+                    totalMessages = QQ_msgjson.私聊[`${UserName}和${chatName}的聊天`].length;
+                }
+                
+                const currentDisplayed = chatDisplayCounts[chatName] || 0;
+                
+                // 只有当消息数量超过显示限制且还有历史消息时才显示按钮
+                if (totalMessages > CHAT_DISPLAY_LIMIT && currentDisplayed < totalMessages) {
+                    const loadMoreBtn = $(`
+                        <div id="${loadMoreId}" class="load-more-messages" style="text-align: center; padding: 15px 0; color: #999; font-size: 12px; cursor: pointer; border-bottom: 1px solid #e5e5e5; margin-bottom: 10px; background-color: #f9f9f9;">
+                            --点击加载更多--
+                        </div>
+                    `);
+                    
+                    loadMoreBtn.on('click', async function() {
+                        $(this).text('加载中...');
+                        try {
+                            const hasMore = await QQ_Load_Chat_History(chatName, msgContainer);
+                            if (!hasMore) {
+                                $(this).text('没有更多消息了').css('color', '#ccc').off('click');
+                                setTimeout(() => $(this).fadeOut(), 2000);
+                            } else {
+                                $(this).text('--点击加载更多--');
+                            }
+                        } catch (error) {
+                            console.error('加载更多聊天消息失败:', error);
+                            $(this).text('加载失败，点击重试');
+                        }
+                    });
+                    
+                    // 将按钮插入到容器顶部
+                    $container.prepend(loadMoreBtn);
+                }
             }
 
             /**
@@ -8538,19 +8705,38 @@
                 // 将新创建的页面添加到DOM中
                 $("#App_QQ").append($page);
                 
-                // *** 核心修复：创建页面后，立即加载并显示已有消息 ***
+                // *** 核心修复：创建页面后，立即加载并显示已有消息（支持分页） ***
                 const $msgContent = $page.find(".msgcontent");
+                let allMessages = [];
+                
                 if (isGroup && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
-                    console.log(`为新创建的群聊 ${name} 加载 ${QQ_msgjson.群聊[name].msgs.length} 条已有消息`);
-                    QQ_msgjson.群聊[name].msgs.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg, name, false); // false表示非新消息，不触发红点
-                    });
+                    allMessages = QQ_msgjson.群聊[name].msgs;
                 } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
-                    const privateMsgs = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
-                    console.log(`为新创建的私聊 ${name} 加载 ${privateMsgs.length} 条已有消息`);
-                    privateMsgs.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg, name, false);
+                    allMessages = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
+                }
+                
+                if (allMessages.length > 0) {
+                    console.log(`为新创建的聊天 ${name} 加载消息，总数: ${allMessages.length}`);
+                    
+                    // 初始化显示计数
+                    chatDisplayCounts[name] = 0;
+                    
+                    // 计算要显示的消息数量（从最新的开始，最多显示CHAT_DISPLAY_LIMIT条）
+                    const startIndex = Math.max(0, allMessages.length - CHAT_DISPLAY_LIMIT);
+                    const messagesToShow = allMessages.slice(startIndex);
+                    
+                    // 添加消息到界面
+                    messagesToShow.forEach(msg => {
+                        QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过分页控制
                     });
+                    
+                    // 更新显示计数
+                    chatDisplayCounts[name] = messagesToShow.length;
+                    
+                    // 添加"加载更多"按钮（如果需要）
+                    QQ_Update_Chat_LoadMore(name, $msgContent[0]);
+                    
+                    console.log(`聊天页面加载完成: 显示 ${messagesToShow.length}/${allMessages.length} 条消息`);
                 }
                 
                 // 滚动到底部
@@ -8913,6 +9099,12 @@
                         ).text(LastTime);
                         QQ_SetHomeTips(name, NewMsgCount);
                         $msgContent.scrollTop($msgContent[0].scrollHeight);
+                        
+                        // *** 新增：更新分页按钮 ***
+                        if (NewMsgCount > 0) {
+                            QQ_Update_Chat_LoadMore(name, $msgContent[0]);
+                        }
+                        
                         // 有新消息时更新消息列表
                         QQ_UpdateMessageList();
                     } catch (error) {
@@ -9191,6 +9383,11 @@
                         console.log(`群聊的未读消息数量:${NewMsgCount}`);
                         $msgContent.scrollTop($msgContent[0].scrollHeight);
                         
+                        // *** 新增：更新分页按钮 ***
+                        if (NewMsgCount > 0) {
+                            QQ_Update_Chat_LoadMore(name, $msgContent[0]);
+                        }
+                        
                         let TipsCount = QQ_GetChatShowTipsCount(name);
                         const $Tips = $(`.QQ_chat_page[data-name=${name}]`).find(`.new_tips`);
                         $Tips.text(TipsCount);
@@ -9467,8 +9664,24 @@
              * @param {*} name - 角色/群聊名称
              * @param {*} isNew - 是否为新消息
              */
-            function QQ_Chat_AddMsg(dom, content, name, isNew) {
+            function QQ_Chat_AddMsg(dom, content, name, isNew, skipScrollAndCount = false) {
                 console.log(`QQ_Chat_AddMsg: 添加消息 "${content}" 到聊天页面 "${name}", isNew: ${isNew}`);
+                
+                // *** 分页控制：检查当前消息数量 ***
+                if (!skipScrollAndCount) {
+                    const chatKey = name;
+                    if (!chatDisplayCounts[chatKey]) {
+                        chatDisplayCounts[chatKey] = 0;
+                    }
+                    
+                    // 获取当前聊天容器中的消息数量
+                    const currentMsgCount = $(dom).children().not('.load-more-messages').length;
+                    if (currentMsgCount >= CHAT_DISPLAY_LIMIT && isNew) {
+                        // 如果已达上限且是新消息，移除最旧的消息
+                        $(dom).children().not('.load-more-messages').first().remove();
+                        chatDisplayCounts[chatKey] = CHAT_DISPLAY_LIMIT - 1;
+                    }
+                }
                 
                 // *** 核心改造：判断是否为系统消息 ***
                 if (content.startsWith("系统消息--")) {
@@ -9517,9 +9730,15 @@
                     $(dom).append(messageHtml);
                     console.log(`消息已添加到DOM: ${sender}: ${messageContent}`);
                 }
+                
+                // 更新显示计数
+                if (!skipScrollAndCount) {
+                    const chatKey = name;
+                    chatDisplayCounts[chatKey] = $(dom).children().not('.load-more-messages').length;
+                }
                              
                 // 滚动到底部（无论是否为新消息，确保用户能看到最新内容）
-                if (dom && dom.scrollHeight) {
+                if (!skipScrollAndCount && dom && dom.scrollHeight) {
                     $(dom).scrollTop(dom.scrollHeight);
                     console.log(`聊天区域已滚动到底部`);
                 }
