@@ -9665,14 +9665,96 @@
                     console.warn('未找到对应的动态数据，无法添加用户回复');
                 }
                 
-                // *** 增强版AI引导内容 ***
-                const sendvalue = `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n1. 联系人可能看到这条动态并选择性回应\n2. 可能会有人私聊用户或在群聊中@用户讨论\n3. 根据角色性格决定是否回应以及回应方式\n4. 输出格式必须使用moment_start/moment_end包裹\n</AI指导>`;
+                // *** 增强版AI引导内容 - 修改为只在原动态下评论 ***
+                const sendvalue = `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n根据角色性格，一些联系人可能会在这条动态下直接回复评论。\n\n如果有角色要回复，请使用以下格式：\nmoment_start\n角色名--评论内容\n角色名--评论内容\nmoment_end\n\n注意：\n1. 只输出评论，不要重复原动态内容\n2. 根据角色性格决定是否回应\n3. 外向角色更容易回应，内向角色可能不回应\n4. 如果没有角色要回应，可以不输出任何内容\n</AI指导>`;
                 
                 console.log('发送给AI的内容:', sendvalue);
                 const result = await QQ_Gen(sendvalue);
-                await ResultHandle(result);
+                
+                // *** 新增：处理AI回复的评论，直接添加到当前动态 ***
+                if (result && result.includes('moment_start') && result.includes('moment_end')) {
+                    QQ_Handle_AI_Comments(result, $closest);
+                } else {
+                    // 如果不是动态格式，使用原有的处理方式
+                    await ResultHandle(result);
+                }
             }
-            function QQ_Moment_Parse(content) {
+            
+            /**
+             * *** 新增：处理AI回复的评论，直接添加到指定动态 ***
+             * @param {string} content - AI返回的内容
+             * @param {jQuery} $momentDiv - 目标动态的jQuery对象
+             */
+            function QQ_Handle_AI_Comments(content, $momentDiv) {
+                try {
+                    // 提取moment_start和moment_end之间的内容
+                    const momentMatch = content.match(/moment_start([\s\S]*?)moment_end/);
+                    if (!momentMatch) {
+                        console.log('未找到有效的moment格式');
+                        return;
+                    }
+                    
+                    const momentContent = momentMatch[1].trim();
+                    const lines = momentContent.split(/\r?\n/g);
+                    const commentsList = $momentDiv.find('.user_leave_message_list');
+                    const momentId = $momentDiv.attr('data-moment-id');
+                    
+                    // 查找对应的动态数据对象
+                    const targetMoment = QQ_MomentsData.find(moment => moment.id === momentId);
+                    
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine) continue;
+                        
+                        // 匹配评论格式：角色名--评论内容
+                        const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
+                        if (commentMatch) {
+                            const [, name, commentContent] = commentMatch;
+                            
+                            // *** 检查评论上限并移除最早的评论 ***
+                            if (commentsList.find('.user_leave_message').length >= 8) {
+                                commentsList.find('.user_leave_message').first().remove();
+                            }
+                            
+                            // 添加评论到界面
+                            const messageDiv = $("<div>", { class: "user_leave_message" });
+                            messageDiv.html(`<span><strong>${name}</strong>：${commentContent}</span>`);
+                            commentsList.append(messageDiv);
+                            
+                            // *** 添加评论到数据对象 ***
+                            if (targetMoment) {
+                                const commentData = {
+                                    name: name,
+                                    content: commentContent,
+                                    timestamp: new Date().toISOString()
+                                };
+                                targetMoment.comments.push(commentData);
+                                
+                                // 保持评论数量上限
+                                if (targetMoment.comments.length > 8) {
+                                    targetMoment.comments = targetMoment.comments.slice(-8);
+                                }
+                            }
+                            
+                            console.log(`AI评论已添加: ${name} - ${commentContent}`);
+                        }
+                    }
+                    
+                    // *** 平滑滚动到新评论 ***
+                    if (commentsList.length > 0) {
+                        commentsList.scrollTop(commentsList[0].scrollHeight);
+                    }
+                    
+                    // *** 保存更新后的动态数据 ***
+                    if (targetMoment) {
+                        QQ_Save_Moments();
+                    }
+                    
+                                 } catch (error) {
+                     console.error('处理AI评论时出错:', error);
+                 }
+             }
+             function QQ_Moment_Parse(content) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
                 let list;
