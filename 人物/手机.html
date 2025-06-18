@@ -14893,7 +14893,7 @@
                     // 移除旧的背景样式（如果存在）
                     $(`style[data-group-bg="${groupName}"]`).remove();
                     
-                    // 创建新的背景CSS样式
+                    // 创建新的背景CSS样式（包含完整的背景属性）
                     const backgroundCSS = `
 .QQ_chat_page[data-name='${groupName}'] {
     --BackGroundImg: url('${randomBackground}');
@@ -14901,7 +14901,7 @@
     background-size: cover !important;
     background-position: center !important;
     background-repeat: no-repeat !important;
-    background-attachment: fixed !important;
+    background-color: transparent !important;
 }`;
                     
                     // 创建新的style元素并添加到页面
@@ -15094,19 +15094,62 @@
                                 console.log('window.currentGroupChat已更新:', window.currentGroupChat);
                             }
                             
-                            // *** 核心修复3：立即更新聊天页面头部 ***
-                            const chatHeader = currentChatPage.querySelector('.chat-header') || 
-                                             currentChatPage.querySelector('.QQ_home_usermsg') ||
+                            // *** 核心修复3：立即更新聊天页面头部（多重策略） ***
+                            console.log('开始立即更新聊天页面标题...');
+                            
+                            // 策略1：直接更新聊天用户名元素
+                            const chatUsernameElement = currentChatPage.querySelector('#QQ_chat_username');
+                            if (chatUsernameElement) {
+                                console.log('找到聊天用户名元素，立即更新...');
+                                const displayName = groupData.members && groupData.members.length > 1 
+                                    ? `${groupData.name} (${groupData.members.length}人)` 
+                                    : groupData.name;
+                                chatUsernameElement.textContent = displayName;
+                                chatUsernameElement.setAttribute('data-group-name', groupData.name);
+                                chatUsernameElement.setAttribute('data-group-id', groupData.id);
+                                console.log(`聊天标题已立即更新为: ${displayName}`);
+                            } else {
+                                console.warn('未找到#QQ_chat_username元素');
+                            }
+                            
+                            // 策略2：查找并更新完整的聊天头部
+                            const chatHeader = currentChatPage.querySelector('.QQ_chat_header') || 
+                                             currentChatPage.querySelector('.QQ_home') ||
                                              currentChatPage.querySelector('[class*="header"]');
                             
                             if (chatHeader) {
-                                console.log('找到聊天头部，立即更新...');
+                                console.log('找到聊天头部，完整更新...');
                                 updateHeaderContent(chatHeader, groupData);
-                                console.log('聊天头部已更新');
+                                console.log('聊天头部完整更新完成');
                             } else {
                                 console.warn('未找到聊天头部元素');
                                 console.log('聊天页面结构:', currentChatPage.outerHTML.substring(0, 500));
                             }
+                            
+                            // *** 策略3：强制DOM刷新后再次更新（确保显示更新） ***
+                            setTimeout(() => {
+                                console.log('延迟强制更新聊天标题...');
+                                
+                                // 再次查找并更新用户名元素
+                                const delayedUsernameElement = currentChatPage.querySelector('#QQ_chat_username');
+                                if (delayedUsernameElement) {
+                                    const delayedDisplayName = groupData.members && groupData.members.length > 1 
+                                        ? `${groupData.name} (${groupData.members.length}人)` 
+                                        : groupData.name;
+                                    delayedUsernameElement.textContent = delayedDisplayName;
+                                    console.log(`延迟更新标题成功: ${delayedDisplayName}`);
+                                }
+                                
+                                // 再次更新头部
+                                const delayedChatHeader = currentChatPage.querySelector('.QQ_chat_header') || 
+                                                         currentChatPage.querySelector('.QQ_home') ||
+                                                         currentChatPage.querySelector('[class*="header"]');
+                                if (delayedChatHeader) {
+                                    updateHeaderContent(delayedChatHeader, groupData);
+                                    console.log('延迟头部更新完成');
+                                }
+                                
+                            }, 50);
                             
                                                          // *** 核心修复4：重新应用群聊背景（立即执行） ***
                              reapplyGroupChatBackground(groupData);
