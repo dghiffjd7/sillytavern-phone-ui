@@ -4531,6 +4531,8 @@
             let QQ_NewMsg = {};
             let Npc_Settings = {};
             let QQ_Groups = [];
+            // 确保QQ_Groups作为全局变量可访问
+            window.QQ_Groups = QQ_Groups;
             let gening;
             let worldbook;
             let entries;
@@ -15016,7 +15018,42 @@
                         }
                     }
                     
-                    // *** 2. 迁移其他可能的名称绑定数据 ***
+                    // *** 2. 确保全局QQ_Groups数组正确更新 ***
+                    console.log('检查和更新全局QQ_Groups数组...');
+                    
+                    // 确保QQ_Groups数组存在
+                    if (!window.QQ_Groups) {
+                        console.warn('QQ_Groups数组不存在，重新初始化');
+                        window.QQ_Groups = [];
+                    }
+                    
+                    // 查找并更新QQ_Groups中的群聊数据
+                    const groupIndex = window.QQ_Groups.findIndex(g => 
+                        g && (g.id === groupData.id || g.name === oldName || g.name === newName)
+                    );
+                    
+                    if (groupIndex > -1) {
+                        console.log(`更新QQ_Groups数组中的群聊 [${groupIndex}]:`, oldName, '->', newName);
+                        window.QQ_Groups[groupIndex] = {
+                            ...window.QQ_Groups[groupIndex],
+                            name: groupData.name,
+                            id: groupData.id,
+                            avatar: groupData.avatar,
+                            avatarUrl: groupData.avatarUrl,
+                            members: groupData.members
+                        };
+                        migratedCount++;
+                    } else {
+                        // 如果在QQ_Groups中找不到，确保群聊数据存在
+                        console.log('在QQ_Groups中未找到群聊，添加新数据');
+                        window.QQ_Groups.push(groupData);
+                        migratedCount++;
+                    }
+                    
+                    console.log('QQ_Groups数组更新完成，当前数量:', window.QQ_Groups.length);
+                    console.log('QQ_Groups数组内容:', window.QQ_Groups.map(g => ({ name: g.name, id: g.id })));
+                    
+                    // *** 3. 迁移其他可能的名称绑定数据 ***
                     
                     // 迁移localStorage中可能的群聊相关数据
                     try {
@@ -15064,18 +15101,88 @@
                     
                     console.log(`*** 数据迁移完成，共迁移 ${migratedCount} 项数据绑定 ***`);
                     
-                    // *** 6. 强制刷新相关组件以应用新的绑定关系 ***
+                    // *** 6. 立即更新当前聊天页面（如果正在聊天中） ***
+                    console.log('检查是否需要更新当前聊天页面...');
+                    
+                    // 查找当前显示的聊天页面
+                    const currentChatPage = document.querySelector('.QQ_chat_page:not([style*="display: none"]):not([style*="display:none"])');
+                    if (currentChatPage) {
+                        console.log('找到当前聊天页面，检查是否为目标群聊...');
+                        
+                        // 检查是否为当前群聊的聊天页面
+                        const pageGroupId = currentChatPage.getAttribute('data-group-id');
+                        const pageDataName = currentChatPage.getAttribute('data-name');
+                        
+                        console.log('聊天页面数据:', {
+                            pageGroupId,
+                            pageDataName,
+                            targetGroupId: groupData.id,
+                            oldName,
+                            newName
+                        });
+                        
+                        // 判断是否为目标群聊页面（通过ID或名称匹配）
+                        const isTargetChatPage = (pageGroupId === groupData.id) || 
+                                                (pageDataName === oldName) || 
+                                                (pageDataName === newName);
+                        
+                        if (isTargetChatPage) {
+                            console.log('*** 当前聊天页面是目标群聊，立即更新！***');
+                            
+                            // *** 核心修复1：立即更新聊天页面的数据属性 ***
+                            currentChatPage.setAttribute('data-group-id', groupData.id);
+                            currentChatPage.setAttribute('data-name', groupData.name);
+                            console.log('已更新聊天页面的data-group-id和data-name');
+                            
+                            // *** 核心修复2：立即更新window.currentGroupChat ***
+                            if (window.currentGroupChat && 
+                                (window.currentGroupChat.id === groupData.id || 
+                                 window.currentGroupChat.name === oldName)) {
+                                console.log('更新window.currentGroupChat数据...');
+                                window.currentGroupChat.name = groupData.name;
+                                window.currentGroupChat.avatar = groupData.avatar;
+                                window.currentGroupChat.avatarUrl = groupData.avatarUrl;
+                                window.currentGroupChat.members = groupData.members;
+                                console.log('window.currentGroupChat已更新:', window.currentGroupChat);
+                            }
+                            
+                            // *** 核心修复3：立即更新聊天页面头部 ***
+                            const chatHeader = currentChatPage.querySelector('.chat-header') || 
+                                             currentChatPage.querySelector('.QQ_home_usermsg') ||
+                                             currentChatPage.querySelector('[class*="header"]');
+                            
+                            if (chatHeader) {
+                                console.log('找到聊天头部，立即更新...');
+                                updateHeaderContent(chatHeader, groupData);
+                                console.log('聊天头部已更新');
+                            } else {
+                                console.warn('未找到聊天头部元素');
+                                console.log('聊天页面结构:', currentChatPage.outerHTML.substring(0, 500));
+                            }
+                            
+                            // *** 核心修复4：强制重新应用壁纸（立即执行） ***
+                            forceRestoreChatBackground(groupData);
+                            
+                            console.log('*** 当前聊天页面实时更新完成 ***');
+                        } else {
+                            console.log('当前聊天页面不是目标群聊，跳过实时更新');
+                        }
+                    } else {
+                        console.log('当前没有打开的聊天页面');
+                    }
+                    
+                    // *** 7. 延迟刷新其他组件以应用新的绑定关系 ***
                     setTimeout(() => {
-                        console.log('强制刷新组件以应用新的数据绑定...');
+                        console.log('延迟刷新其他组件...');
                         
-                        // 强制重新应用壁纸
-                        forceRestoreChatBackground(groupData);
-                        
-                        // 触发界面重新渲染
+                        // 触发界面重新渲染事件
                         const event = new CustomEvent('groupDataMigrated', {
                             detail: { oldName, newName, groupData }
                         });
                         window.dispatchEvent(event);
+                        
+                        // 再次确保壁纸正确
+                        forceRestoreChatBackground(groupData);
                         
                     }, 100);
                     
