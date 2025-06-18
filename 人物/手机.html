@@ -4529,6 +4529,234 @@
                 }
             }
             let QQ_NewMsg = {};
+            let QQ_ReadStatus = {}; // 新增：记录已读状态
+
+            // *** 新增：已读状态管理功能 ***
+            const QQ_READ_STATUS_KEY = "QQ_已读状态备份";
+
+            /**
+             * 保存已读状态到世界书
+             */
+            async function QQ_SaveReadStatus() {
+                try {
+                    if (!worldbook || !entries) {
+                        console.warn('QQ_SaveReadStatus: worldbook未初始化');
+                        return;
+                    }
+                    
+                    const readStatusData = {
+                        lastUpdate: Date.now(),
+                        私聊: {},
+                        群聊: {},
+                        动态: QQ_ReadStatus.moment || 0
+                    };
+                    
+                    // 保存私聊已读状态
+                    for (const [name, data] of Object.entries(QQ_ReadStatus)) {
+                        if (name === 'moment') continue;
+                        
+                        if (QQ_msgjson.私聊[name]) {
+                            readStatusData.私聊[name] = {
+                                lastReadTime: data.lastReadTime || 0,
+                                lastReadIndex: data.lastReadIndex || 0
+                            };
+                        } else if (QQ_msgjson.群聊[name]) {
+                            readStatusData.群聊[name] = {
+                                lastReadTime: data.lastReadTime || 0,
+                                lastReadIndex: data.lastReadIndex || 0
+                            };
+                        }
+                    }
+                    
+                    // 查找或创建已读状态条目
+                    let readStatusEntry = entries.find(entry => 
+                        entry.keys.includes(QQ_READ_STATUS_KEY)
+                    );
+                    
+                    if (readStatusEntry) {
+                        readStatusEntry.content = JSON.stringify(readStatusData, null, 2);
+                    } else {
+                        const newEntry = {
+                            keys: [QQ_READ_STATUS_KEY],
+                            content: JSON.stringify(readStatusData, null, 2),
+                            enabled: true,
+                            constant: true,
+                            comment: "手机界面已读状态备份 - 自动生成",
+                            depth: 0,
+                            selectiveLogic: 0,
+                            order: 9999
+                        };
+                        entries.push(newEntry);
+                    }
+                    
+                    // 保存到世界书
+                    await saveWorldEntry();
+                    console.log('已读状态已保存到世界书');
+                    
+                } catch (error) {
+                    console.error('保存已读状态失败:', error);
+                }
+            }
+
+            /**
+             * 从世界书加载已读状态
+             */
+            async function QQ_LoadReadStatus() {
+                try {
+                    if (!worldbook || !entries) {
+                        console.warn('QQ_LoadReadStatus: worldbook未初始化');
+                        return;
+                    }
+                    
+                    const readStatusEntry = entries.find(entry => 
+                        entry.keys.includes(QQ_READ_STATUS_KEY)
+                    );
+                    
+                    if (readStatusEntry && readStatusEntry.content) {
+                        const readStatusData = JSON.parse(readStatusEntry.content);
+                        
+                        // 恢复已读状态
+                        QQ_ReadStatus = {
+                            moment: readStatusData.动态 || 0
+                        };
+                        
+                        // 恢复私聊已读状态
+                        for (const [name, data] of Object.entries(readStatusData.私聊 || {})) {
+                            QQ_ReadStatus[name] = {
+                                lastReadTime: data.lastReadTime || 0,
+                                lastReadIndex: data.lastReadIndex || 0
+                            };
+                        }
+                        
+                        // 恢复群聊已读状态
+                        for (const [name, data] of Object.entries(readStatusData.群聊 || {})) {
+                            QQ_ReadStatus[name] = {
+                                lastReadTime: data.lastReadTime || 0,
+                                lastReadIndex: data.lastReadIndex || 0
+                            };
+                        }
+                        
+                        console.log('已读状态已从世界书加载:', Object.keys(QQ_ReadStatus).length);
+                    } else {
+                        console.log('未找到已读状态备份，使用默认状态');
+                        QQ_ReadStatus = { moment: 0 };
+                    }
+                    
+                } catch (error) {
+                    console.error('加载已读状态失败:', error);
+                    QQ_ReadStatus = { moment: 0 };
+                }
+            }
+
+            /**
+             * 标记聊天为已读
+             */
+            function QQ_MarkAsRead(chatName, chatType = 'auto') {
+                try {
+                    if (!QQ_ReadStatus[chatName]) {
+                        QQ_ReadStatus[chatName] = {};
+                    }
+                    
+                    QQ_ReadStatus[chatName].lastReadTime = Date.now();
+                    
+                    // 根据聊天类型设置已读索引
+                    if (chatType === 'auto') {
+                        if (QQ_msgjson.私聊[chatName]) {
+                            QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.私聊[chatName].length;
+                        } else if (QQ_msgjson.群聊[chatName]) {
+                            QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.群聊[chatName].msgs.length;
+                        }
+                    }
+                    
+                    // 清除红点
+                    QQ_NewMsg[chatName] = 0;
+                    QQ_SetHomeTips(chatName, 0);
+                    
+                    // 异步保存到世界书
+                    setTimeout(() => QQ_SaveReadStatus(), 1000);
+                    
+                    console.log(`${chatName} 已标记为已读`);
+                    
+                } catch (error) {
+                    console.error('标记已读状态失败:', error);
+                }
+            }
+
+            /**
+             * 检查消息是否为系统初始消息
+             */
+            function QQ_IsInitialSystemMessage(message) {
+                if (!message.startsWith('系统消息--')) {
+                    return false;
+                }
+                
+                const content = message.split('--')[1];
+                if (!content) return false;
+                
+                // 检查是否为初始系统消息
+                return content.includes('创建成功') || 
+                       content.includes('加入了群聊') || 
+                       /^\d{2}:\d{2}$/.test(content); // 时间消息
+            }
+
+            /**
+             * 计算未读消息数量（排除初始系统消息）
+             */
+            function QQ_CalculateUnreadCount(chatName, messages, chatType = 'private') {
+                try {
+                    if (!messages || messages.length === 0) {
+                        return 0;
+                    }
+                    
+                    const readStatus = QQ_ReadStatus[chatName];
+                    let unreadCount = 0;
+                    
+                    // 如果没有已读记录，所有非初始系统消息都算未读
+                    if (!readStatus) {
+                        for (const msg of messages) {
+                            // 跳过初始系统消息
+                            if (QQ_IsInitialSystemMessage(msg)) {
+                                continue;
+                            }
+                            
+                            // 检查是否为用户自己发送的消息
+                            const parts = msg.split('--');
+                            if (parts.length >= 2 && parts[0] === `${UserName}`) {
+                                continue; // 跳过用户自己的消息
+                            }
+                            
+                            unreadCount++;
+                        }
+                        return unreadCount;
+                    }
+                    
+                    // 基于已读索引计算未读消息
+                    const lastReadIndex = readStatus.lastReadIndex || 0;
+                    
+                    for (let i = lastReadIndex; i < messages.length; i++) {
+                        const msg = messages[i];
+                        
+                        // 跳过初始系统消息
+                        if (QQ_IsInitialSystemMessage(msg)) {
+                            continue;
+                        }
+                        
+                        // 检查是否为用户自己发送的消息
+                        const parts = msg.split('--');
+                        if (parts.length >= 2 && parts[0] === `${UserName}`) {
+                            continue; // 跳过用户自己的消息
+                        }
+                        
+                        unreadCount++;
+                    }
+                    
+                    return unreadCount;
+                    
+                } catch (error) {
+                    console.error('计算未读消息数量失败:', error);
+                    return 0;
+                }
+            }
             let Npc_Settings = {};
             let QQ_Groups = [];
             // 确保QQ_Groups作为全局变量可访问
@@ -6727,6 +6955,10 @@
                 await MiPhone_Merge();
 
                 // 群聊数据已在LoadChars中加载，无需额外恢复
+                
+                // *** 新增：初始化时加载已读状态 ***
+                console.log('开始加载已读状态...');
+                await QQ_LoadReadStatus();
                 
                 // *** 新增：加载保存的动态内容 ***
                 console.log('开始加载动态内容...');
@@ -9098,10 +9330,22 @@
                 
                 const groupData = QQ_msgjson.群聊[groupName];
                 
-                // *** 修复：只有在群聊消息为空时才添加初始消息，避免重复 ***
-                if (groupData.msgs.length > 0) {
-                    console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条消息，跳过添加初始消息`);
+                // *** 修复：检查是否已有系统初始消息，避免重复添加 ***
+                const hasInitialMessages = groupData.msgs.some(msg => 
+                    msg.startsWith('系统消息--') && (
+                        msg.includes('创建成功') || 
+                        msg.includes('加入了群聊') ||
+                        /系统消息--\d{2}:\d{2}--\d{2}:\d{2}$/.test(msg)
+                    )
+                );
+                
+                if (hasInitialMessages) {
+                    console.log(`群聊 ${groupName} 已有系统初始消息，跳过添加`);
                     return;
+                }
+                
+                if (groupData.msgs.length > 0) {
+                    console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条非系统消息，但缺少初始消息，将添加`);
                 }
 
                 const currentTime = new Date().toLocaleTimeString('zh-CN', { 
@@ -9354,6 +9598,10 @@
                 }
                 
                 QQ_SetHomeTips(name, "0");
+                
+                // *** 新增：点击聊天时标记为已读 ***
+                QQ_MarkAsRead(name);
+                
                 QQ_HideAllChat();
                 // 隐藏QQ主页和消息页面
                 $("#QQ_home_page").hide();
@@ -9752,7 +10000,6 @@
                                 if (sp[0] == `${UserName}`) {
                                     User_LastMsgMap.私聊[name] =
                                         `${sp[0]}--${sp[1]}`;
-                                    NewMsgCount = 0;
                                 } else if (sp[0] == name) {
                                     if (sp.length >= 3) {
                                         Char_LastMsgMap.私聊[name] =
@@ -9761,7 +10008,6 @@
                                         Char_LastMsgMap.私聊[name] =
                                             `${sp[0]}--${sp[1]}`;
                                     }
-                                    NewMsgCount += 1;
                                 }
                             }
                             if (sp.length >= 3) {
@@ -9769,6 +10015,9 @@
                             }
                             LastMsg = sp[1];
                         }
+                        
+                        // *** 新的未读消息计算逻辑：使用QQ_CalculateUnreadCount ***
+                        NewMsgCount = QQ_CalculateUnreadCount(name, QQ_msgjson.私聊[str], 'private');
                         // 设置红点和首页显示的消息
                         if (
                             $(`.QQ_chat_page[data-name='${name}']`).css(
@@ -10028,7 +10277,6 @@
                                 if (sp[0] == `${UserName}`) {
                                     User_LastMsgMap.群聊[name] =
                                         `${sp[0]}--${sp[1]}`;
-                                    NewMsgCount = 0;
                                 } else {
                                     if (sp.length >= 3) {
                                         Char_LastMsgMap.群聊[name] =
@@ -10037,7 +10285,6 @@
                                         Char_LastMsgMap.群聊[name] =
                                             `${sp[0]}--${sp[1]}`;
                                     }
-                                    NewMsgCount += 1;
                                 }
                             }
                             if (sp.length >= 3) {
@@ -10045,6 +10292,10 @@
                             }
                             LastMsg = `${sp[0]}:${sp[1]}`;
                         }
+                        
+                        // *** 新的未读消息计算逻辑：使用QQ_CalculateUnreadCount ***
+                        NewMsgCount = QQ_CalculateUnreadCount(name, QQ_msgjson.群聊[name]["msgs"], 'group');
+                        
                         // 设置红点和首页显示的消息
                         const isCurrentlyVisible = $(`.QQ_chat_page[data-name='${name}']`).css("display") != "none" ||
                                                   $(`.QQ_chat_page[data-group-id]`).filter(function() {
