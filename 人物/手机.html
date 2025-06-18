@@ -13038,54 +13038,118 @@
                     console.warn('未找到聊天界面头像元素');
                 }
                 
-                // 更新名称 - 查找多个可能的选择器
-                let headerName = chatHeader.querySelector('.QQ_home_name') || 
-                                chatHeader.querySelector('.chat-title') || 
-                                chatHeader.querySelector('h2') ||
-                                chatHeader.querySelector('.name') ||
-                                chatHeader.querySelector('#QQ_chat_username') ||
-                                chatHeader.querySelector('span') ||
-                                chatHeader.querySelector('div');
+                // *** 修复：更全面的名称元素查找和更新 ***
+                console.log('=== 开始更新聊天头部名称显示 ===');
+                console.log('目标群聊名称:', groupData.name);
+                console.log('群聊成员数量:', groupData.members.length);
+                
+                // 查找多个可能的选择器，按重要性排序
+                const nameSelectors = [
+                    '#QQ_chat_username',        // 最常用的聊天用户名元素
+                    '.QQ_home_name',           // 联系人名称元素
+                    '.chat-title',             // 聊天标题元素
+                    '.group-chat-title',       // 群聊标题元素
+                    'h2',                      // 通用标题元素
+                    '.name',                   // 通用名称元素
+                    'span',                    // 通用span元素
+                    'div'                      // 最后的备选
+                ];
+                
+                let headerName = null;
+                let selectorUsed = '';
+                
+                // 按优先级查找名称元素
+                for (const selector of nameSelectors) {
+                    headerName = chatHeader.querySelector(selector);
+                    if (headerName) {
+                        selectorUsed = selector;
+                        console.log(`找到名称元素，使用选择器: ${selector}`);
+                        break;
+                    }
+                }
                 
                 console.log('查找到的名称元素:', headerName);
-                console.log('聊天头部的所有子元素:', chatHeader.children);
+                console.log('聊天头部的所有子元素:', Array.from(chatHeader.children).map(el => ({
+                    tag: el.tagName,
+                    class: el.className,
+                    id: el.id,
+                    text: el.textContent.trim().substring(0, 50)
+                })));
                 
                 if (headerName) {
-                    console.log('找到名称元素，更新名称:', groupData.name);
-                    headerName.textContent = groupData.name;
+                    console.log('找到名称元素，开始更新...');
+                    console.log('  - 当前内容:', headerName.textContent.trim());
+                    console.log('  - 目标名称:', groupData.name);
+                    console.log('  - 成员数量:', groupData.members.length);
                     
-                    // 添加可点击样式和事件
-                    if (!headerName.className.includes('group-chat-clickable-name')) {
-                        headerName.className += ' group-chat-clickable-name';
+                    // *** 核心修复：正确设置群聊标题格式 ***
+                    if (groupData.members && groupData.members.length > 1) {
+                        // 群聊格式：名称 + 人数
+                        const groupTitle = `${groupData.name} (${groupData.members.length}人)`;
+                        headerName.innerHTML = groupTitle;
+                        console.log('已设置群聊标题:', groupTitle);
+                    } else {
+                        // 私聊或无成员信息时，只显示名称
+                        headerName.textContent = groupData.name;
+                        console.log('已设置私聊标题:', groupData.name);
                     }
+                    
+                    // *** 核心修复：确保元素正确的可点击性 ***
+                    // 移除可能存在的旧类名
+                    headerName.classList.remove('group-chat-clickable-name');
+                    
+                    // 添加新的类名和样式
+                    headerName.classList.add('group-chat-clickable-name');
                     headerName.style.cursor = 'pointer';
                     headerName.style.userSelect = 'none';
                     headerName.style.color = '#333';
                     headerName.style.fontWeight = 'bold';
                     
+                    // 设置重要的数据属性
+                    headerName.setAttribute('data-group-name', groupData.name);
+                    headerName.setAttribute('data-group-id', groupData.id);
+                    
                     // 移除旧的点击事件监听器
                     if (headerName._groupClickHandler) {
                         headerName.removeEventListener('click', headerName._groupClickHandler);
+                        console.log('已移除旧的点击事件');
                     }
                     
                     // 添加新的点击事件
                     headerName._groupClickHandler = function(e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        console.log('群聊名称被点击:', groupData.name);
+                        console.log('群聊名称被点击 - 最新数据:', {
+                            name: groupData.name,
+                            id: groupData.id,
+                            members: groupData.members.length
+                        });
                         showGroupManagementMenu(groupData, headerName);
                     };
                     headerName.addEventListener('click', headerName._groupClickHandler);
                     
-                    console.log('群聊名称点击事件已绑定');
+                    console.log('群聊名称点击事件已重新绑定');
+                    console.log('  - 最终显示内容:', headerName.textContent.trim());
                     
                 } else {
-                    console.error('未找到名称元素，创建新的名称元素');
-                    // 如果找不到名称元素，尝试直接在头部添加
-                    const nameElement = document.createElement('div');
+                    console.error('*** 未找到群名称元素，群名称更新失败 ***');
+                    console.error('聊天头部结构:', chatHeader.outerHTML);
+                    
+                    // 创建新的名称元素作为最后手段
+                    const nameElement = document.createElement('span');
+                    nameElement.id = 'QQ_chat_username';
                     nameElement.className = 'QQ_home_name group-chat-clickable-name';
-                    nameElement.textContent = groupData.name;
+                    
+                    // 设置群聊标题
+                    if (groupData.members && groupData.members.length > 1) {
+                        nameElement.textContent = `${groupData.name} (${groupData.members.length}人)`;
+                    } else {
+                        nameElement.textContent = groupData.name;
+                    }
+                    
                     nameElement.style.cssText = 'font-size: 16px; font-weight: bold; color: #333; margin-left: 10px; cursor: pointer; user-select: none;';
+                    nameElement.setAttribute('data-group-name', groupData.name);
+                    nameElement.setAttribute('data-group-id', groupData.id);
                     
                     // 添加点击事件
                     nameElement.addEventListener('click', function(e) {
@@ -13099,6 +13163,8 @@
                     headerName = nameElement;
                     console.log('已创建新的群聊名称元素');
                 }
+                
+                console.log('=== 聊天头部名称更新完成 ===');
                 
                 // 添加群聊成员数显示
                 const headerMsg = chatHeader.querySelector('.QQ_home_lastmsg') || 
@@ -14276,6 +14342,59 @@
                                 updateHeaderContent(header, currentManagingGroup);
                             }
                         }
+                        
+                        // *** 核心修复：强制更新所有可能的聊天标题元素 ***
+                        console.log('=== 强制更新所有聊天标题元素 ===');
+                        const allTitleElements = document.querySelectorAll('#QQ_chat_username, .QQ_home_name, .chat-title');
+                        let updatedCount = 0;
+                        
+                        allTitleElements.forEach((titleEl, index) => {
+                            const currentText = titleEl.textContent.trim();
+                            console.log(`检查标题元素${index + 1}: "${currentText}"`);
+                            
+                            // 检查是否包含旧群名或需要更新的内容
+                            if (currentText.includes(oldName) || 
+                                (currentText.includes('(') && currentText.includes('人)') && !currentText.includes(currentManagingGroup.name))) {
+                                
+                                console.log(`需要更新的标题元素: "${currentText}"`);
+                                
+                                // 设置新的群聊标题
+                                const newTitle = `${currentManagingGroup.name} (${currentManagingGroup.members.length}人)`;
+                                titleEl.textContent = newTitle;
+                                
+                                // 更新数据属性
+                                titleEl.setAttribute('data-group-name', currentManagingGroup.name);
+                                titleEl.setAttribute('data-group-id', stableGroupId);
+                                
+                                console.log(`已更新标题: "${currentText}" -> "${newTitle}"`);
+                                updatedCount++;
+                            }
+                        });
+                        
+                        console.log(`共更新了 ${updatedCount} 个标题元素`);
+                        
+                        // *** 额外修复：确保联系人列表中的群聊名称也被更新 ***
+                        console.log('=== 更新联系人列表中的群聊显示 ===');
+                        const contactElements = document.querySelectorAll('.QQ_home_usermsg');
+                        let contactUpdatedCount = 0;
+                        
+                        contactElements.forEach((contactEl, index) => {
+                            const nameElement = contactEl.querySelector('.QQ_home_name');
+                            if (nameElement) {
+                                const currentName = nameElement.textContent.trim();
+                                if (currentName === oldName || currentName.includes(oldName)) {
+                                    console.log(`更新联系人项${index + 1}: "${currentName}" -> "${currentManagingGroup.name}"`);
+                                    nameElement.textContent = currentManagingGroup.name;
+                                    contactEl.setAttribute('data-name', currentManagingGroup.name);
+                                    contactEl.setAttribute('data-group-id', stableGroupId);
+                                    contactUpdatedCount++;
+                                }
+                            }
+                        });
+                        
+                        console.log(`共更新了 ${contactUpdatedCount} 个联系人项`);
+                        console.log('=== 所有界面元素强制更新完成 ===');
+                        
                     }, 100);
                     
                     console.log('*** 聊天界面头部和背景强制更新完成 ***');
