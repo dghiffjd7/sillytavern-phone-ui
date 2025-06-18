@@ -14866,121 +14866,69 @@
             }
             
             /**
-             * 强制恢复聊天页面背景（修复版）
+             * 重新应用群聊背景（使用原有的getRandomChatBackground逻辑）
              */
-            function forceRestoreChatBackground(groupData) {
-                console.log('*** 强制恢复聊天页面背景 ***');
+            function reapplyGroupChatBackground(groupData) {
+                console.log('*** 重新应用群聊背景 ***');
+                console.log('群聊数据:', groupData);
                 
                 try {
-                    // 查找当前可见的聊天页面
-                    let chatPage = null;
-                    
-                    // 方法1：查找显示状态为block的聊天页面
-                    const visiblePages = document.querySelectorAll('.QQ_chat_page[style*="display:block"], .QQ_chat_page[style*="display: block"]');
-                    if (visiblePages.length > 0) {
-                        chatPage = visiblePages[0];
-                        console.log('找到可见聊天页面(方法1):', chatPage);
-                    }
-                    
-                    // 方法2：查找当前群聊对应的聊天页面
-                    if (!chatPage && groupData) {
-                        chatPage = document.querySelector(`.QQ_chat_page[data-name="${groupData.name}"]`);
-                        if (chatPage) {
-                            console.log('找到群聊聊天页面(方法2):', chatPage);
-                        }
-                    }
-                    
-                    // 方法3：查找没有display:none的聊天页面
-                    if (!chatPage) {
-                        const allChatPages = document.querySelectorAll('.QQ_chat_page');
-                        for (const page of allChatPages) {
-                            const style = window.getComputedStyle(page);
-                            if (style.display !== 'none' && page.offsetParent !== null) {
-                                chatPage = page;
-                                console.log('找到可见聊天页面(方法3):', chatPage);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!chatPage) {
-                        console.warn('未找到可见的聊天页面，背景恢复失败');
+                    if (!groupData || !groupData.name) {
+                        console.warn('群聊数据无效，跳过背景应用');
                         return;
                     }
                     
-                    // 强制恢复背景的多种策略
-                    let backgroundRestored = false;
+                    // 获取随机聊天背景（使用原有逻辑）
+                    const randomBackground = getRandomChatBackground();
+                    console.log('获取到的随机背景:', randomBackground);
                     
-                    // 策略1：使用群聊成员的背景设置
-                    if (groupData && groupData.members && groupData.members.length > 0 && window.wallpaperurl) {
-                        const firstMember = groupData.members[0];
-                        const memberBg = window.wallpaperurl[firstMember];
-                        if (memberBg) {
-                            console.log('策略1：使用成员背景:', firstMember, memberBg);
-                            applyChatBackground(chatPage, memberBg);
-                            backgroundRestored = true;
-                        }
+                    if (!randomBackground) {
+                        console.warn('未获取到有效背景，跳过应用');
+                        return;
                     }
                     
-                    // 策略2：保持当前背景（如果存在且有效）
-                    if (!backgroundRestored) {
-                        const currentBg = window.getComputedStyle(chatPage).backgroundImage;
-                        if (currentBg && currentBg !== 'none' && !currentBg.includes('data:')) {
-                            console.log('策略2：保持当前背景:', currentBg);
-                            backgroundRestored = true;
-                        }
-                    }
+                    // 查找或创建群聊的CSS样式（模仿AddNewGroup的逻辑）
+                    const groupName = groupData.name;
                     
-                    // 策略3：使用默认群聊背景
-                    if (!backgroundRestored) {
-                        const defaultBg = 'https://files.catbox.moe/9fdwty.jpg';
-                        console.log('策略3：使用默认群聊背景');
-                        applyChatBackground(chatPage, defaultBg);
-                        backgroundRestored = true;
-                    }
+                    // 移除旧的背景样式（如果存在）
+                    $(`style[data-group-bg="${groupName}"]`).remove();
+                    
+                    // 创建新的背景CSS样式
+                    const backgroundCSS = `
+.QQ_chat_page[data-name='${groupName}'] {
+    --BackGroundImg: url('${randomBackground}');
+    background-image: var(--BackGroundImg) !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-attachment: fixed !important;
+}`;
+                    
+                    // 创建新的style元素并添加到页面
+                    const style = $("<style></style>").prop("type", "text/css");
+                    style.attr('data-group-bg', groupName);
+                    style.text(backgroundCSS);
+                    $("head").append(style);
+                    
+                    console.log(`群聊 ${groupName} 的背景CSS已重新应用:`, randomBackground);
                     
                     // 延迟验证背景是否正确应用
                     setTimeout(() => {
-                        const finalBg = window.getComputedStyle(chatPage).backgroundImage;
-                        console.log('背景恢复验证 - 最终背景:', finalBg);
-                        if (finalBg === 'none') {
-                            console.warn('背景恢复失败，再次尝试');
-                            const fallbackBg = 'https://files.catbox.moe/9fdwty.jpg';
-                            applyChatBackground(chatPage, fallbackBg);
-                        } else {
-                            console.log('*** 聊天背景恢复成功 ***');
+                        const chatPage = document.querySelector(`.QQ_chat_page[data-name="${groupName}"]`);
+                        if (chatPage) {
+                            const finalBg = window.getComputedStyle(chatPage).backgroundImage;
+                            console.log('背景应用验证 - 最终背景:', finalBg);
+                            if (finalBg === 'none' || !finalBg.includes(randomBackground)) {
+                                console.warn('背景应用可能失败，请检查CSS规则');
+                            } else {
+                                console.log('*** 群聊背景重新应用成功 ***');
+                            }
                         }
-                    }, 300);
+                    }, 200);
                     
                 } catch (error) {
-                    console.error('强制恢复聊天背景时出错:', error);
+                    console.error('重新应用群聊背景时出错:', error);
                 }
-            }
-            
-            /**
-             * 应用聊天背景的通用函数
-             */
-            function applyChatBackground(chatPage, backgroundUrl) {
-                if (!chatPage || !backgroundUrl) return;
-                
-                console.log('应用聊天背景:', backgroundUrl);
-                
-                // 强制清除并重新设置背景
-                chatPage.style.backgroundImage = '';
-                chatPage.style.background = '';
-                
-                // 设置新背景
-                chatPage.style.backgroundImage = `url('${backgroundUrl}')`;
-                chatPage.style.backgroundSize = 'cover';
-                chatPage.style.backgroundPosition = 'center';
-                chatPage.style.backgroundRepeat = 'no-repeat';
-                chatPage.style.backgroundAttachment = 'fixed';
-                
-                // 确保容器样式
-                chatPage.style.minHeight = '100vh';
-                chatPage.style.position = 'relative';
-                
-                console.log('背景应用完成');
             }
             
             /**
@@ -15160,8 +15108,8 @@
                                 console.log('聊天页面结构:', currentChatPage.outerHTML.substring(0, 500));
                             }
                             
-                            // *** 核心修复4：强制重新应用壁纸（立即执行） ***
-                            forceRestoreChatBackground(groupData);
+                                                         // *** 核心修复4：重新应用群聊背景（立即执行） ***
+                             reapplyGroupChatBackground(groupData);
                             
                             console.log('*** 当前聊天页面实时更新完成 ***');
                         } else {
@@ -15181,8 +15129,8 @@
                         });
                         window.dispatchEvent(event);
                         
-                        // 再次确保壁纸正确
-                        forceRestoreChatBackground(groupData);
+                                                 // 再次确保壁纸正确
+                         reapplyGroupChatBackground(groupData);
                         
                     }, 100);
                     
