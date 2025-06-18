@@ -14004,6 +14004,14 @@
                         
                                 // *** 立即更新所有界面中的群聊显示 ***
         console.log('立即更新联系人列表中的群聊显示（移除成员后）...');
+        
+        // *** 关键修复：确保传递完整的群聊数据，包括头像信息 ***
+        console.log('传递给protectedContactListUpdate的数据:', {
+            name: currentManagingGroup.name,
+            id: currentManagingGroup.id,
+            avatar: currentManagingGroup.avatar,
+            members: currentManagingGroup.members
+        });
         await protectedContactListUpdate(currentManagingGroup, 'remove_member');
         
         // 更新到世界书
@@ -14488,6 +14496,7 @@
                 try {
                     // *** 关键修复：使用当前内存中的QQ_Groups数据，不重新加载 ***
                     const latestGroups = window.QQ_Groups || [];
+                    console.log('updateExistingGroupElements: 使用的群聊数据:', latestGroups.length, '个群聊');
                     console.log('使用当前内存中的群聊数据:', latestGroups.length, '个');
                     
                     if (latestGroups.length === 0) {
@@ -14533,67 +14542,63 @@
             }
             
             /**
-             * 更新群聊元素的名称和头像
+             * 更新群聊元素的名称和头像（增强版：防止头像丢失）
              */
             function updateGroupElement(element, groupData) {
                 try {
+                    console.log('=== updateGroupElement 开始 ===');
+                    console.log('群聊数据:', {
+                        name: groupData.name,
+                        id: groupData.id,
+                        avatar: groupData.avatar,
+                        avatarUrl: groupData.avatarUrl
+                    });
+                    
                     // 更新群聊名称
                     const nameElement = element.querySelector('.QQ_home_name');
                     if (nameElement) {
                         nameElement.textContent = groupData.name;
                     }
                     
-                    // 更新群聊头像
+                    // *** 关键修复：更强的头像数据检查和保护 ***
                     const avatarElement = element.querySelector('.QQ_home_head');
-                    if (avatarElement && groupData.avatar) {
-                        console.log('应用群聊头像:', groupData.name, groupData.avatar);
+                    if (avatarElement) {
+                        console.log('找到头像元素，检查头像数据...');
                         
-                        if (groupData.avatar.type === 'preset') {
-                            // 预设头像
-                            avatarElement.style.background = `linear-gradient(135deg, ${groupData.avatar.gradient.start}, ${groupData.avatar.gradient.end})`;
-                            avatarElement.style.backgroundImage = 'none';
-                            avatarElement.style.color = 'white';
-                            avatarElement.style.display = 'flex';
-                            avatarElement.style.alignItems = 'center';
-                            avatarElement.style.justifyContent = 'center';
-                            avatarElement.style.fontWeight = 'bold';
-                            avatarElement.textContent = groupData.avatar.text || '群';
-                        } else if (groupData.avatar.type === 'upload' && groupData.avatar.imageData) {
-                            // 上传的头像
-                            avatarElement.style.background = 'none';
-                            avatarElement.style.backgroundImage = `url('${groupData.avatar.imageData}')`;
-                            avatarElement.style.backgroundSize = 'cover';
-                            avatarElement.style.backgroundPosition = 'center';
-                            avatarElement.style.backgroundRepeat = 'no-repeat';
-                            avatarElement.textContent = '';
-                        } else if (typeof groupData.avatar === 'string' && groupData.avatar.startsWith('data:')) {
-                            // 直接的base64字符串
-                            avatarElement.style.background = 'none';
-                            avatarElement.style.backgroundImage = `url('${groupData.avatar}')`;
-                            avatarElement.style.backgroundSize = 'cover';
-                            avatarElement.style.backgroundPosition = 'center';
-                            avatarElement.style.backgroundRepeat = 'no-repeat';
-                            avatarElement.textContent = '';
-                        } else if (typeof groupData.avatar === 'string' && (groupData.avatar.startsWith('http://') || groupData.avatar.startsWith('https://'))) {
-                            // 网络图片URL
-                            avatarElement.style.background = 'none';
-                            avatarElement.style.backgroundImage = `url('${groupData.avatar}')`;
-                            avatarElement.style.backgroundSize = 'cover';
-                            avatarElement.style.backgroundPosition = 'center';
-                            avatarElement.style.backgroundRepeat = 'no-repeat';
-                            avatarElement.textContent = '';
-                        } else {
-                            // 默认头像
-                            avatarElement.style.background = 'linear-gradient(135deg, #199AFF, #0066CC)';
-                            avatarElement.style.backgroundImage = 'none';
-                            avatarElement.style.color = 'white';
-                            avatarElement.style.display = 'flex';
-                            avatarElement.style.alignItems = 'center';
-                            avatarElement.style.justifyContent = 'center';
-                            avatarElement.style.fontWeight = 'bold';
-                            avatarElement.textContent = '群';
+                        // 优先级1：检查完整的avatar对象
+                        if (groupData.avatar && typeof groupData.avatar === 'object' && groupData.avatar.type) {
+                            console.log('发现完整的头像对象，应用头像:', groupData.avatar);
+                            updateAvatarElement(avatarElement, groupData.avatar);
                         }
-                    }
+                        // 优先级2：检查avatarUrl字符串
+                        else if (groupData.avatarUrl && typeof groupData.avatarUrl === 'string') {
+                            console.log('发现avatarUrl，应用字符串头像:', groupData.avatarUrl);
+                            updateAvatarElement(avatarElement, groupData.avatarUrl);
+                        }
+                        // 优先级3：检查avatar字符串
+                        else if (groupData.avatar && typeof groupData.avatar === 'string') {
+                            console.log('发现avatar字符串，应用头像:', groupData.avatar);
+                            updateAvatarElement(avatarElement, groupData.avatar);
+                        }
+                        // 优先级4：从内存中的QQ_Groups查找完整数据
+                        else if (window.QQ_Groups && groupData.id) {
+                            console.log('头像数据不完整，从QQ_Groups中查找...');
+                            const fullGroupData = window.QQ_Groups.find(g => g.id === groupData.id || g.name === groupData.name);
+                            if (fullGroupData && fullGroupData.avatar) {
+                                console.log('从QQ_Groups中找到完整头像数据:', fullGroupData.avatar);
+                                updateAvatarElement(avatarElement, fullGroupData.avatar);
+                            } else {
+                                console.warn('从QQ_Groups中也未找到头像数据，保持现有头像');
+                                // 不应用默认头像，保持现有头像不变
+                            }
+                        }
+                                                 else {
+                             console.warn('没有有效的头像数据，保持现有头像');
+                             // 不应用默认头像，保持现有头像不变
+                         }
+                     } else {
+                         console.warn('未找到头像元素');
+                     }
                     
                     console.log('群聊元素更新完成:', groupData.name);
                 } catch (error) {
@@ -15446,7 +15451,15 @@
              * 更新头像元素的通用函数
              */
             function updateAvatarElement(avatarElement, avatarData) {
-                if (!avatarElement || !avatarData) return;
+                if (!avatarElement) {
+                    console.warn('updateAvatarElement: 头像元素不存在');
+                    return;
+                }
+                
+                if (!avatarData) {
+                    console.warn('updateAvatarElement: 头像数据不存在，保持现有头像');
+                    return;
+                }
                 
                 console.log('更新头像元素:', avatarData);
                 
@@ -16032,11 +16045,19 @@
                 }
                 
                         // *** 立即更新所有界面中的群聊显示 ***
-        console.log('立即更新联系人列表中的群聊显示...');
-        await protectedContactListUpdate(currentManagingGroup, 'move_member');
+        console.log('立即更新联系人列表中的群聊显示（添加成员后）...');
+        
+        // *** 关键修复：确保传递完整的群聊数据，包括头像信息 ***
+        console.log('传递给protectedContactListUpdate的数据:', {
+            name: currentManagingGroup.name,
+            id: currentManagingGroup.id,
+            avatar: currentManagingGroup.avatar,
+            members: currentManagingGroup.members
+        });
+        await protectedContactListUpdate(currentManagingGroup, 'add_member');
         
         // *** 轻量级界面更新，避免消息丢失 ***
-        console.log('执行轻量级界面更新（移除成员后）...');
+        console.log('执行轻量级界面更新（添加成员后）...');
         await refreshGroupChatsDisplay();
                 
                 console.log(`已添加 ${newMembers.length} 个新成员到群聊`);
