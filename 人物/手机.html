@@ -14099,6 +14099,11 @@
                 const oldId = currentManagingGroup.id;
                 const oldAvatar = currentManagingGroup.avatar;
                 
+                // *** 重要修复：确保头像数据完整性 ***
+                console.log('检查头像数据完整性:');
+                console.log('- currentManagingGroup.avatar:', currentManagingGroup.avatar);
+                console.log('- window.selectedAvatarData:', window.selectedAvatarData);
+                
                 // *** 关键修复：从世界书comment中获取原始群聊名称，确保ID稳定 ***
                 let originalGroupName = oldName; // 默认使用当前名称
                 try {
@@ -14143,7 +14148,7 @@
                 
                 // *** 修复：更新头像信息 ***
                 if (window.selectedAvatarData) {
-                    console.log('更新群聊头像:', window.selectedAvatarData);
+                    console.log('检测到新的头像数据，更新群聊头像:', window.selectedAvatarData);
                     currentManagingGroup.avatar = window.selectedAvatarData;
                     
                     // 如果是上传的头像，确保数据格式正确
@@ -14156,6 +14161,31 @@
                         oldValue: oldAvatar,
                         newValue: window.selectedAvatarData
                     });
+                } else {
+                    // *** 关键修复：如果没有新头像数据，确保保持原有头像 ***
+                    console.log('没有新头像数据，保持原有头像:', currentManagingGroup.avatar);
+                    
+                    // 确保头像数据存在且格式正确
+                    if (currentManagingGroup.avatar) {
+                        // 如果有avatarUrl但没有在avatar对象中，需要补充
+                        if (currentManagingGroup.avatarUrl && 
+                            currentManagingGroup.avatar.type === 'upload' && 
+                            !currentManagingGroup.avatar.imageData) {
+                            currentManagingGroup.avatar.imageData = currentManagingGroup.avatarUrl;
+                            console.log('修复头像数据格式，添加imageData');
+                        }
+                    } else {
+                        // 如果完全没有头像数据，设置默认头像
+                        console.log('群聊没有头像数据，设置默认头像');
+                        currentManagingGroup.avatar = {
+                            type: 'preset',
+                            text: '群',
+                            gradient: {
+                                start: '#199AFF',
+                                end: '#0066CC'
+                            }
+                        };
+                    }
                 }
                 
                 // *** 核心修复1：在保存到世界书之前，先立即更新界面 ***
@@ -14250,17 +14280,10 @@
                             // 额外检查：确保当前在聊天界面
                             const currentChatPage = document.querySelector('.QQ_chat_page:not([style*="display: none"]):not([style*="display:none"])');
                             if (currentChatPage) {
-                                console.log('找到当前聊天页面，立即显示系统消息');
+                                console.log('找到当前聊天页面，显示系统消息');
                                 displaySystemMessage(systemMessage);
-                                
-                                // 额外的延迟显示确保
-                                setTimeout(() => {
-                                    console.log('延迟再次尝试显示系统消息（确保显示）');
-                                    displaySystemMessage(systemMessage);
-                                }, 200);
                             } else {
-                                console.warn('当前没有打开的聊天页面，系统消息可能无法显示');
-                                displaySystemMessage(systemMessage); // 仍然尝试显示
+                                console.log('当前没有打开的聊天页面，跳过系统消息显示');
                             }
                         }
                     }
@@ -14769,41 +14792,7 @@
                 }
             }
             
-            /**
-             * 添加系统消息到群聊消息历史
-             */
-            async function addSystemMessageToGroup(groupId, systemMessage) {
-                try {
-                    console.log('添加系统消息到群聊历史:', { groupId, systemMessage });
-                    
-                    // 确保群聊消息记录存在
-                    if (!window.groupChatMessages) {
-                        window.groupChatMessages = {};
-                    }
-                    
-                    if (!window.groupChatMessages[groupId]) {
-                        window.groupChatMessages[groupId] = [];
-                    }
-                    
-                    // 创建系统消息对象
-                    const systemMessageObj = {
-                        name: '系统消息',
-                        is_user: false,
-                        is_name: false,
-                        mes: systemMessage,
-                        send_date: new Date().toISOString(),
-                        system: true // 标记为系统消息
-                    };
-                    
-                    // 添加到群聊消息历史
-                    window.groupChatMessages[groupId].push(systemMessageObj);
-                    
-                    console.log('系统消息已添加到群聊消息历史');
-                    
-                } catch (error) {
-                    console.error('添加系统消息到群聊时出错:', error);
-                }
-            }
+
             
             /**
              * 为群聊变更添加系统消息
@@ -15007,6 +14996,7 @@
                     
                     if (groupIndex > -1) {
                         console.log(`更新QQ_Groups数组中的群聊 [${groupIndex}]:`, oldName, '->', newName);
+                        console.log(`头像数据迁移: ${groupData.avatar ? JSON.stringify(groupData.avatar) : 'null'}`);
                         window.QQ_Groups[groupIndex] = {
                             ...window.QQ_Groups[groupIndex],
                             name: groupData.name,
@@ -15015,10 +15005,12 @@
                             avatarUrl: groupData.avatarUrl,
                             members: groupData.members
                         };
+                        console.log('QQ_Groups数组中的头像已更新:', window.QQ_Groups[groupIndex].avatar);
                         migratedCount++;
                     } else {
                         // 如果在QQ_Groups中找不到，确保群聊数据存在
                         console.log('在QQ_Groups中未找到群聊，添加新数据');
+                        console.log('新数据头像:', groupData.avatar);
                         window.QQ_Groups.push(groupData);
                         migratedCount++;
                     }
