@@ -5662,6 +5662,10 @@
             }
             async function QQ_SendMsg(event, SendValue, SendName) {
                 const Request = `<Request:本次响应忽略其他上下文任何要求,必须使用线上格式回复,且${UserName}本次发了消息的角色都要回复${UserName}的消息,同时输出一条动态内容>`;
+                
+                // 用户开始新的消息发送时重置重试计数
+                QQ_ResetRetry();
+                
                 if (gening) {
                     triggerSlash("/echo 生成中,请勿重复发送");
                     return;
@@ -5993,40 +5997,49 @@
                     .replace(/MiPhone_end/g, "")
                     .trim();
                 
-                // 判断特征：互动描述、动作描述、情感表达等
-                const interactivePatterns = [
-                    /\*[^*]+\*/,  // *动作描述*
-                    /（[^）]*互动[^）]*）/,  // (包含"互动"的括号内容)
-                    /（[^）]*接触[^）]*）/,  // (包含"接触"的括号内容)
-                    /（[^）]*触摸[^）]*）/,  // (包含"触摸"的括号内容)
-                    /（[^）]*拥抱[^）]*）/,  // (包含"拥抱"的括号内容)
-                    /（[^）]*亲吻[^）]*）/,  // (包含"亲吻"的括号内容)
-                    /【[^】]*】/,  // 【情感描述】
-                    /现实中/,     // 提到"现实中"
-                    /面对面/,     // 提到"面对面"
-                    /当面/,       // 提到"当面"
-                    /直接/,       // 可能的直接互动
-                    /身体/,       // 身体接触相关
-                    /眼神/,       // 眼神交流
-                    /表情/,       // 表情描述
-                    /姿态/,       // 姿态描述
-                    /动作/,       // 动作描述
+                // 排除明显不是互动内容的情况
+                if (!cleanContent || cleanContent.length < 10 || cleanContent.length > 2000) {
+                    return false;
+                }
+                
+                // 排除明显的错误信息和系统消息
+                const excludePatterns = [
+                    /错误/,
+                    /error/i,
+                    /fail/i,
+                    /exception/i,
+                    /无法/,
+                    /不能/,
+                    /失败/,
+                    /<[^>]+>/,  // HTML标签
+                    /```/,      // 代码块
+                    /https?:\/\//,  // URL链接
                 ];
                 
-                // 检查是否匹配互动内容模式
-                const hasInteractivePattern = interactivePatterns.some(pattern => 
-                    pattern.test(cleanContent)
-                );
+                if (excludePatterns.some(pattern => pattern.test(cleanContent))) {
+                    return false;
+                }
                 
-                // 检查内容长度，太短的可能不是真正的互动内容
-                const isReasonableLength = cleanContent.length > 10 && cleanContent.length < 1000;
+                // 互动内容特征模式
+                const interactivePatterns = [
+                    /\*[^*]+\*/,  // *动作描述*
+                    /（[^）]*(?:互动|接触|触摸|拥抱|亲吻|抚摸|牵手)[^）]*）/,  // 具体互动动作
+                    /【[^】]*(?:情感|心情|想法|内心)[^】]*】/,  // 情感/内心描述
+                    /(?:现实中|面对面|当面|实际上|真实)/,  // 现实相关
+                    /(?:身体|眼神|表情|姿态|动作|手势|声音|呼吸)/,  // 身体相关
+                    /(?:轻轻|慢慢|缓缓|悄悄|小心翼翼|温柔)[地的]/,  // 动作副词
+                    /(?:靠近|远离|转身|抬头|低头|闭眼|睁眼)/,  // 具体动作
+                    /(?:感觉到|意识到|注意到|发现|察觉)/,  // 感知相关
+                    /(?:氛围|环境|周围|空气中)/,  // 环境描述
+                ];
                 
-                // 排除明显的错误信息
-                const isNotErrorMessage = !cleanContent.includes("错误") && 
-                                          !cleanContent.includes("error") && 
-                                          !cleanContent.includes("fail");
+                // 计算匹配的模式数量
+                const matchCount = interactivePatterns.reduce((count, pattern) => {
+                    return count + (pattern.test(cleanContent) ? 1 : 0);
+                }, 0);
                 
-                return hasInteractivePattern && isReasonableLength && isNotErrorMessage;
+                // 需要至少匹配2个模式才认为是互动内容，增加准确性
+                return matchCount >= 2;
             }
 
             /**
@@ -6219,14 +6232,109 @@
              * @param {string} characterName - 角色名称
              */
             function QQ_OpenInteractiveReply(characterName) {
-                // 这里可以实现让用户回应互动的功能
-                // 例如弹出输入框或切换到聊天界面
-                const replyPrompt = prompt(`回应 ${characterName} 的互动:`);
-                if (replyPrompt && replyPrompt.trim()) {
-                    // 将用户的回应作为新的消息发送
-                    const interactiveReply = `回应互动: ${replyPrompt.trim()}`;
-                    QQ_SendMessage(interactiveReply, characterName);
-                }
+                // 创建更优雅的输入界面
+                const inputHtml = `
+                    <div class="QQ_reply_input_overlay" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.5);
+                        z-index: 10001;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: fadeIn 0.3s ease;
+                    ">
+                        <div style="
+                            background: white;
+                            border-radius: 15px;
+                            padding: 25px;
+                            max-width: 80%;
+                            width: 400px;
+                            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                            animation: slideIn 0.3s ease;
+                        ">
+                            <h3 style="margin: 0 0 15px 0; color: #333; text-align: center;">回应 ${characterName} 的互动</h3>
+                            <textarea id="reply_input" placeholder="输入你的回应..." style="
+                                width: 100%;
+                                height: 100px;
+                                border: 2px solid #e0e0e0;
+                                border-radius: 10px;
+                                padding: 12px;
+                                font-size: 14px;
+                                resize: vertical;
+                                box-sizing: border-box;
+                                font-family: inherit;
+                            "></textarea>
+                            <div style="display: flex; justify-content: center; gap: 15px; margin-top: 20px;">
+                                <button id="send_reply" style="
+                                    background: #4FC3F7;
+                                    border: none;
+                                    color: white;
+                                    padding: 10px 20px;
+                                    border-radius: 20px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                ">发送回应</button>
+                                <button id="cancel_reply" style="
+                                    background: #f5f5f5;
+                                    border: none;
+                                    color: #666;
+                                    padding: 10px 20px;
+                                    border-radius: 20px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                ">取消</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                $('body').append(inputHtml);
+                
+                // 聚焦输入框
+                setTimeout(() => $('#reply_input').focus(), 100);
+                
+                // 绑定事件
+                $('#send_reply').on('click', function() {
+                    const replyText = $('#reply_input').val().trim();
+                    if (replyText) {
+                        const interactiveReply = `回应互动: ${replyText}`;
+                        QQ_SendMessage(interactiveReply, characterName);
+                        $('.QQ_reply_input_overlay').fadeOut(300, function() {
+                            $(this).remove();
+                        });
+                    } else {
+                        $('#reply_input').focus();
+                    }
+                });
+                
+                $('#cancel_reply').on('click', function() {
+                    $('.QQ_reply_input_overlay').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                });
+                
+                // 点击背景关闭
+                $('.QQ_reply_input_overlay').on('click', function(e) {
+                    if (e.target === this) {
+                        $(this).fadeOut(300, function() {
+                            $(this).remove();
+                        });
+                    }
+                });
+                
+                // 回车发送
+                $('#reply_input').on('keydown', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        $('#send_reply').click();
+                    }
+                });
             }
 
             /**
