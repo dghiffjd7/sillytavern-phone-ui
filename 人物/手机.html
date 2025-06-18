@@ -10171,16 +10171,28 @@
                                     QQ_Groups.push(groupData.name);
                                 }
                                 
+                                // **修复：检查群聊是否已在界面中存在，避免重复创建**
+                                const existingGroupElement = $(`.QQ_home_usermsg[data-name='${groupData.name}'][data-group-type='true']`);
+                                const groupAlreadyExists = existingGroupElement.length > 0;
+                                
                                 if (!QQ_msgjson.群聊[groupData.name]) {
                                     QQ_msgjson.群聊[groupData.name] = {
                                         members: groupData.members || [],
                                         msgs: []
                                     };
                                     console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupData.name);
+                                } else {
+                                    console.log('群聊数据已存在，更新成员列表:', groupData.name);
+                                    QQ_msgjson.群聊[groupData.name].members = groupData.members || [];
                                 }
                                 
-                                console.log('准备调用AddNewGroup函数添加群聊:', groupData.name);
-                                AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                                // **修复：只有当群聊不存在时才调用AddNewGroup，避免重复创建和系统消息**
+                                if (!groupAlreadyExists) {
+                                    console.log('群聊不存在，调用AddNewGroup函数添加群聊:', groupData.name);
+                                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                                } else {
+                                    console.log('群聊已存在于界面中，跳过AddNewGroup调用:', groupData.name);
+                                }
                                 
                                 // *** 修复：在加载群聊后立即更新最后消息显示 ***
                                 setTimeout(() => {
@@ -14449,6 +14461,8 @@
                             console.log('刷新entries以移除已删除的群聊');
                             entries = await getLorebookEntries(worldbook);
                             console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                            
+
                             
                             // 从数据结构中删除群聊
                             delete QQ_msgjson.群聊[deletedGroupName];
