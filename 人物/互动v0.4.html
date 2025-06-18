@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
@@ -6253,16 +6253,7 @@
                     }
                     QQ_CacheSendMsg = "";
                     if (value) {
-                        // *** 新增：检测用户输入的互动意图 ***
-                        const userInput = content || SendValue || "";
-                        if (QQ_DetectInteractiveIntent(userInput)) {
-                            console.log('检测到用户互动意图，将引导AI回复互动内容');
-                            // 修改Request以引导AI生成互动内容
-                            const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
-                            value += `\n${modifiedRequest}`;
-                        } else {
-                            value += `\n${Request}`;
-                        }
+                        value += `\n${Request}`;
                         const namevalue = QQ_GetValueName(value);
                         if (namevalue) {
                             for (const match of namevalue) {
@@ -6328,15 +6319,7 @@
                         User_LastMsgMap.私聊[name] =
                             `${UserName}--${SendValue}`;
                     }
-                    
-                    // *** 新增：对SendValue也检测互动意图 ***
-                    if (QQ_DetectInteractiveIntent(SendValue)) {
-                        console.log('检测到SendValue中的互动意图，将引导AI回复互动内容');
-                        const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
-                        value += `\n${modifiedRequest}`;
-                    } else {
-                        value += `\n${Request}`;
-                    }
+                    value += `\n${Request}`;
                 }
                 console.log(
                     `User_LastMsg:\n${JSON.stringify(User_LastMsgMap)}`,
@@ -6354,7 +6337,7 @@
                 } finally {
                     gening = false;
                     console.log(`生成结束`);
-                    await QQ_Save_Msg(); // 确保异步保存完成
+                    QQ_Save_Msg();
                 }
                 await ResultHandle(result);
             }
@@ -6654,132 +6637,6 @@
             let QQ_ActiveSpaceId = null; // 当前活动的互动空间ID
             let QQ_SpiritVisible = false; // 精灵按钮是否可见
             const QQ_INTERACTIVE_BACKUP_KEY = "QQ_互动空间备份";
-            
-            // ===== 主动互动检测系统 =====
-            
-            /**
-             * 检测用户消息是否包含明显的互动意图
-             * @param {string} content - 用户消息内容
-             * @returns {boolean} - 是否包含互动意图
-             */
-            function QQ_DetectInteractiveIntent(content) {
-                if (!content || typeof content !== 'string') return false;
-                
-                const text = content.toLowerCase().trim();
-                
-                // 身体接触类关键词
-                const physicalContactKeywords = [
-                    '拥抱', '抱抱', '抱住', '搂抱', '紧抱',
-                    '亲吻', '亲', '吻', 'kiss', '亲亲',
-                    '触摸', '摸', '抚摸', '轻抚', '摸摸',
-                    '握手', '牵手', '拉手', '手牵手',
-                    '拍肩', '拍背', '轻拍', '拍拍',
-                    '推', '拉', '扶', '搀扶', '扶着',
-                    '贴近', '靠近', '紧贴', '依偎'
-                ];
-                
-                // 面对面互动类关键词
-                const faceToFaceKeywords = [
-                    '面对面', '当面', '面前', '眼神交流', '对视', '凝视',
-                    '现实中', '真实中', '现实里', '面对着',
-                    '走向', '走近', '走过去', '过来', '靠过来',
-                    '坐下', '坐过来', '坐在身边', '坐在旁边',
-                    '躺下', '躺在', '躺着', '趴下',
-                    '蹲下', '跪下', '弯腰', '俯身'
-                ];
-                
-                // 情感表达类关键词
-                const emotionalKeywords = [
-                    '脸红', '害羞', '紧张', '心跳', '颤抖',
-                    '微笑', '笑容', '开心', '高兴', '激动',
-                    '哭', '流泪', '哭泣', '眼泪', '哽咽',
-                    '生气', '愤怒', '恼火', '皱眉', '瞪眼',
-                    '温柔', '体贴', '关心', '安慰', '呵护'
-                ];
-                
-                // 动作描述类关键词
-                const actionKeywords = [
-                    '伸手', '张开手', '举手', '挥手', '招手',
-                    '点头', '摇头', '转身', '回头', '侧身',
-                    '低头', '抬头', '仰头', '俯视', '仰视',
-                    '踮脚', '跳跃', '跑过来', '冲过来',
-                    '慢慢', '轻轻', '小心', '温柔地', '缓缓'
-                ];
-                
-                // 组合关键词检测
-                const allKeywords = [
-                    ...physicalContactKeywords,
-                    ...faceToFaceKeywords, 
-                    ...emotionalKeywords,
-                    ...actionKeywords
-                ];
-                
-                let matchCount = 0;
-                let matchedKeywords = [];
-                
-                for (const keyword of allKeywords) {
-                    if (text.includes(keyword)) {
-                        matchCount++;
-                        matchedKeywords.push(keyword);
-                    }
-                }
-                
-                // 检测动作描述模式 *动作* 或 【情感】
-                const actionPatterns = [
-                    /\*[^*]+\*/g, // *动作*
-                    /【[^】]+】/g, // 【情感】
-                    /\([^)]*动作[^)]*\)/g, // (包含动作的描述)
-                    /\([^)]*表情[^)]*\)/g, // (包含表情的描述)
-                ];
-                
-                let patternMatches = 0;
-                for (const pattern of actionPatterns) {
-                    const matches = text.match(pattern);
-                    if (matches) {
-                        patternMatches += matches.length;
-                        matchedKeywords.push(...matches);
-                    }
-                }
-                
-                // 判断是否为互动意图
-                const isInteractive = matchCount >= 2 || patternMatches >= 1 || 
-                    (matchCount >= 1 && patternMatches >= 1);
-                
-                if (isInteractive) {
-                    console.log(`检测到互动意图: 关键词${matchCount}个, 模式${patternMatches}个`);
-                    console.log('匹配的关键词/模式:', matchedKeywords);
-                }
-                
-                return isInteractive;
-            }
-            
-            /**
-             * 为互动内容请求修改AI指导
-             * @param {string} originalRequest - 原始请求内容
-             * @returns {string} - 修改后的请求内容
-             */
-            function QQ_ModifyRequestForInteractive(originalRequest) {
-                // 在Request标签中添加互动内容要求
-                const interactiveGuidance = `
-<InteractiveGuidance:用户的消息包含明显的互动意图(如身体接触、面对面交流、现实动作等)。
-请在回复中：
-1. 将互动部分用<content>标签包裹
-2. <content>标签内描述具体的现实互动场景
-3. 包含感官细节、情感表达、动作描述
-4. 确保互动内容能够引发后续的现实互动
-示例格式：
-角色名--回复内容
-<content>
-*角色做出回应动作* 现实互动描述，包含感官和情感细节
-</content>
->`;
-                
-                // 在原始Request之前插入互动指导
-                return originalRequest.replace(
-                    /<Request:/,
-                    `${interactiveGuidance}\n<Request:`
-                );
-            }
             
             /**
              * 生成互动空间的唯一ID
@@ -8267,32 +8124,6 @@ ${index + 1}. ${space.name}
                         lastAccess: s.lastAccess
                     }))
                 };
-            };
-            
-            // *** 新增：互动检测测试工具 ***
-            window.QQ_Test_Interactive_Detection = function(text) {
-                const result = QQ_DetectInteractiveIntent(text);
-                const details = `
-=== 互动意图检测测试 ===
-📝 测试文本: "${text}"
-🎯 检测结果: ${result ? '✅ 检测到互动意图' : '❌ 未检测到互动意图'}
-
-💡 测试提示:
-• 身体接触词汇: 拥抱、亲吻、触摸、牵手等
-• 面对面交流: 面对面、当面、走近、坐下等  
-• 情感表达: 脸红、害羞、微笑、哭泣等
-• 动作描述: *动作*、【情感】等格式
-• 需要2个关键词或1个模式匹配才触发
-
-📚 示例测试文本:
-• "我想抱抱你" (✅ 身体接触)
-• "*走向你*" (✅ 动作模式)
-• "面对面聊天" (✅ 面对面+动作)
-• "你好吗？" (❌ 普通对话)
-            `;
-                console.log(details);
-                alert(details);
-                return result;
             };
 
             function QQ_UpdateNewTips() {
@@ -12083,36 +11914,13 @@ ${index + 1}. ${space.name}
                     console.warn('未找到对应的动态数据，无法添加用户回复');
                 }
                 
-                // *** 修复：整合缓存消息和动态评论，避免重复动态内容 ***
+                // *** 修复：整合缓存消息和动态评论 ***
                 let sendvalue = '';
                 
-                // 如果有缓存的消息，先添加并处理消息保存（但排除动态重复内容）
+                // 如果有缓存的消息，先添加并处理消息保存
                 if (QQ_CacheSendMsg && QQ_CacheSendMsg.trim()) {
-                    // *** 新增：检查缓存消息是否包含当前动态的重复内容 ***
-                    let cleanedCacheMsg = QQ_CacheSendMsg;
-                    
-                    // 移除可能的动态重复描述
-                    const dynamicRepeatPatterns = [
-                        new RegExp(`用户在${name}的动态下评论[：:]?${value}`, 'g'),
-                        new RegExp(`在${name}的动态.+?评论[：:]?${value}`, 'g'),
-                        new RegExp(`动态内容[：:]?.+?用户评论[：:]?${value}`, 'g')
-                    ];
-                    
-                    for (const pattern of dynamicRepeatPatterns) {
-                        cleanedCacheMsg = cleanedCacheMsg.replace(pattern, '');
-                    }
-                    
-                    // 只有清理后还有有效内容才添加
-                    cleanedCacheMsg = cleanedCacheMsg.trim();
-                    if (cleanedCacheMsg && cleanedCacheMsg !== QQ_CacheSendMsg.trim()) {
-                        sendvalue += `${cleanedCacheMsg}\n\n`;
-                        console.log('包含清理后的缓存消息:', cleanedCacheMsg);
-                    } else if (cleanedCacheMsg && !cleanedCacheMsg.includes(`用户在${name}的动态下评论`)) {
-                        sendvalue += `${cleanedCacheMsg}\n\n`;
-                        console.log('包含缓存消息:', cleanedCacheMsg);
-                    } else {
-                        console.log('缓存消息包含重复动态内容，已跳过');
-                    }
+                    sendvalue += `${QQ_CacheSendMsg}\n\n`;
+                    console.log('包含缓存消息:', QQ_CacheSendMsg);
                     
                     // *** 新增：解析并保存缓存消息到对应聊天记录 ***
                     const namevalue = QQ_GetValueName(QQ_CacheSendMsg);
@@ -12163,15 +11971,7 @@ ${index + 1}. ${space.name}
                     sendvalue += `用户在${name}的动态下评论：${value}\n\n`;
                 }
                 
-                // *** 新增：检测动态评论的互动意图 ***
-                let finalRequest = `<Request:本次响应必须使用线上格式回复，可以选择动态评论回复或私聊回复。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end>`;
-                
-                if (QQ_DetectInteractiveIntent(value)) {
-                    console.log('检测到动态评论中的互动意图，将引导AI回复互动内容');
-                    finalRequest = QQ_ModifyRequestForInteractive(finalRequest);
-                }
-                
-                sendvalue += finalRequest;
+                sendvalue += `<Request:本次响应必须使用线上格式回复，可以选择动态评论回复或私聊回复。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end>`;
                 
                 console.log('发送给AI的内容:', sendvalue);
                 const result = await QQ_Gen(sendvalue);
