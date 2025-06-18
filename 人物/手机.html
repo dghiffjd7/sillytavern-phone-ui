@@ -14593,17 +14593,63 @@
                     
                     // 更新消息列表中的群聊
                     if (messagesContainer && latestGroups) {
+                        console.log('=== 开始更新消息列表中的群聊 ===');
+                        console.log('消息容器存在:', !!messagesContainer);
+                        console.log('群聊数据:', latestGroups.map(g => ({ name: g.name, id: g.id })));
+                        
+                        // 先检查消息列表中现有的群聊元素
+                        const existingElements = messagesContainer.querySelectorAll('[data-group-id]');
+                        console.log('消息列表中现有的群聊元素:', Array.from(existingElements).map(el => ({
+                            name: el.querySelector('.QQ_home_name')?.textContent,
+                            dataGroupId: el.getAttribute('data-group-id')
+                        })));
+                        
                         for (const groupData of latestGroups) {
                             if (groupData && groupData.name) {
+                                console.log(`\n--- 处理群聊: ${groupData.name} (ID: ${groupData.id}) ---`);
+                                
                                 const existingElement = messagesContainer.querySelector(`[data-group-id="${groupData.id}"]`);
-                                if (existingElement) {
-                                    console.log('更新消息列表中的群聊元素:', groupData.name);
-                                    updateGroupElement(existingElement, groupData);
+                                console.log('根据data-group-id查找到的元素:', !!existingElement);
+                                
+                                if (!existingElement) {
+                                    // 尝试用其他方式查找，比如名称匹配
+                                    const nameElements = messagesContainer.querySelectorAll('.QQ_home_name');
+                                    let foundByName = null;
+                                    for (const nameEl of nameElements) {
+                                        if (nameEl.textContent.trim() === groupData.name) {
+                                            foundByName = nameEl.closest('[data-group-id]');
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (foundByName) {
+                                        console.log('通过名称匹配找到群聊元素，更新data-group-id');
+                                        foundByName.setAttribute('data-group-id', groupData.id);
+                                        updateGroupElement(foundByName, groupData);
+                                    } else {
+                                        console.warn(`❌ 群聊 "${groupData.name}" 在消息列表中完全找不到，可能已被删除或隐藏`);
+                                        
+                                        // 特殊检查'港区'群聊
+                                        if (groupData.name === '港区') {
+                                            console.error('🚨 特别关注：港区群聊在消息列表中找不到！');
+                                            console.log('所有现有元素的详细信息:');
+                                            existingElements.forEach(el => {
+                                                console.log('元素:', {
+                                                    innerHTML: el.innerHTML.substring(0, 200),
+                                                    dataGroupId: el.getAttribute('data-group-id'),
+                                                    nameText: el.querySelector('.QQ_home_name')?.textContent
+                                                });
+                                            });
+                                        }
+                                    }
                                 } else {
-                                    console.log('消息列表中群聊元素不存在，保持现状:', groupData.name);
+                                    console.log('✅ 找到群聊元素，正在更新:', groupData.name);
+                                    updateGroupElement(existingElement, groupData);
                                 }
                             }
                         }
+                        
+                        console.log('=== 消息列表群聊更新完成 ===');
                     }
                 } catch (error) {
                     console.error('更新现有群聊元素时出错:', error);
