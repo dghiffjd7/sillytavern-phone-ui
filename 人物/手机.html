@@ -5794,6 +5794,11 @@
                 console.log(
                     `User_LastMsg:\n${JSON.stringify(User_LastMsgMap)}`,
                 );
+                
+                // 保存请求信息用于重试
+                QQ_LastRequest = value;
+                QQ_LastRequestName = name || "";
+                
                 gening = true;
                 let result;
                 try {
@@ -5806,25 +5811,88 @@
                 }
                 await ResultHandle(result);
             }
-            async function ResultHandle(result) {
+            // 添加重试相关的全局变量
+            let QQ_RetryCount = 0;
+            const QQ_MAX_RETRY = 3;
+            let QQ_LastRequest = "";
+            let QQ_LastRequestName = "";
+
+            async function ResultHandle(result, isRetry = false) {
                 if (!result) {
-                    triggerSlash("/echo 空回复了");
+                    // 空回复处理 - 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI空回复，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                        
+                        // 使用保存的最后请求重新生成
+                        if (QQ_LastRequest) {
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
+                        }
+                    } else {
+                        // 重试次数用完或其他情况
+                        if (QQ_RetryCount >= QQ_MAX_RETRY) {
+                            triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
+                        } else {
+                            triggerSlash("/echo 空回复了");
+                        }
+                        QQ_ResetRetry();
+                    }
                     return;
                 }
+                
                 result = System_TagCompletion(result);
                 console.log(`开始对结果进行处理:\n${result}`);
                 const matches = [
                     ...result.matchAll(/MiPhone_start([\s\S]+?)MiPhone_end/g),
                 ];
+                
                 if (matches.length == 0) {
-                    triggerSlash(
-                        "/echo AI没有回复线上格式,原文直接输出到新楼层",
-                    );
-                    triggerSlash(`/sendas name={{char}} ${result}`);
+                    // 没有回复线上格式 - 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI没有回复线上格式，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                        
+                        if (QQ_LastRequest) {
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
+                        }
+                    } else {
+                        // 重试用完，判断是否为互动内容
+                        if (QQ_IsInteractiveContent(result)) {
+                            // 在手机界面显示互动内容
+                            QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                        } else {
+                            triggerSlash("/echo AI没有回复线上格式,原文直接输出到新楼层");
+                            triggerSlash(`/sendas name={{char}} ${result}`);
+                        }
+                        QQ_ResetRetry();
+                    }
                     return;
                 } else if (matches.length > 1) {
-                    triggerSlash("/echo AI回复了多个线上格式,直接输出到新楼层");
-                    triggerSlash(`/sendas name={{char}} ${result}`);
+                    // 回复了多个线上格式 - 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI回复了多个线上格式，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI回复多个格式，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                        
+                        if (QQ_LastRequest) {
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
+                        }
+                    } else {
+                        // 重试用完，判断是否为互动内容
+                        if (QQ_IsInteractiveContent(result)) {
+                            // 在手机界面显示互动内容
+                            QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                        } else {
+                            triggerSlash("/echo AI回复了多个线上格式,直接输出到新楼层");
+                            triggerSlash(`/sendas name={{char}} ${result}`);
+                        }
+                        QQ_ResetRetry();
+                    }
                     return;
                 } else {
                     result = matches[0][1];
@@ -5882,21 +5950,314 @@
                     }
                 }
                 if (!ok) {
-                    triggerSlash(
-                        "/echo 回复不为空但不存在手机格式,输出到新楼层",
-                    );
-                    triggerSlash(
-                        `/sendas name={{char}} ${result
-                            .replace("MiPhone_start", "")
-                            .replace("MiPhone_end", "")}`,
-                    );
+                    // 最后的格式检查失败 - 判断是否为互动内容
+                    if (QQ_IsInteractiveContent(result)) {
+                        // 在手机界面显示互动内容
+                        QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                    } else {
+                        triggerSlash("/echo 回复不为空但不存在手机格式,输出到新楼层");
+                        triggerSlash(
+                            `/sendas name={{char}} ${result
+                                .replace("MiPhone_start", "")
+                                .replace("MiPhone_end", "")}`,
+                        );
+                    }
+                    QQ_ResetRetry();
                     return;
                 }
                 
+                // 成功处理，重置重试计数
+                QQ_ResetRetry();
                 QQ_UpdateNewTips();
                 QQ_Save_Msg();
             }
-            
+
+            /**
+             * 重置重试相关变量
+             */
+            function QQ_ResetRetry() {
+                QQ_RetryCount = 0;
+                QQ_LastRequest = "";
+                QQ_LastRequestName = "";
+            }
+
+            /**
+             * 判断是否为互动内容
+             * @param {string} content - AI回复的内容
+             * @returns {boolean} 是否为互动内容
+             */
+            function QQ_IsInteractiveContent(content) {
+                // 移除格式标签后的内容
+                const cleanContent = content
+                    .replace(/MiPhone_start/g, "")
+                    .replace(/MiPhone_end/g, "")
+                    .trim();
+                
+                // 判断特征：互动描述、动作描述、情感表达等
+                const interactivePatterns = [
+                    /\*[^*]+\*/,  // *动作描述*
+                    /（[^）]*互动[^）]*）/,  // (包含"互动"的括号内容)
+                    /（[^）]*接触[^）]*）/,  // (包含"接触"的括号内容)
+                    /（[^）]*触摸[^）]*）/,  // (包含"触摸"的括号内容)
+                    /（[^）]*拥抱[^）]*）/,  // (包含"拥抱"的括号内容)
+                    /（[^）]*亲吻[^）]*）/,  // (包含"亲吻"的括号内容)
+                    /【[^】]*】/,  // 【情感描述】
+                    /现实中/,     // 提到"现实中"
+                    /面对面/,     // 提到"面对面"
+                    /当面/,       // 提到"当面"
+                    /直接/,       // 可能的直接互动
+                    /身体/,       // 身体接触相关
+                    /眼神/,       // 眼神交流
+                    /表情/,       // 表情描述
+                    /姿态/,       // 姿态描述
+                    /动作/,       // 动作描述
+                ];
+                
+                // 检查是否匹配互动内容模式
+                const hasInteractivePattern = interactivePatterns.some(pattern => 
+                    pattern.test(cleanContent)
+                );
+                
+                // 检查内容长度，太短的可能不是真正的互动内容
+                const isReasonableLength = cleanContent.length > 10 && cleanContent.length < 1000;
+                
+                // 排除明显的错误信息
+                const isNotErrorMessage = !cleanContent.includes("错误") && 
+                                          !cleanContent.includes("error") && 
+                                          !cleanContent.includes("fail");
+                
+                return hasInteractivePattern && isReasonableLength && isNotErrorMessage;
+            }
+
+            /**
+             * 在手机界面显示互动空间
+             * @param {string} content - 互动内容
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_ShowInteractiveSpace(content, characterName = "") {
+                // 清理内容
+                const cleanContent = content
+                    .replace(/MiPhone_start/g, "")
+                    .replace(/MiPhone_end/g, "")
+                    .trim();
+                
+                // 移除现有的互动空间
+                $('.QQ_interactive_space').remove();
+                
+                // 获取角色信息
+                const charName = characterName || charcardname || "角色";
+                const charAvatar = charAvatarPath || "default_avatar.png";
+                
+                // 创建互动空间HTML - 更符合手机界面风格
+                const interactiveSpaceHtml = `
+                    <div class="QQ_interactive_space" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.7);
+                        z-index: 10000;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: fadeIn 0.3s ease;
+                        backdrop-filter: blur(10px);
+                    ">
+                        <div class="QQ_interactive_content" style="
+                            background: #ffffff;
+                            border-radius: 15px;
+                            padding: 0;
+                            max-width: 85%;
+                            max-height: 75%;
+                            overflow: hidden;
+                            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                            position: relative;
+                            color: #333;
+                            animation: slideIn 0.3s ease;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        ">
+                            <div class="QQ_interactive_header" style="
+                                background: linear-gradient(135deg, #4FC3F7 0%, #29B6F6 100%);
+                                padding: 20px;
+                                display: flex;
+                                align-items: center;
+                                color: white;
+                                position: relative;
+                            ">
+                                <img src="${charAvatar}" alt="${charName}" style="
+                                    width: 45px;
+                                    height: 45px;
+                                    border-radius: 50%;
+                                    margin-right: 15px;
+                                    border: 3px solid white;
+                                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+                                ">
+                                <div style="flex: 1;">
+                                    <h3 style="margin: 0; font-size: 17px; font-weight: 600;">${charName}</h3>
+                                    <p style="margin: 3px 0 0 0; font-size: 13px; opacity: 0.9;">现实互动模式</p>
+                                </div>
+                                <button class="QQ_close_interactive" style="
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 18px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                                    ×
+                                </button>
+                            </div>
+                            <div class="QQ_interactive_body" style="
+                                padding: 25px 20px;
+                                font-size: 15px;
+                                line-height: 1.5;
+                                white-space: pre-wrap;
+                                color: #333;
+                                background: #fafafa;
+                                max-height: 300px;
+                                overflow-y: auto;
+                            ">${cleanContent}</div>
+                            <div class="QQ_interactive_footer" style="
+                                padding: 20px;
+                                background: #ffffff;
+                                border-top: 1px solid #eee;
+                                display: flex;
+                                justify-content: center;
+                                gap: 15px;
+                            ">
+                                <button class="QQ_reply_interactive" style="
+                                    background: #4FC3F7;
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 24px;
+                                    border-radius: 25px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                    box-shadow: 0 2px 8px rgba(79, 195, 247, 0.3);
+                                " onmouseover="this.style.background='#29B6F6'; this.style.transform='translateY(-1px)'" 
+                                   onmouseout="this.style.background='#4FC3F7'; this.style.transform='translateY(0)'">
+                                    💬 回应互动
+                                </button>
+                                <button class="QQ_close_interactive" style="
+                                    background: #f5f5f5;
+                                    border: none;
+                                    color: #666;
+                                    padding: 12px 24px;
+                                    border-radius: 25px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='#eeeeee'" 
+                                   onmouseout="this.style.background='#f5f5f5'">
+                                    关闭
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <style>
+                        @keyframes fadeIn {
+                            from { opacity: 0; }
+                            to { opacity: 1; }
+                        }
+                        @keyframes slideIn {
+                            from { transform: translateY(-30px); opacity: 0; }
+                            to { transform: translateY(0); opacity: 1; }
+                        }
+                        .QQ_interactive_space * {
+                            user-select: text;
+                        }
+                    </style>
+                `;
+                
+                // 添加到页面
+                $('body').append(interactiveSpaceHtml);
+                
+                // 绑定关闭事件
+                $('.QQ_close_interactive').off('click').on('click', function() {
+                    $('.QQ_interactive_space').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                });
+                
+                // 绑定回应互动事件
+                $('.QQ_reply_interactive').off('click').on('click', function() {
+                    // 关闭互动空间
+                    $('.QQ_interactive_space').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                    
+                    // 可以在这里添加回应互动的逻辑
+                    // 例如：打开输入框让用户回应
+                    QQ_OpenInteractiveReply(charName);
+                });
+                
+                // 点击背景关闭
+                $('.QQ_interactive_space').on('click', function(e) {
+                    if (e.target === this) {
+                        $(this).fadeOut(300, function() {
+                            $(this).remove();
+                        });
+                    }
+                });
+                
+                triggerSlash(`/echo 检测到互动内容，已在手机界面显示`);
+            }
+
+            /**
+             * 打开互动回应界面
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_OpenInteractiveReply(characterName) {
+                // 这里可以实现让用户回应互动的功能
+                // 例如弹出输入框或切换到聊天界面
+                const replyPrompt = prompt(`回应 ${characterName} 的互动:`);
+                if (replyPrompt && replyPrompt.trim()) {
+                    // 将用户的回应作为新的消息发送
+                    const interactiveReply = `回应互动: ${replyPrompt.trim()}`;
+                    QQ_SendMessage(interactiveReply, characterName);
+                }
+            }
+
+            /**
+             * 发送消息到指定角色
+             * @param {string} message - 消息内容
+             * @param {string} targetName - 目标角色名称
+             */
+            function QQ_SendMessage(message, targetName = "") {
+                // 设置全局发送变量
+                SendValue = message;
+                SendName = targetName;
+                
+                // 调用现有的发送机制
+                console.log(`发送互动回应消息: ${message} -> ${targetName}`);
+                
+                // 如果在聊天页面，直接发送
+                if (typeof QQ_Send === 'function') {
+                    QQ_Send();
+                } else {
+                    // 否则通过triggerSlash发送
+                    if (targetName) {
+                        triggerSlash(`/sendas name={{char}} 收到来自${UserName}的互动回应: ${message}`);
+                    } else {
+                        triggerSlash(`/sendas name={{char}} 收到互动回应: ${message}`);
+                    }
+                }
+                
+                // 清理发送变量
+                SendValue = "";
+                SendName = "";
+            }
 
             
             function QQ_UpdateNewTips() {
