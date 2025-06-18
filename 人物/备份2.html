@@ -11790,6 +11790,9 @@
                         }
                     }
                     
+                    // 定义uniqueComment变量在函数开头，确保在所有分支中都可用
+                    const uniqueComment = `手机-群聊-${groupData.name}`;
+                    
                     // 查找现有的群聊条目
                     let groupEntry = null;
                     const groupEntryKey = `手机-群聊-${groupData.name}`;
@@ -11894,7 +11897,6 @@
                         console.log('创建新的独立群聊条目');
                         
                         // 使用正确的createLorebookEntry函数，遵循项目标准设定
-                        const uniqueComment = `手机-群聊-${groupData.name}`;
                         console.log('准备调用createLorebookEntry，参数:', { worldbook, uniqueComment, groupContent });
                         const createResult = await createLorebookEntry(worldbook, {
                             comment: uniqueComment, // 使用唯一的comment标识群聊
@@ -12459,12 +12461,26 @@
                     // 4. 删除聊天页面
                     $(`.QQ_chat_page[data-name='${groupName}']`).remove();
                     
-                    // 5. 更新消息列表
+                    // 5. 立即刷新entries，确保删除的群聊从界面消失
+                    console.log('刷新entries以移除已删除的群聊');
+                    try {
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                    } catch (e) {
+                        console.warn('刷新entries失败，但群聊已删除:', e);
+                    }
+                    
+                    // 6. 立即重新加载群聊以确保已删除的群聊从界面消失
+                    console.log('立即重新加载群聊数据以移除已删除的群聊');
+                    await loadGroupChatsFromWorldbook();
+                    
+                    // 7. 更新消息列表
                     setTimeout(async () => {
                         await QQ_UpdateMessageList();
                     }, 100);
                     
                     console.log('群聊删除成功:', groupName);
+                    console.log('当前QQ_Groups数组:', QQ_Groups);
                     return true;
                 } catch (error) {
                     console.error('删除群聊失败:', error);
@@ -14407,8 +14423,29 @@
                     // 新版本：群聊数据已从世界书中删除，不需要操作localStorage
                     console.log('群聊已从世界书中删除');
                     
+                    // 立即刷新entries，确保删除的群聊从界面消失
+                    console.log('刷新entries以移除已删除的群聊');
+                    try {
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                    } catch (e) {
+                        console.warn('刷新entries失败，但群聊已删除:', e);
+                    }
+                    
+                    // 从数据结构中删除群聊
+                    delete QQ_msgjson.群聊[currentManagingGroup.name];
+                    const index = QQ_Groups.indexOf(currentManagingGroup.name);
+                    if (index > -1) {
+                        QQ_Groups.splice(index, 1);
+                    }
+                    console.log('群聊已从数据结构中删除，当前QQ_Groups:', QQ_Groups);
+                    
                     // 从界面中移除
                     removeGroupFromAllLists(currentManagingGroup.id);
+                    
+                    // 立即重新加载群聊以确保已删除的群聊从界面消失
+                    console.log('立即重新加载群聊数据以移除已删除的群聊');
+                    await loadGroupChatsFromWorldbook();
                     
                     // 如果当前在群聊界面，返回到来源页面
                     if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
@@ -14424,6 +14461,11 @@
                         window.currentGroupChat = null;
                         window.groupChatSourcePage = null;
                     }
+                    
+                    // 更新消息列表
+                    setTimeout(async () => {
+                        await QQ_UpdateMessageList();
+                    }, 100);
                     
                     alert('群聊已删除');
                     closeGroupSettings();

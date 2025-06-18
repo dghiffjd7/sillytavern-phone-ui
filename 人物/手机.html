@@ -14417,40 +14417,22 @@
                 if (confirm(`确定要删除群聊 "${currentManagingGroup.name}" 吗？此操作不可撤销。`)) {
                     console.log('删除群聊:', currentManagingGroup.name);
                     
-                    // 从世界书中删除
-                    await removeGroupFromWorldbook(currentManagingGroup.name);
+                    const deletedGroupId = currentManagingGroup.id;
+                    const deletedGroupName = currentManagingGroup.name;
                     
-                    // 新版本：群聊数据已从世界书中删除，不需要操作localStorage
-                    console.log('群聊已从世界书中删除');
+                    // **关键修复：先关闭模态窗口并立即跳转，避免界面卡死**
+                    closeGroupSettings();
                     
-                    // 立即刷新entries，确保删除的群聊从界面消失
-                    console.log('刷新entries以移除已删除的群聊');
-                    try {
-                        entries = await getLorebookEntries(worldbook);
-                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
-                    } catch (e) {
-                        console.warn('刷新entries失败，但群聊已删除:', e);
-                    }
-                    
-                    // 从数据结构中删除群聊
-                    delete QQ_msgjson.群聊[currentManagingGroup.name];
-                    const index = QQ_Groups.indexOf(currentManagingGroup.name);
-                    if (index > -1) {
-                        QQ_Groups.splice(index, 1);
-                    }
-                    console.log('群聊已从数据结构中删除，当前QQ_Groups:', QQ_Groups);
-                    
-                    // 从界面中移除
-                    removeGroupFromAllLists(currentManagingGroup.id);
-                    
-                    // 立即重新加载群聊以确保已删除的群聊从界面消失
-                    console.log('立即重新加载群聊数据以移除已删除的群聊');
-                    await loadGroupChatsFromWorldbook();
-                    
-                    // 如果当前在群聊界面，返回到来源页面
-                    if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
+                    // 如果当前在群聊界面，立即跳转到来源页面
+                    if (window.currentGroupChat && window.currentGroupChat.id === deletedGroupId) {
                         const sourcePage = window.groupChatSourcePage || 'contacts';
-                        console.log('删除群聊后返回到来源页面:', sourcePage);
+                        console.log('删除群聊前立即跳转到来源页面:', sourcePage);
+                        
+                        // 清除群聊状态
+                        window.currentGroupChat = null;
+                        window.groupChatSourcePage = null;
+                        
+                        // 立即跳转
                         if (typeof QQ_Nav === 'function') {
                             if (sourcePage === 'messages') {
                                 QQ_Nav('message');
@@ -14458,18 +14440,48 @@
                                 QQ_Nav('people');
                             }
                         }
-                        window.currentGroupChat = null;
-                        window.groupChatSourcePage = null;
                     }
                     
-                    // 更新消息列表
+                    // 等待跳转完成后再执行删除操作
                     setTimeout(async () => {
-                        await QQ_UpdateMessageList();
-                    }, 100);
-                    
-                    alert('群聊已删除');
-                    closeGroupSettings();
-                    currentManagingGroup = null;
+                        try {
+                            // 从世界书中删除
+                            await removeGroupFromWorldbook(deletedGroupName);
+                            console.log('群聊已从世界书中删除');
+                            
+                            // 立即刷新entries
+                            console.log('刷新entries以移除已删除的群聊');
+                            entries = await getLorebookEntries(worldbook);
+                            console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                            
+                            // 从数据结构中删除群聊
+                            delete QQ_msgjson.群聊[deletedGroupName];
+                            const index = QQ_Groups.findIndex(g => g.id === deletedGroupId || g.name === deletedGroupName);
+                            if (index > -1) {
+                                QQ_Groups.splice(index, 1);
+                            }
+                            console.log('群聊已从数据结构中删除，当前QQ_Groups:', QQ_Groups.length);
+                            
+                            // **强制删除界面元素**
+                            forceRemoveGroupFromInterface(deletedGroupId, deletedGroupName);
+                            
+                            // 立即重新加载群聊数据
+                            console.log('立即重新加载群聊数据');
+                            await loadGroupChatsFromWorldbook();
+                            
+                            // 更新消息列表
+                            await QQ_UpdateMessageList();
+                            
+                            console.log('群聊删除完成:', deletedGroupName);
+                            alert('群聊已删除');
+                            
+                        } catch (error) {
+                            console.error('删除群聊时出错:', error);
+                            alert('删除群聊时出现问题，请刷新页面');
+                        }
+                        
+                        currentManagingGroup = null;
+                    }, 200); // 等待页面跳转完成
                 }
             }
             
@@ -15806,6 +15818,62 @@
                         existingGroup.remove();
                     }
                 }
+            }
+            
+            /**
+             * 强制删除群聊界面元素（增强版删除，确保完全清除）
+             */
+            function forceRemoveGroupFromInterface(groupId, groupName) {
+                console.log('强制删除群聊界面元素:', groupId, groupName);
+                
+                // 方法1：通过data-group-id删除
+                const elementsById = document.querySelectorAll(`[data-group-id="${groupId}"]`);
+                elementsById.forEach((element, index) => {
+                    console.log(`通过ID删除元素 ${index + 1}:`, element);
+                    element.remove();
+                });
+                
+                // 方法2：通过群聊名称删除
+                const contactsContainer = document.getElementById('QQ_home_chars');
+                if (contactsContainer) {
+                    const groupElements = contactsContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                    groupElements.forEach(element => {
+                        const nameElement = element.querySelector('.QQ_home_name');
+                        if (nameElement && nameElement.textContent.trim() === groupName) {
+                            console.log('通过名称删除联系人列表中的群聊:', groupName);
+                            element.remove();
+                        }
+                    });
+                }
+                
+                // 方法3：通过群聊名称删除消息列表中的群聊
+                const messagesContainer = document.getElementById('QQ_message_list_chars');
+                if (messagesContainer) {
+                    const groupElements = messagesContainer.querySelectorAll('.QQ_home_char[data-group-type="true"]');
+                    groupElements.forEach(element => {
+                        const nameElement = element.querySelector('.QQ_home_name');
+                        if (nameElement && nameElement.textContent.trim() === groupName) {
+                            console.log('通过名称删除消息列表中的群聊:', groupName);
+                            element.remove();
+                        }
+                    });
+                }
+                
+                // 方法4：删除对应的聊天页面
+                const chatPages = document.querySelectorAll(`.QQ_chat_page[data-name='${groupName}']`);
+                chatPages.forEach((page, index) => {
+                    console.log(`删除聊天页面 ${index + 1}:`, groupName);
+                    page.remove();
+                });
+                
+                // 方法5：删除群聊专用页面
+                const groupChatPages = document.querySelectorAll(`.group-chat-page[data-group-id="${groupId}"]`);
+                groupChatPages.forEach((page, index) => {
+                    console.log(`删除群聊专用页面 ${index + 1}:`, groupId);
+                    page.remove();
+                });
+                
+                console.log('强制删除群聊界面元素完成');
             }
             
             /**
