@@ -4539,6 +4539,9 @@
             let newgen = true;
             let QQ_CharSettings = new MyINI();
             let Phone_Settings = new MyINI();
+            // *** 新增：动态内容持久化存储 ***
+            let QQ_MomentsData = [];  // 存储所有动态内容的数组
+            window.QQ_MomentsData = QQ_MomentsData;  // 设为全局变量方便调试
             let QQ_Music = {
                 audio: new Audio(),
                 lastelement: undefined, // 允许 undefined
@@ -4683,6 +4686,75 @@
                 setChatMessage({ message: msg }, CurrentMessageId, {
                     refresh: "none",
                 });
+            }
+
+            /**
+             * *** 新增：保存动态内容到worldbook ***
+             * @returns
+             */
+            async function QQ_Save_Moments() {
+                if (!worldbook || !entries || QQ_MomentsData.length === 0) {
+                    console.log('动态保存跳过：缺少worldbook或entries或无动态数据');
+                    return;
+                }
+                
+                try {
+                    // *** 新增：清理过期动态（保留最近50条） ***
+                    QQ_CleanOldMoments();
+                    
+                    // 查找或创建动态存储条目
+                    let momentEntry = entries.find(entry => entry.comment === "手机-动态内容存储");
+                    
+                    const momentsJson = JSON.stringify(QQ_MomentsData, null, 2);
+                    console.log('准备保存动态内容:', QQ_MomentsData.length, '条动态');
+                    
+                    if (momentEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: momentEntry.uid,
+                            content: momentsJson,
+                        }]);
+                        console.log('动态内容已更新到现有worldbook条目');
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: "手机-动态内容存储",
+                            key: ["此世界书永不触发_动态存储"],
+                            content: momentsJson,
+                            position: "at_depth_as_system",
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9999,
+                            enabled: true,
+                        });
+                        console.log('动态内容已保存到新worldbook条目');
+                        
+                        // 重新获取entries以包含新创建的条目
+                        entries = await getLorebookEntries(worldbook);
+                    }
+                } catch (error) {
+                    console.error('保存动态内容失败:', error);
+                }
+            }
+
+            /**
+             * *** 新增：清理过期动态内容 ***
+             */
+            function QQ_CleanOldMoments() {
+                const MAX_MOMENTS = 50; // 最多保留50条动态
+                
+                if (QQ_MomentsData.length > MAX_MOMENTS) {
+                    // 按时间戳排序，保留最新的动态
+                    QQ_MomentsData.sort((a, b) => {
+                        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+                    });
+                    
+                    const removedCount = QQ_MomentsData.length - MAX_MOMENTS;
+                    QQ_MomentsData.splice(MAX_MOMENTS);
+                    
+                    console.log(`清理了 ${removedCount} 条过期动态，当前保留 ${QQ_MomentsData.length} 条动态`);
+                }
             }
             function QQ_Json2Text(json) {
                 console.log(`传进来的json:${JSON.stringify(json)}`);
@@ -5532,6 +5604,11 @@
                 await MiPhone_Merge();
 
                 // 群聊数据已在LoadChars中加载，无需额外恢复
+                
+                // *** 新增：加载保存的动态内容 ***
+                console.log('开始加载动态内容...');
+                await QQ_Load_Moments();
+                
                 console.log('页面初始化完成');
                 
                 // 为聊天元素绑定点击事件
@@ -6714,10 +6791,93 @@
                 setChatMessage({ message: messages }, CurrentMessageId);
             }
             /**
+             * *** 新增：从worldbook加载动态内容 ***
+             */
+            async function QQ_Load_Moments() {
+                if (!worldbook || !entries) {
+                    console.log('动态加载跳过：缺少worldbook或entries');
+                    return;
+                }
+                
+                try {
+                    const momentEntry = entries.find(entry => entry.comment === "手机-动态内容存储");
+                    
+                    if (momentEntry && momentEntry.content) {
+                        // 解析保存的动态数据
+                        const savedMoments = JSON.parse(momentEntry.content);
+                        QQ_MomentsData = savedMoments;
+                        window.QQ_MomentsData = QQ_MomentsData; // 更新全局引用
+                        
+                        console.log('成功加载动态内容:', QQ_MomentsData.length, '条动态');
+                        
+                        // 重新渲染动态界面
+                        await QQ_Render_Moments();
+                    } else {
+                        console.log('未找到保存的动态内容');
+                    }
+                } catch (error) {
+                    console.error('加载动态内容失败:', error);
+                }
+            }
+
+            /**
+             * *** 新增：渲染动态内容到界面 ***
+             */
+            async function QQ_Render_Moments() {
+                const $spaceContents = $("#space_contents");
+                $spaceContents.empty(); // 清空现有内容
+                
+                if (QQ_MomentsData.length === 0) {
+                    console.log('没有动态内容需要渲染');
+                    return;
+                }
+                
+                // 按时间戳倒序排列（最新的在前）
+                const sortedMoments = [...QQ_MomentsData].sort((a, b) => {
+                    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+                });
+                
+                for (const momentData of sortedMoments) {
+                    try {
+                        const momentDiv = $("<div>", { class: "user_moment" });
+                        momentDiv.html(
+                            _.template(moment_page)({
+                                userName: momentData.userName,
+                                message: momentData.message,
+                                timestamp: momentData.timestampText,
+                                additionalInfo: momentData.additionalInfo,
+                                randomPhone: momentData.randomPhone,
+                                extraContent: momentData.extraContent || '',
+                                imgcontent: momentData.imgcontent || '',
+                            })
+                        );
+                        
+                        // 渲染评论
+                        const commentsList = momentDiv.find(".user_leave_message_list");
+                        for (const comment of momentData.comments || []) {
+                            const messageDiv = $("<div>", { class: "user_leave_message" });
+                            messageDiv.html(`<span><strong>${comment.name}</strong>：${comment.content}</span>`);
+                            commentsList.append(messageDiv);
+                        }
+                        
+                        $spaceContents.append(momentDiv);
+                    } catch (error) {
+                        console.error('渲染动态失败:', error, momentData);
+                    }
+                }
+                
+                console.log('动态内容渲染完成，共', sortedMoments.length, '条');
+            }
+
+            /**
              * 初始化动态空间内容
              */
             function space_init() {
                 $("#space_contents").prepend(space_contents);
+                // *** 修改：初始化时加载保存的动态内容 ***
+                setTimeout(() => {
+                    QQ_Load_Moments();
+                }, 500);
             }
             async function GetWorldBookName() {
                 let localbook;
@@ -8548,6 +8708,28 @@
                 );
                 list.append(messageDiv);
                 input.val("");
+                
+                // *** 新增：将用户回复添加到对应动态的评论中并保存 ***
+                const userComment = {
+                    name: UserName,
+                    content: value
+                };
+                
+                // 查找对应的动态并添加评论
+                const targetMoment = QQ_MomentsData.find(moment => 
+                    moment.userName === name && moment.message.includes(message.substring(0, 20))
+                );
+                
+                if (targetMoment) {
+                    targetMoment.comments.push(userComment);
+                    console.log('用户回复已添加到动态数据:', userComment);
+                    
+                    // 立即保存更新后的动态数据
+                    await QQ_Save_Moments();
+                } else {
+                    console.warn('未找到对应的动态数据，无法添加用户回复');
+                }
+                
                 const sendvalue = `回复${name}的动态"${message}"\n回复内容:${value}\n<Request:只是在动态里回复,而不是给他发私信>`;
                 console.log(sendvalue);
                 const result = await QQ_Gen(sendvalue);
@@ -8558,6 +8740,8 @@
                 let momentdiv;
                 let list;
                 let count = QQ_NewMsg["moment"] || 0;
+                let currentMomentData = null; // *** 新增：当前动态的数据对象 ***
+                
                 for (const line of lines) {
                     //console.log(`line:${line}`);
                     let match = line.match(
@@ -8565,15 +8749,15 @@
                     );
                     if (match) {
                         // 是新动态内容
-                        // const str = `${match[1]}--${match[2]}`;
-                        // if (str! in QQ_momentjson) {
-                        //   QQ_momentjson[str] = [];
-                        // }
                         console.log(`匹配到动态内容:${match[0]}`);
-                        if (momentdiv) {
+                        
+                        // *** 保存上一个动态数据 ***
+                        if (currentMomentData && momentdiv) {
+                            QQ_MomentsData.unshift(currentMomentData); // 新动态添加到数组开头
                             count += 1;
                             $("#space_contents").prepend(momentdiv);
                         }
+                        
                         let fakeimg = "";
                         let message = match[2];
                         const matches = message.matchAll(/\[img-(.+?)\]/g);
@@ -8583,6 +8767,25 @@
                                 fakeimg += `\n<div class="space_fakeimg">${m[1]}</div>`;
                             }
                         }
+                        
+                        const randomPhone = QQ_CharSettings.readValue(match[1], "手机型号") 
+                            ? QQ_CharSettings.readValue(match[1], "手机型号")
+                            : QQ_GetRandomPhone();
+                        
+                        // *** 新增：创建动态数据对象 ***
+                        currentMomentData = {
+                            id: Date.now() + Math.random(), // 生成唯一ID
+                            userName: match[1],
+                            message: message,
+                            timestampText: match[3],
+                            timestamp: new Date().toISOString(), // 保存完整时间戳用于排序
+                            additionalInfo: match[4],
+                            randomPhone: randomPhone,
+                            extraContent: match[5] || '',
+                            imgcontent: fakeimg,
+                            comments: [] // 初始化评论数组
+                        };
+                        
                         momentdiv = $("<div>", { class: "user_moment" });
                         momentdiv.html(
                             _.template(moment_page)({
@@ -8590,15 +8793,7 @@
                                 message: message,
                                 timestamp: match[3],
                                 additionalInfo: match[4],
-                                randomPhone: QQ_CharSettings.readValue(
-                                    match[1],
-                                    "手机型号",
-                                )
-                                    ? QQ_CharSettings.readValue(
-                                          match[1],
-                                          "手机型号",
-                                      )
-                                    : QQ_GetRandomPhone(),
+                                randomPhone: randomPhone,
                                 extraContent: match[5],
                                 imgcontent: fakeimg,
                             }),
@@ -8607,9 +8802,16 @@
                         continue;
                     }
                     match = line.match(/^\s*(.+?)(?::|：|--)(.+)$/m);
-                    if (match && momentdiv && list) {
+                    if (match && momentdiv && list && currentMomentData) {
                         // 是评论内容
                         //console.log(`评论人:${match[1]}  评论内容:${match[2]}`)
+                        
+                        // *** 新增：保存评论到数据对象 ***
+                        currentMomentData.comments.push({
+                            name: match[1],
+                            content: match[2]
+                        });
+                        
                         let messageDiv = $("<div>", {
                             class: "user_leave_message",
                         });
@@ -8619,12 +8821,23 @@
                         list.append(messageDiv);
                     }
                 }
-                if (momentdiv) {
+                
+                // *** 保存最后一个动态数据 ***
+                if (currentMomentData && momentdiv) {
+                    QQ_MomentsData.unshift(currentMomentData);
                     count += 1;
                     $("#space_contents").prepend(momentdiv);
                 }
+                
                 QQ_NewMsg["moment"] = count;
                 QQ_SetNewTips(count);
+                
+                // *** 新增：自动保存动态内容 ***
+                if (QQ_MomentsData.length > 0) {
+                    setTimeout(() => {
+                        QQ_Save_Moments();
+                    }, 1000); // 延迟保存，确保所有处理完成
+                }
             }
             function QQ_GetRandomHead() {
                 // return `http://sharkpan.xyz/f/${random_head_list[Math.floor(Math.random() * random_head_list.length)]
