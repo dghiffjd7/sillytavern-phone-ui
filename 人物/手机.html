@@ -4719,14 +4719,38 @@
                 }
                 
                 try {
-                    // *** 新增：在保存前清理过期消息数据 ***
+                    // *** 新增：在保存前清理过期消息数据和系统消息 ***
                     const cleanedMsgjson = JSON.parse(JSON.stringify(QQ_msgjson)); // 深拷贝避免修改原数据
+                    
+                    // 清理过期消息
                     QQ_CleanOldChatMessages(cleanedMsgjson);
+                    
+                    // *** 新增：排除系统消息 ***
+                    if (cleanedMsgjson.私聊) {
+                        for (const chatKey in cleanedMsgjson.私聊) {
+                            if (Array.isArray(cleanedMsgjson.私聊[chatKey])) {
+                                cleanedMsgjson.私聊[chatKey] = cleanedMsgjson.私聊[chatKey].filter(msg => 
+                                    !msg.startsWith('系统消息--')
+                                );
+                            }
+                        }
+                    }
+                    
+                    if (cleanedMsgjson.群聊) {
+                        for (const groupKey in cleanedMsgjson.群聊) {
+                            const group = cleanedMsgjson.群聊[groupKey];
+                            if (group && Array.isArray(group.msgs)) {
+                                group.msgs = group.msgs.filter(msg => 
+                                    !msg.startsWith('系统消息--')
+                                );
+                            }
+                        }
+                    }
                     
                     // 创建备份数据结构，包含时间戳和完整聊天数据
                     QQ_ChatBackup = {
                         lastUpdated: new Date().toISOString(),
-                        data: cleanedMsgjson,  // 使用清理后的数据
+                        data: cleanedMsgjson,  // 使用清理后的数据（已排除系统消息）
                         version: version || "unknown"
                     };
                     
@@ -4734,7 +4758,32 @@
                     let chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
                     
                     const backupJson = JSON.stringify(QQ_ChatBackup, null, 2);
-                    console.log('准备备份聊天消息:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                    
+                    // 统计要备份的消息数量（排除系统消息）
+                    let totalUserMessages = 0;
+                    let totalPrivateChats = 0;
+                    let totalGroupChats = 0;
+                    
+                    if (cleanedMsgjson.私聊) {
+                        for (const chatKey in cleanedMsgjson.私聊) {
+                            if (Array.isArray(cleanedMsgjson.私聊[chatKey]) && cleanedMsgjson.私聊[chatKey].length > 0) {
+                                totalPrivateChats++;
+                                totalUserMessages += cleanedMsgjson.私聊[chatKey].length;
+                            }
+                        }
+                    }
+                    
+                    if (cleanedMsgjson.群聊) {
+                        for (const groupKey in cleanedMsgjson.群聊) {
+                            const group = cleanedMsgjson.群聊[groupKey];
+                            if (group && Array.isArray(group.msgs) && group.msgs.length > 0) {
+                                totalGroupChats++;
+                                totalUserMessages += group.msgs.length;
+                            }
+                        }
+                    }
+                    
+                    console.log('准备备份聊天消息:', totalPrivateChats, '个私聊,', totalGroupChats, '个群聊, 共', totalUserMessages, '条用户对话消息（已排除系统消息）');
                     
                     if (chatBackupEntry) {
                         // 更新现有条目
@@ -4845,7 +4894,7 @@
                 try {
                     let totalCleaned = 0;
                     
-                    // 清理私聊消息
+                    // *** 修复：清理私聊消息（消息格式："发送者--内容--时间"） ***
                     if (msgjsonData.私聊) {
                         for (const chatKey in msgjsonData.私聊) {
                             const chat = msgjsonData.私聊[chatKey];
@@ -4853,10 +4902,22 @@
                                 const originalLength = chat.length;
                                 // 过滤掉过期消息（基于时间戳）
                                 msgjsonData.私聊[chatKey] = chat.filter(msg => {
-                                    if (msg && msg.timestamp) {
-                                        return new Date(msg.timestamp).getTime() >= cutoffTime;
+                                    if (typeof msg === 'string' && msg.includes('--')) {
+                                        const parts = msg.split('--');
+                                        if (parts.length >= 3) {
+                                            // 尝试解析时间戳
+                                            try {
+                                                const timeStr = parts[2];
+                                                const msgTime = new Date(timeStr).getTime();
+                                                if (!isNaN(msgTime)) {
+                                                    return msgTime >= cutoffTime;
+                                                }
+                                            } catch (e) {
+                                                // 时间解析失败，保留消息
+                                            }
+                                        }
                                     }
-                                    // 如果没有时间戳，采用更宽松的策略，保留最近的消息
+                                    // 如果没有时间戳或格式异常，保留消息（避免误删）
                                     return true;
                                 });
                                 
@@ -4874,29 +4935,41 @@
                         }
                     }
                     
-                    // 清理群聊消息
+                    // *** 修复：清理群聊消息（消息在group.msgs数组中） ***
                     if (msgjsonData.群聊) {
                         for (const groupKey in msgjsonData.群聊) {
                             const group = msgjsonData.群聊[groupKey];
-                            if (group && Array.isArray(group.聊天内容)) {
-                                const originalLength = group.聊天内容.length;
+                            if (group && Array.isArray(group.msgs)) {
+                                const originalLength = group.msgs.length;
                                 // 过滤掉过期消息
-                                group.聊天内容 = group.聊天内容.filter(msg => {
-                                    if (msg && msg.timestamp) {
-                                        return new Date(msg.timestamp).getTime() >= cutoffTime;
+                                group.msgs = group.msgs.filter(msg => {
+                                    if (typeof msg === 'string' && msg.includes('--')) {
+                                        const parts = msg.split('--');
+                                        if (parts.length >= 3) {
+                                            // 尝试解析时间戳
+                                            try {
+                                                const timeStr = parts[2];
+                                                const msgTime = new Date(timeStr).getTime();
+                                                if (!isNaN(msgTime)) {
+                                                    return msgTime >= cutoffTime;
+                                                }
+                                            } catch (e) {
+                                                // 时间解析失败，保留消息
+                                            }
+                                        }
                                     }
-                                    // 如果没有时间戳，保留最近的消息
+                                    // 如果没有时间戳或格式异常，保留消息（避免误删）
                                     return true;
                                 });
                                 
-                                const cleanedCount = originalLength - group.聊天内容.length;
+                                const cleanedCount = originalLength - group.msgs.length;
                                 if (cleanedCount > 0) {
                                     totalCleaned += cleanedCount;
                                     console.log(`群聊${groupKey}清理了${cleanedCount}条过期消息`);
                                 }
                                 
                                 // 如果群聊记录为空，删除整个群聊
-                                if (group.聊天内容.length === 0) {
+                                if (group.msgs.length === 0) {
                                     delete msgjsonData.群聊[groupKey];
                                 }
                             }
@@ -4979,6 +5052,78 @@
                     console.log('没有可用的备份数据或备份数据不够新');
                     return false;
                 }
+            };
+            
+            /**
+             * *** 新增：检查聊天备份状态（调试用） ***
+             */
+            window.QQ_Check_Chat_Backup = async function() {
+                console.log('=== 聊天备份状态检查 ===');
+                
+                // 检查当前QQ_msgjson状态
+                console.log('当前QQ_msgjson状态:');
+                console.log('私聊数量:', Object.keys(QQ_msgjson.私聊 || {}).length);
+                console.log('群聊数量:', Object.keys(QQ_msgjson.群聊 || {}).length);
+                
+                for (const chatKey in QQ_msgjson.私聊) {
+                    const msgs = QQ_msgjson.私聊[chatKey];
+                    console.log(`私聊 ${chatKey}: ${msgs.length} 条消息`);
+                    // 显示最后几条消息（过滤系统消息）
+                    const recentMsgs = msgs.filter(msg => !msg.startsWith('系统消息--')).slice(-3);
+                    recentMsgs.forEach((msg, index) => {
+                        console.log(`  ${index + 1}. ${msg}`);
+                    });
+                }
+                
+                for (const groupKey in QQ_msgjson.群聊) {
+                    const group = QQ_msgjson.群聊[groupKey];
+                    if (group && group.msgs) {
+                        console.log(`群聊 ${groupKey}: ${group.msgs.length} 条消息`);
+                        // 显示最后几条消息（过滤系统消息）
+                        const recentMsgs = group.msgs.filter(msg => !msg.startsWith('系统消息--')).slice(-3);
+                        recentMsgs.forEach((msg, index) => {
+                            console.log(`  ${index + 1}. ${msg}`);
+                        });
+                    }
+                }
+                
+                // 检查worldbook备份状态
+                if (!worldbook || !entries) {
+                    console.log('worldbook或entries未初始化');
+                    return;
+                }
+                
+                const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                if (chatBackupEntry) {
+                    console.log('找到聊天备份条目，解析内容...');
+                    try {
+                        const backupData = JSON.parse(chatBackupEntry.content);
+                        console.log('备份时间:', backupData.lastUpdated);
+                        console.log('备份私聊数量:', Object.keys(backupData.data.私聊 || {}).length);
+                        console.log('备份群聊数量:', Object.keys(backupData.data.群聊 || {}).length);
+                        
+                        // 检查备份内容（排除系统消息）
+                        for (const chatKey in backupData.data.私聊) {
+                            const msgs = backupData.data.私聊[chatKey];
+                            const nonSystemMsgs = msgs.filter(msg => !msg.startsWith('系统消息--'));
+                            console.log(`备份私聊 ${chatKey}: ${nonSystemMsgs.length} 条非系统消息 (总共${msgs.length}条)`);
+                        }
+                        
+                        for (const groupKey in backupData.data.群聊) {
+                            const group = backupData.data.群聊[groupKey];
+                            if (group && group.msgs) {
+                                const nonSystemMsgs = group.msgs.filter(msg => !msg.startsWith('系统消息--'));
+                                console.log(`备份群聊 ${groupKey}: ${nonSystemMsgs.length} 条非系统消息 (总共${group.msgs.length}条)`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('解析备份数据失败:', error);
+                    }
+                } else {
+                    console.log('未找到聊天备份条目');
+                }
+                
+                console.log('=== 检查完成 ===');
             };
             
             /**
