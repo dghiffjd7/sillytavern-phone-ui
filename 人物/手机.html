@@ -14329,28 +14329,11 @@
                         }
                     }
                     
-                    // *** 立即更新聊天页面背景壁纸 ***
-                    console.log('=== 更新聊天页面背景壁纸 ===');
-                    try {
-                        updateChatPageBackground(currentManagingGroup);
-                        console.log('聊天页面背景壁纸更新完成');
-                    } catch (error) {
-                        console.error('更新聊天页面背景时出错:', error);
-                        
-                        // 如果专用函数失败，使用备用方法
-                        console.log('使用备用方法恢复背景壁纸...');
-                        const chatPages = document.querySelectorAll('.QQ_chat_page');
-                        chatPages.forEach(page => {
-                            // 恢复默认的聊天背景
-                            if (!page.style.backgroundImage || page.style.backgroundImage === 'none') {
-                                page.style.backgroundImage = 'url("https://files.catbox.moe/skngqq.jpg")';
-                                page.style.backgroundSize = 'cover';
-                                page.style.backgroundPosition = 'center';
-                                page.style.backgroundRepeat = 'no-repeat';
-                                console.log('已恢复聊天页面的默认背景');
-                            }
-                        });
-                    }
+                    // *** 强制恢复聊天页面背景壁纸（修复版）***
+                    console.log('=== 强制恢复聊天页面背景壁纸 ===');
+                    setTimeout(() => {
+                        forceRestoreChatBackground(currentManagingGroup);
+                    }, 100);
                     
                     // *** 延迟再次确保更新生效 ***
                     setTimeout(() => {
@@ -14392,49 +14375,10 @@
                         
                         console.log(`共更新了 ${updatedCount} 个标题元素`);
                         
-                        // *** 修复：更精确地更新联系人列表中的群聊显示 ***
-                        console.log('=== 精确更新联系人列表中的群聊显示 ===');
-                        const contactElements = document.querySelectorAll('.QQ_home_usermsg');
-                        let contactUpdatedCount = 0;
-                        
-                        contactElements.forEach((contactEl, index) => {
-                            // 更精确的匹配逻辑：只更新确实需要更新的群聊项
-                            const currentDataName = contactEl.getAttribute('data-name');
-                            const currentGroupId = contactEl.getAttribute('data-group-id');
-                            
-                            // 只有当data-name完全匹配旧名称，或者group-id匹配时才更新
-                            if ((currentDataName === oldName) || (currentGroupId === stableGroupId)) {
-                                const nameElement = contactEl.querySelector('.QQ_home_name');
-                                if (nameElement) {
-                                    const currentName = nameElement.textContent.trim();
-                                    console.log(`精确匹配的联系人项${index + 1}:`, {
-                                        currentName,
-                                        currentDataName,
-                                        currentGroupId,
-                                        targetName: currentManagingGroup.name,
-                                        targetId: stableGroupId
-                                    });
-                                    
-                                    // 只更新名称，保持其他格式不变
-                                    if (currentName !== currentManagingGroup.name) {
-                                        nameElement.textContent = currentManagingGroup.name;
-                                        console.log(`已更新联系人名称: "${currentName}" -> "${currentManagingGroup.name}"`);
-                                    }
-                                    
-                                    // 确保数据属性正确
-                                    contactEl.setAttribute('data-name', currentManagingGroup.name);
-                                    contactEl.setAttribute('data-group-id', stableGroupId);
-                                    
-                                    contactUpdatedCount++;
-                                    
-                                    // *** 重要：保持联系人项的原有样式和布局 ***
-                                    // 不修改任何CSS类或样式，只更新数据
-                                    console.log('联系人项格式已保持，仅更新了数据属性');
-                                }
-                            }
-                        });
-                        
-                        console.log(`共精确更新了 ${contactUpdatedCount} 个联系人项，格式完整保持`);
+                        // *** 保护性联系人列表更新（防止格式破坏）***
+                        setTimeout(async () => {
+                            await protectedContactListUpdate(currentManagingGroup, oldName);
+                        }, 200);
                         console.log('=== 所有界面元素强制更新完成 ===');
                         
                     }, 100);
@@ -15169,6 +15113,234 @@
                     console.log('群聊消息信息更新完成');
                 } catch (error) {
                     console.error('更新群聊消息信息时出错:', error);
+                }
+            }
+            
+            /**
+             * 强制恢复聊天页面背景（修复版）
+             */
+            function forceRestoreChatBackground(groupData) {
+                console.log('*** 强制恢复聊天页面背景 ***');
+                
+                try {
+                    // 查找当前可见的聊天页面
+                    let chatPage = null;
+                    
+                    // 方法1：查找显示状态为block的聊天页面
+                    const visiblePages = document.querySelectorAll('.QQ_chat_page[style*="display:block"], .QQ_chat_page[style*="display: block"]');
+                    if (visiblePages.length > 0) {
+                        chatPage = visiblePages[0];
+                        console.log('找到可见聊天页面(方法1):', chatPage);
+                    }
+                    
+                    // 方法2：查找当前群聊对应的聊天页面
+                    if (!chatPage && groupData) {
+                        chatPage = document.querySelector(`.QQ_chat_page[data-name="${groupData.name}"]`);
+                        if (chatPage) {
+                            console.log('找到群聊聊天页面(方法2):', chatPage);
+                        }
+                    }
+                    
+                    // 方法3：查找没有display:none的聊天页面
+                    if (!chatPage) {
+                        const allChatPages = document.querySelectorAll('.QQ_chat_page');
+                        for (const page of allChatPages) {
+                            const style = window.getComputedStyle(page);
+                            if (style.display !== 'none' && page.offsetParent !== null) {
+                                chatPage = page;
+                                console.log('找到可见聊天页面(方法3):', chatPage);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!chatPage) {
+                        console.warn('未找到可见的聊天页面，背景恢复失败');
+                        return;
+                    }
+                    
+                    // 强制恢复背景的多种策略
+                    let backgroundRestored = false;
+                    
+                    // 策略1：使用群聊成员的背景设置
+                    if (groupData && groupData.members && groupData.members.length > 0 && window.wallpaperurl) {
+                        const firstMember = groupData.members[0];
+                        const memberBg = window.wallpaperurl[firstMember];
+                        if (memberBg) {
+                            console.log('策略1：使用成员背景:', firstMember, memberBg);
+                            applyChatBackground(chatPage, memberBg);
+                            backgroundRestored = true;
+                        }
+                    }
+                    
+                    // 策略2：保持当前背景（如果存在且有效）
+                    if (!backgroundRestored) {
+                        const currentBg = window.getComputedStyle(chatPage).backgroundImage;
+                        if (currentBg && currentBg !== 'none' && !currentBg.includes('data:')) {
+                            console.log('策略2：保持当前背景:', currentBg);
+                            backgroundRestored = true;
+                        }
+                    }
+                    
+                    // 策略3：使用默认群聊背景
+                    if (!backgroundRestored) {
+                        const defaultBg = 'https://files.catbox.moe/9fdwty.jpg';
+                        console.log('策略3：使用默认群聊背景');
+                        applyChatBackground(chatPage, defaultBg);
+                        backgroundRestored = true;
+                    }
+                    
+                    // 延迟验证背景是否正确应用
+                    setTimeout(() => {
+                        const finalBg = window.getComputedStyle(chatPage).backgroundImage;
+                        console.log('背景恢复验证 - 最终背景:', finalBg);
+                        if (finalBg === 'none') {
+                            console.warn('背景恢复失败，再次尝试');
+                            const fallbackBg = 'https://files.catbox.moe/9fdwty.jpg';
+                            applyChatBackground(chatPage, fallbackBg);
+                        } else {
+                            console.log('*** 聊天背景恢复成功 ***');
+                        }
+                    }, 300);
+                    
+                } catch (error) {
+                    console.error('强制恢复聊天背景时出错:', error);
+                }
+            }
+            
+            /**
+             * 应用聊天背景的通用函数
+             */
+            function applyChatBackground(chatPage, backgroundUrl) {
+                if (!chatPage || !backgroundUrl) return;
+                
+                console.log('应用聊天背景:', backgroundUrl);
+                
+                // 强制清除并重新设置背景
+                chatPage.style.backgroundImage = '';
+                chatPage.style.background = '';
+                
+                // 设置新背景
+                chatPage.style.backgroundImage = `url('${backgroundUrl}')`;
+                chatPage.style.backgroundSize = 'cover';
+                chatPage.style.backgroundPosition = 'center';
+                chatPage.style.backgroundRepeat = 'no-repeat';
+                chatPage.style.backgroundAttachment = 'fixed';
+                
+                // 确保容器样式
+                chatPage.style.minHeight = '100vh';
+                chatPage.style.position = 'relative';
+                
+                console.log('背景应用完成');
+            }
+            
+            /**
+             * 保护性联系人列表更新（防止格式破坏）
+             */
+            async function protectedContactListUpdate(groupData, oldName) {
+                console.log('*** 开始保护性联系人列表更新 ***');
+                console.log('群聊数据:', groupData);
+                console.log('旧名称:', oldName);
+                
+                try {
+                    const contactsContainer = document.getElementById('QQ_home_chars');
+                    if (!contactsContainer) {
+                        console.warn('联系人容器未找到');
+                        return;
+                    }
+                    
+                    // *** 关键策略：极度保守的更新方式 ***
+                    
+                    // 1. 精确查找目标群聊元素（使用多种方法确保精确匹配）
+                    let targetElements = [];
+                    
+                    // 方法1：使用data-group-id查找
+                    if (groupData.id) {
+                        const byGroupId = contactsContainer.querySelectorAll(`[data-group-id="${groupData.id}"]`);
+                        targetElements.push(...byGroupId);
+                        console.log(`方法1(data-group-id)找到 ${byGroupId.length} 个元素`);
+                    }
+                    
+                    // 方法2：使用旧名称的data-name查找
+                    if (oldName && targetElements.length === 0) {
+                        const byOldName = contactsContainer.querySelectorAll(`[data-name="${oldName}"]`);
+                        targetElements.push(...byOldName);
+                        console.log(`方法2(data-name旧名称)找到 ${byOldName.length} 个元素`);
+                    }
+                    
+                    // 方法3：使用新名称的data-name查找
+                    if (groupData.name && targetElements.length === 0) {
+                        const byNewName = contactsContainer.querySelectorAll(`[data-name="${groupData.name}"]`);
+                        targetElements.push(...byNewName);
+                        console.log(`方法3(data-name新名称)找到 ${byNewName.length} 个元素`);
+                    }
+                    
+                    // 去重
+                    targetElements = [...new Set(targetElements)];
+                    console.log(`总共找到 ${targetElements.length} 个目标元素需要更新`);
+                    
+                    if (targetElements.length === 0) {
+                        console.warn('未找到需要更新的联系人元素，跳过更新');
+                        return;
+                    }
+                    
+                    // 2. 对每个目标元素进行安全更新
+                    let successCount = 0;
+                    let errorCount = 0;
+                    
+                    targetElements.forEach((element, index) => {
+                        try {
+                            console.log(`更新目标元素 ${index + 1}/${targetElements.length}`);
+                            
+                            // *** 极度安全的更新策略：只更新确保存在的元素 ***
+                            
+                            // 验证这是一个有效的联系人元素
+                            if (!element.classList.contains('QQ_home_usermsg')) {
+                                console.warn(`元素${index + 1}不是有效的联系人元素，跳过`);
+                                return;
+                            }
+                            
+                            // 只更新数据属性（最安全）
+                            element.setAttribute('data-group-id', groupData.id);
+                            element.setAttribute('data-name', groupData.name);
+                            
+                            // 只有在找到名称元素时才更新文本
+                            const nameElement = element.querySelector('.QQ_home_name');
+                            if (nameElement && nameElement.textContent.trim() !== groupData.name) {
+                                const oldText = nameElement.textContent.trim();
+                                nameElement.textContent = groupData.name;
+                                console.log(`元素${index + 1}名称更新: "${oldText}" -> "${groupData.name}"`);
+                            }
+                            
+                            // 不更新任何其他DOM结构，保护现有格式
+                            
+                            successCount++;
+                            console.log(`元素${index + 1}更新成功`);
+                            
+                        } catch (elementError) {
+                            console.error(`更新元素${index + 1}时出错:`, elementError);
+                            errorCount++;
+                        }
+                    });
+                    
+                    console.log(`*** 保护性联系人更新完成: 成功${successCount}个, 错误${errorCount}个 ***`);
+                    
+                    // 3. 验证更新结果
+                    setTimeout(() => {
+                        console.log('=== 联系人更新结果验证 ===');
+                        const updatedElements = contactsContainer.querySelectorAll(`[data-name="${groupData.name}"]`);
+                        console.log(`验证：现在有 ${updatedElements.length} 个元素使用新名称`);
+                        
+                        updatedElements.forEach((el, i) => {
+                            const nameEl = el.querySelector('.QQ_home_name');
+                            if (nameEl) {
+                                console.log(`验证元素${i + 1}: "${nameEl.textContent.trim()}"`);
+                            }
+                        });
+                    }, 500);
+                    
+                } catch (error) {
+                    console.error('保护性联系人列表更新时出错:', error);
                 }
             }
             
