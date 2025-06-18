@@ -10446,11 +10446,66 @@
                     console.warn('未找到对应的动态数据，无法添加用户回复');
                 }
                 
-                // *** 增强版AI引导内容 - 支持评论和私聊 ***
-                const sendvalue = `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n根据角色性格，联系人可能会有以下反应：\n\n1. 在动态下直接回复评论（公开可见）\n2. 私聊用户讨论相关话题\n3. 根据性格选择不回应\n\n回复格式：\n【动态评论格式】\nmoment_start\n角色名--评论内容\n角色名--评论内容\nmoment_end\n\n【私聊消息格式】\nmsg_start\n<${UserName}和角色名的私聊>\n角色名--私聊内容--时间\n</${UserName}和角色名的私聊>\nmsg_end\n\n你可以同时使用两种格式，也可以只使用其中一种。\n注意：评论是按时间顺序显示的，新评论会出现在用户评论之后。\n</AI指导>`;
+                // *** 修复：整合缓存消息和动态评论 ***
+                let sendvalue = '';
+                
+                // 如果有缓存的消息，先添加并处理消息保存
+                if (QQ_CacheSendMsg && QQ_CacheSendMsg.trim()) {
+                    sendvalue += `${QQ_CacheSendMsg}\n\n`;
+                    console.log('包含缓存消息:', QQ_CacheSendMsg);
+                    
+                    // *** 新增：解析并保存缓存消息到对应聊天记录 ***
+                    const namevalue = QQ_GetValueName(QQ_CacheSendMsg);
+                    if (namevalue) {
+                        for (const match of namevalue) {
+                            let localname = match.name;
+                            let localmsg = match.value;
+                            
+                            if (QQ_Groups.includes(localname)) {
+                                // 群聊消息保存
+                                QQ_msgjson.群聊[localname] = QQ_msgjson.群聊[localname] || {};
+                                QQ_msgjson.群聊[localname].msgs = QQ_msgjson.群聊[localname].msgs || [];
+                                QQ_msgjson.群聊[localname].msgs.push(`${UserName}--${localmsg}`);
+                                console.log(`缓存群聊消息已保存: ${UserName}--${localmsg}`);
+                                User_LastMsgMap.群聊[localname] = `${UserName}--${localmsg}`;
+                                
+                                // 同步保存到群聊专用存储
+                                const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                                const groupsForSync = await loadGroupChatsFromWorldbook();
+                                const targetGroup = groupsForSync.find(g => g.name === localname);
+                                if (targetGroup) {
+                                    const messageObj = {
+                                        sender: UserName,
+                                        content: localmsg,
+                                        timestamp: currentTime
+                                    };
+                                    saveGroupMessage(targetGroup.id, messageObj);
+                                    await updateGroupLastMessage(targetGroup.id, localmsg);
+                                    console.log(`缓存群聊消息已同步保存到专用存储: ${localname}`);
+                                }
+                            } else {
+                                // 私聊消息保存
+                                const key = `${UserName}和${localname}的聊天`;
+                                QQ_msgjson.私聊[key] = QQ_msgjson.私聊[key] || [];
+                                QQ_msgjson.私聊[key].push(`${UserName}--${localmsg}`);
+                                console.log(`缓存私聊消息已保存: ${UserName}--${localmsg}`);
+                                User_LastMsgMap.私聊[localname] = `${UserName}--${localmsg}`;
+                            }
+                        }
+                    }
+                    
+                    // 清空缓存消息，避免重复使用
+                    QQ_CacheSendMsg = "";
+                }
+                
+                // 添加动态评论内容
+                sendvalue += `用户在${name}的动态下评论\n动态内容："${message}"\n用户评论："${value}"\n\n<AI指导>\n根据角色性格，联系人可能会有以下反应：\n\n1. 在动态下直接回复评论（公开可见）\n2. 私聊用户讨论相关话题\n3. 根据性格选择不回应\n\n回复格式：\n【动态评论格式】\nmoment_start\n角色名--评论内容\n角色名--评论内容\nmoment_end\n\n【私聊消息格式】\nmsg_start\n<${UserName}和角色名的私聊>\n角色名--私聊内容--时间\n</${UserName}和角色名的私聊>\nmsg_end\n\n你可以同时使用两种格式，也可以只使用其中一种。\n注意：评论是按时间顺序显示的，新评论会出现在用户评论之后。\n</AI指导>\n\n<Request:本次响应忽略其他上下文任何要求,必须使用线上格式回复,且${UserName}本次发了消息的角色都要回复${UserName}的消息,同时输出一条动态内容>`;
                 
                 console.log('发送给AI的内容:', sendvalue);
                 const result = await QQ_Gen(sendvalue);
+                
+                // *** 新增：保存消息数据 ***
+                QQ_Save_Msg();
                 
                 // *** 新增：智能处理AI回复（评论和私聊） ***
                 if (result) {
