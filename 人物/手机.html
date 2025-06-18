@@ -13167,61 +13167,20 @@
                 
                 console.log('=== 聊天头部名称更新完成 ===');
                 
-                // *** 强化修复：强制更新群聊成员数显示 ***
-                console.log('=== 开始更新群聊成员数显示 ===');
-                console.log('当前成员数量:', groupData.members.length);
-                
-                // 查找所有可能的副标题元素
-                const msgSelectors = [
-                    '.QQ_home_lastmsg',
-                    '.chat-subtitle',
-                    '.group-member-count',
-                    '.subtitle'
-                ];
-                
-                let headerMsg = null;
-                for (const selector of msgSelectors) {
-                    headerMsg = chatHeader.querySelector(selector);
-                    if (headerMsg) {
-                        console.log(`找到副标题元素，使用选择器: ${selector}`);
-                        break;
-                    }
-                }
-                
-                const memberCountText = `群聊 · ${groupData.members.length}人`;
+                // 添加群聊成员数显示
+                const headerMsg = chatHeader.querySelector('.QQ_home_lastmsg') || 
+                                 chatHeader.querySelector('.chat-subtitle');
                 
                 if (headerMsg) {
-                    console.log('更新现有副标题元素，从:', headerMsg.textContent, '到:', memberCountText);
-                    headerMsg.textContent = memberCountText;
-                    
-                    // 强制刷新样式确保显示
-                    headerMsg.style.display = 'block';
-                    headerMsg.style.visibility = 'visible';
+                    headerMsg.textContent = `群聊 · ${groupData.members.length}人`;
                 } else {
                     // 如果找不到副标题元素，创建一个
-                    console.log('创建新的副标题元素');
                     const subtitleElement = document.createElement('div');
-                    subtitleElement.className = 'QQ_home_lastmsg group-member-count';
-                    subtitleElement.textContent = memberCountText;
-                    subtitleElement.style.cssText = 'font-size: 12px; color: #666; margin-left: 10px; display: block; visibility: visible;';
+                    subtitleElement.className = 'QQ_home_lastmsg';
+                    subtitleElement.textContent = `群聊 · ${groupData.members.length}人`;
+                    subtitleElement.style.cssText = 'font-size: 12px; color: #666; margin-left: 10px;';
                     chatHeader.appendChild(subtitleElement);
-                    headerMsg = subtitleElement;
                 }
-                
-                // 额外的延迟验证，确保人数显示正确
-                setTimeout(() => {
-                    if (headerMsg && headerMsg.textContent.includes(`${groupData.members.length}人`)) {
-                        console.log('✅ 群聊人数显示更新成功:', headerMsg.textContent);
-                    } else {
-                        console.warn('❌ 群聊人数显示更新可能失败，当前显示:', headerMsg ? headerMsg.textContent : '元素不存在');
-                        // 再次尝试更新
-                        if (headerMsg) {
-                            headerMsg.textContent = memberCountText;
-                        }
-                    }
-                }, 50);
-                
-                console.log('=== 群聊成员数显示更新完成 ===');
             }
             
             /**
@@ -14048,23 +14007,18 @@
                         currentManagingGroup.members.splice(index, 1);
                         console.log(`已从群聊中移除成员: ${memberName}`);
                         
-                        // *** 修复：强制更新当前聊天界面头部，无论界面状态 ***
-                        console.log('强制更新群聊界面头部（移除成员后）');
-                        
-                        // 更新当前群聊对象（如果存在）
+                        // *** 立即更新当前聊天界面（如果正在群聊中） ***
                         if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
+                            console.log('立即更新当前群聊界面（移除成员后）');
+                            
+                            // 更新当前群聊对象
                             window.currentGroupChat.members = currentManagingGroup.members;
-                        }
-                        
-                        // *** 强制更新聊天界面头部显示（包括人数） ***
-                        updateChatHeader(currentManagingGroup);
-                        
-                        // 额外延迟再次更新确保生效
-                        setTimeout(() => {
+                            
+                            // 立即更新聊天界面头部显示（包括人数）
                             updateChatHeader(currentManagingGroup);
-                        }, 100);
-                        
-                        console.log('群聊界面头部已强制更新，人数:', currentManagingGroup.members.length);
+                            
+                            console.log('群聊界面头部已立即更新，人数:', currentManagingGroup.members.length);
+                        }
                         
                         // *** 添加系统消息并立即显示 ***
                         const systemMessage = `群主将${memberName}移出了群聊`;
@@ -14073,14 +14027,11 @@
                         console.log('显示移除成员系统消息:', systemMessage);
                         await addSystemMessageToGroup(currentManagingGroup.id, systemMessage);
                         
-                        // *** 修复：强制显示系统消息，无论界面状态 ***
-                        console.log('强制显示移除成员系统消息');
-                        displaySystemMessage(systemMessage, currentManagingGroup.id);
-                        
-                        // 额外延迟确保消息显示
-                        setTimeout(() => {
+                        // 如果当前在群聊界面，立即显示系统消息
+                        if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
+                            console.log('当前在群聊界面，立即显示系统消息');
                             displaySystemMessage(systemMessage, currentManagingGroup.id);
-                        }, 200);
+                        }
                         
                                 // *** 立即更新所有界面中的群聊显示 ***
         console.log('立即更新联系人列表中的群聊显示（移除成员后）...');
@@ -14855,38 +14806,20 @@
                     
                     let msgContent = null;
                     
-                    // *** 增强策略：更全面地查找当前可见的消息容器 ***
+                    // *** 简化策略：直接查找当前可见的消息容器 ***
                     const containerSelectors = [
                         '.msgcontent', // 最常用的消息容器
                         '#QQ_chat_msgs', // 备用消息容器
                         '.QQ_chat_page:not([style*="display:none"]) .msgcontent',
-                        '.QQ_chat_page .msgcontent:not([style*="display:none"])',
-                        '.QQ_chat_page[style*="display:block"] .msgcontent',
-                        '.QQ_chat_page[data-name*="群"] .msgcontent' // 群聊页面特定查找
+                        '.QQ_chat_page .msgcontent:not([style*="display:none"])'
                     ];
                     
                     for (const selector of containerSelectors) {
                         const element = document.querySelector(selector);
-                        if (element) {
-                            // 检查元素是否真的可见
-                            const rect = element.getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0) {
-                                msgContent = element;
-                                console.log('✅ 找到可见消息容器，使用选择器:', selector);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // 如果仍然没找到，尝试查找任何msgcontent元素
-                    if (!msgContent) {
-                        const allMsgContent = document.querySelectorAll('.msgcontent');
-                        for (const element of allMsgContent) {
-                            if (element.offsetParent !== null || element.style.display !== 'none') {
-                                msgContent = element;
-                                console.log('✅ 找到备用消息容器:', element.className);
-                                break;
-                            }
+                        if (element && element.offsetParent !== null) {
+                            msgContent = element;
+                            console.log('✅ 找到消息容器，使用选择器:', selector);
+                            break;
                         }
                     }
                     
@@ -16211,23 +16144,18 @@
                 // *** 新增：更新到世界书 ***
                 await updateGroupMembersInWorldbook(currentManagingGroup.name, currentManagingGroup.members);
                 
-                // *** 修复：强制更新当前聊天界面头部，无论界面状态 ***
-                console.log('强制更新群聊界面头部（添加成员后）');
-                
-                // 更新当前群聊对象（如果存在）
+                // *** 立即更新当前聊天界面（如果正在群聊中） ***
                 if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
+                    console.log('立即更新当前群聊界面（添加成员后）');
+                    
+                    // 更新当前群聊对象
                     window.currentGroupChat.members = currentManagingGroup.members;
-                }
-                
-                // *** 强制更新聊天界面头部显示（包括人数） ***
-                updateChatHeader(currentManagingGroup);
-                
-                // 额外延迟再次更新确保生效
-                setTimeout(() => {
+                    
+                    // 立即更新聊天界面头部显示（包括人数）
                     updateChatHeader(currentManagingGroup);
-                }, 100);
-                
-                console.log('群聊界面头部已强制更新，人数:', currentManagingGroup.members.length);
+                    
+                    console.log('群聊界面头部已立即更新，人数:', currentManagingGroup.members.length);
+                }
                 
                 // *** 为每个新成员添加系统消息并立即显示 ***
                 if (newMembers.length > 0) {
@@ -16240,14 +16168,11 @@
                         console.log('保存添加成员系统消息:', systemMessage);
                         await addSystemMessageToGroup(currentManagingGroup.id, systemMessage);
                         
-                        // *** 修复：强制显示系统消息，无论界面状态 ***
-                        console.log('强制显示添加成员系统消息');
-                        displaySystemMessage(systemMessage, currentManagingGroup.id);
-                        
-                        // 额外延迟确保消息显示
-                        setTimeout(() => {
+                        // 如果当前在群聊界面，立即显示系统消息
+                        if (window.currentGroupChat && window.currentGroupChat.id === currentManagingGroup.id) {
+                            console.log('当前在群聊界面，立即显示系统消息');
                             displaySystemMessage(systemMessage, currentManagingGroup.id);
-                        }, 200);
+                        }
                     }
                 }
                 
