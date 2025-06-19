@@ -6896,9 +6896,9 @@
 
             // ===== 互动空间管理系统 =====
             
-            // 全局变量管理互动空间
-            let QQ_InteractiveSpaces = {}; // 存储所有公共互动空间数据
-            let QQ_CharacterSpaces = {}; // 存储角色专属互动空间数据
+            // *** 优化：全局变量仅作为世界书数据的临时缓存 ***
+            let QQ_InteractiveSpaces = {}; // 公共互动空间临时缓存（数据存储在世界书中）
+            let QQ_CharacterSpaces = {}; // 角色专属互动空间临时缓存（数据存储在世界书中）
             
             /**
              * 确保角色互动空间的独立性
@@ -7459,11 +7459,17 @@
                 if (isMultiCharacter) {
                     // 多角色互动，显示在公共互动空间
                     console.log("检测到多角色互动，显示在公共互动空间");
-                    QQ_ShowPublicInteractiveSpace(content, targetCharacter);
+                    // *** 关键优化：异步调用确保从世界书加载 ***
+                    (async () => {
+                        await QQ_ShowPublicInteractiveSpace(content, targetCharacter);
+                    })();
                 } else {
                     // 单角色互动，显示在角色专属空间
                     console.log(`检测到单角色互动，显示在${targetCharacter}的专属空间`);
-                    QQ_ShowCharacterInteractiveSpace(content, targetCharacter);
+                    // *** 关键优化：异步调用确保从世界书加载 ***
+                    (async () => {
+                        await QQ_ShowCharacterInteractiveSpace(content, targetCharacter);
+                    })();
                 }
             }
             
@@ -7832,9 +7838,14 @@
                 
                 QQ_ActiveSpaceId = spaceId;
                 
-                // 保存到世界书 - 使用新的保存机制
+                // *** 立即保存到世界书 - 确保数据持久化 ***
+                console.log('🏠 保存公共互动空间到世界书:', spaceId);
                 QQ_SaveInteractiveContentToWorldBook(content, null);
-                QQ_SaveInteractiveSpaces();
+                QQ_SaveInteractiveSpaces().then(() => {
+                    console.log('✅ 公共互动空间数据已保存到世界书');
+                }).catch(error => {
+                    console.error('❌ 公共互动空间保存失败:', error);
+                });
                 
                 QQ_DisplayInteractiveSpace(spaceId, '公共互动空间');
             }
@@ -7844,8 +7855,12 @@
              * @param {string} content - 互动内容
              * @param {string} characterName - 角色名称
              */
-            function QQ_ShowCharacterInteractiveSpace(content, characterName) {
+            async function QQ_ShowCharacterInteractiveSpace(content, characterName) {
                 const charName = characterName || charcardname || "角色";
+                
+                // *** 关键优化：先从世界书重新加载角色空间数据 ***
+                console.log(`🔄 重新加载角色 ${charName} 的互动空间数据`);
+                await QQ_ForceReloadInteractiveSpaces();
                 const spaceId = QQ_GenerateSpaceId();
                 const spaceName = `${charName}·${QQ_GetSceneFromContent(content)}`;
                 const charAvatar = charAvatarPath || "default_avatar.png";
@@ -7867,12 +7882,15 @@
                 
                 QQ_ActiveSpaceId = spaceId;
                 
-                // 保存到世界书 - 使用新的保存机制
+                // *** 立即保存到世界书 - 确保数据持久化 ***
+                console.log(`👤 保存角色互动空间到世界书: ${charName} - ${spaceId}`);
                 QQ_SaveInteractiveContentToWorldBook(content, charName);
                 
-                // 异步保存到世界书（非阻塞）
-                QQ_SaveCharacterSpaces().catch(error => {
-                    console.error('保存角色互动空间失败:', error);
+                // 异步保存角色空间数据（非阻塞）
+                QQ_SaveCharacterSpaces().then(() => {
+                    console.log(`✅ 角色互动空间数据已保存到世界书: ${charName}`);
+                }).catch(error => {
+                    console.error(`❌ 角色互动空间保存失败: ${charName}`, error);
                 });
                 
                 QQ_DisplayCharacterSpace(spaceId, charName);
@@ -26347,10 +26365,39 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             }
             
             /**
+             * *** 强制从世界书重新加载所有互动空间数据 ***
+             */
+            async function QQ_ForceReloadInteractiveSpaces() {
+                console.log('🔄 强制从世界书重新加载互动空间数据...');
+                
+                try {
+                    // 清空内存缓存
+                    QQ_InteractiveSpaces = {};
+                    QQ_CharacterSpaces = {};
+                    
+                    // 从世界书重新加载
+                    await QQ_LoadInteractiveSpaces();
+                    await QQ_LoadCharacterSpaces();
+                    
+                    console.log('✅ 互动空间数据重新加载完成');
+                    console.log(`📊 公共空间: ${Object.keys(QQ_InteractiveSpaces).length} 个`);
+                    console.log(`👥 角色空间: ${Object.keys(QQ_CharacterSpaces).length} 个角色`);
+                    
+                    return true;
+                } catch (error) {
+                    console.error('❌ 强制重新加载互动空间数据失败:', error);
+                    return false;
+                }
+            }
+            
+            /**
              * *** 新增：显示公共互动空间列表 ***
              */
-            function QQ_ShowPublicInteractiveSpaces() {
+            async function QQ_ShowPublicInteractiveSpaces() {
                 console.log('显示公共互动空间列表');
+                
+                // *** 关键优化：强制从世界书重新加载数据 ***
+                await QQ_ForceReloadInteractiveSpaces();
                 
                 // 移除现有面板
                 $('.QQ_user_spirit_panel').remove();
@@ -26573,8 +26620,11 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             /**
              * *** 新增：创建公共互动空间 ***
              */
-            function QQ_CreatePublicInteractiveSpace() {
+            async function QQ_CreatePublicInteractiveSpace() {
                 console.log('创建公共互动空间');
+                
+                // *** 关键优化：先从世界书重新加载数据 ***
+                await QQ_ForceReloadInteractiveSpaces();
                 
                 // 移除现有面板
                 $('.QQ_public_spaces_panel').remove();
@@ -26813,6 +26863,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_SyncAllData = QQ_SyncAllData;
             window.QQ_ShowPublicInteractiveSpaces = QQ_ShowPublicInteractiveSpaces;
             window.QQ_CreatePublicInteractiveSpace = QQ_CreatePublicInteractiveSpace;
+            window.QQ_ForceReloadInteractiveSpaces = QQ_ForceReloadInteractiveSpaces;
             
         </script>
     </body>
