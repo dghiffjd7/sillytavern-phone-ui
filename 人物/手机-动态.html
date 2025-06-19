@@ -7213,103 +7213,434 @@
                     }
                 }
                 
-                // *** 传统关键词检测（作为备用/惊喜机制） ***
+                // *** 检查用户设置：是否启用关键词触发 ***
+                const interactiveSettings = QQ_GetInteractiveSettings();
                 
-                // 身体接触类关键词
-                const physicalContactKeywords = [
-                    '拥抱', '抱住', '搂抱', '紧抱',
-                    '亲吻', 
-                    '触摸', '抚摸', '轻抚', 
-                    '握手', '牵手', '拉手', 
-                    '拍肩', '拍背', '轻拍', 
-                    '推', '拉', '扶', '搀扶', '扶着',
-                    '贴近', '靠近', '紧贴'
-                ];
+                if (!interactiveSettings.enableKeywordTrigger) {
+                    console.log('⚙️ 关键词触发已被用户禁用');
+                    return false;
+                }
                 
-                // 面对面互动类关键词
-                const faceToFaceKeywords = [
-                    '面对面', '当面', '面前', '眼神交流', '对视', '凝视',
-                    '现实中', '真实中', '现实里', '面对着',
-                    '走向', '走近', '走过去', '过来', '靠过来',
-                    '坐过来', '坐在身边', '坐在旁边',
-                    '躺着', '趴下', '我來了',
-                    '蹲下', '跪下', '弯腰', '俯身'
-                ];
-                
-                // 情感表达类关键词
-                const emotionalKeywords = [
-                    '心跳', '颤抖',
-                    '微笑', '笑容', '高兴', '激动',
-                    '哭', '流泪', '哭泣', '眼泪', '哽咽',
-                    '愤怒', '恼火', '瞪眼',
-                    '体贴', '呵护'
-                ];
-                
-                // 动作描述类关键词
-                const actionKeywords = [
-                    '伸手', '张开手', '举手', '挥手', '招手',
-                    '转身', '回头', '侧身',
-                    '仰头', '俯视', '仰视',
-                    '踮脚', '跳跃', '跑过来', '冲过来'
-                ];
-                
-                // 组合关键词检测
-                const allKeywords = [
-                    ...physicalContactKeywords,
-                    ...faceToFaceKeywords, 
-                    ...emotionalKeywords,
-                    ...actionKeywords
-                ];
-                
-                let matchCount = 0;
-                let matchedKeywords = [];
-                
-                for (const keyword of allKeywords) {
-                    if (text.includes(keyword)) {
-                        matchCount++;
-                        matchedKeywords.push(keyword);
+                // *** 检测用户自定义关键词 ***
+                if (interactiveSettings.customKeywords && interactiveSettings.customKeywords.length > 0) {
+                    for (const keyword of interactiveSettings.customKeywords) {
+                        if (keyword && text.includes(keyword.toLowerCase())) {
+                            console.log(`🎯 检测到用户自定义关键词: ${keyword}`);
+                            
+                            return {
+                                isInteractive: true,
+                                triggerType: 'custom_keyword',
+                                triggerKeyword: keyword,
+                                cleanContent: originalText,
+                                description: `用户自定义关键词"${keyword}"触发互动内容`
+                            };
+                        }
                     }
                 }
                 
-                // 检测动作描述模式 *动作* 或 【情感】
-                const actionPatterns = [
-                    /\*[^*]+\*/g, // *动作*
-                    /【[^】]+】/g, // 【情感】
-                    /\([^)]*动作[^)]*\)/g, // (包含动作的描述)
-                    /\([^)]*表情[^)]*\)/g, // (包含表情的描述)
-                ];
-                
-                let patternMatches = 0;
-                for (const pattern of actionPatterns) {
-                    const matches = text.match(pattern);
-                    if (matches) {
-                        patternMatches += matches.length;
-                        matchedKeywords.push(...matches);
-                    }
-                }
-                
-                // 判断是否为互动意图（关键词检测，作为惊喜机制）
-                const isKeywordInteractive = matchCount >= 2 || patternMatches >= 1 || 
-                    (matchCount >= 1 && patternMatches >= 1);
-                
-                if (isKeywordInteractive) {
-                    console.log(`💫 检测到关键词互动意图 (惊喜模式): 关键词${matchCount}个, 模式${patternMatches}个`);
-                    console.log('匹配的关键词/模式:', matchedKeywords);
+                // *** 检测默认关键词（如果用户启用） ***
+                if (interactiveSettings.enableDefaultKeywords) {
+                    // 身体接触类关键词
+                    const physicalContactKeywords = [
+                        '拥抱', '抱住', '搂抱', '紧抱',
+                        '亲吻', 
+                        '触摸', '抚摸', '轻抚', 
+                        '握手', '牵手', '拉手', 
+                        '拍肩', '拍背', '轻拍', 
+                        '推', '拉', '扶', '搀扶', '扶着',
+                        '贴近', '靠近', '紧贴'
+                    ];
                     
-                    return {
-                        isInteractive: true,
-                        triggerType: 'keyword',
-                        matchCount: matchCount,
-                        patternMatches: patternMatches,
-                        matchedKeywords: matchedKeywords,
-                        cleanContent: originalText,
-                        description: '系统检测到关键词互动意图（惊喜功能）'
-                    };
+                    // 面对面互动类关键词
+                    const faceToFaceKeywords = [
+                        '面对面', '当面', '面前', '眼神交流', '对视', '凝视',
+                        '现实中', '真实中', '现实里', '面对着',
+                        '走向', '走近', '走过去', '过来', '靠过来',
+                        '坐过来', '坐在身边', '坐在旁边',
+                        '躺着', '趴下', '我來了',
+                        '蹲下', '跪下', '弯腰', '俯身'
+                    ];
+                    
+                    // 情感表达类关键词
+                    const emotionalKeywords = [
+                        '心跳', '颤抖',
+                        '微笑', '笑容', '高兴', '激动',
+                        '哭', '流泪', '哭泣', '眼泪', '哽咽',
+                        '愤怒', '恼火', '瞪眼',
+                        '体贴', '呵护'
+                    ];
+                    
+                    // 动作描述类关键词
+                    const actionKeywords = [
+                        '伸手', '张开手', '举手', '挥手', '招手',
+                        '转身', '回头', '侧身',
+                        '仰头', '俯视', '仰视',
+                        '踮脚', '跳跃', '跑过来', '冲过来'
+                    ];
+                    
+                    // 组合关键词检测
+                    const allKeywords = [
+                        ...physicalContactKeywords,
+                        ...faceToFaceKeywords, 
+                        ...emotionalKeywords,
+                        ...actionKeywords
+                    ];
+                    
+                    let matchCount = 0;
+                    let matchedKeywords = [];
+                    
+                    for (const keyword of allKeywords) {
+                        if (text.includes(keyword)) {
+                            matchCount++;
+                            matchedKeywords.push(keyword);
+                        }
+                    }
+                    
+                    // 检测动作描述模式 *动作* 或 【情感】
+                    const actionPatterns = [
+                        /\*[^*]+\*/g, // *动作*
+                        /【[^】]+】/g, // 【情感】
+                        /\([^)]*动作[^)]*\)/g, // (包含动作的描述)
+                        /\([^)]*表情[^)]*\)/g, // (包含表情的描述)
+                    ];
+                    
+                    let patternMatches = 0;
+                    for (const pattern of actionPatterns) {
+                        const matches = text.match(pattern);
+                        if (matches) {
+                            patternMatches += matches.length;
+                            matchedKeywords.push(...matches);
+                        }
+                    }
+                    
+                    // 判断是否为互动意图（默认关键词检测）
+                    const isKeywordInteractive = matchCount >= 2 || patternMatches >= 1 || 
+                        (matchCount >= 1 && patternMatches >= 1);
+                    
+                    if (isKeywordInteractive) {
+                        console.log(`💫 检测到默认关键词互动意图: 关键词${matchCount}个, 模式${patternMatches}个`);
+                        console.log('匹配的关键词/模式:', matchedKeywords);
+                        
+                        return {
+                            isInteractive: true,
+                            triggerType: 'default_keyword',
+                            matchCount: matchCount,
+                            patternMatches: patternMatches,
+                            matchedKeywords: matchedKeywords,
+                            cleanContent: originalText,
+                            description: '系统检测到默认关键词互动意图'
+                        };
+                    }
                 }
                 
                 return false;
             }
             
+            /**
+             * *** 新增：获取互动设置 ***
+             */
+            function QQ_GetInteractiveSettings() {
+                try {
+                    // 从世界书获取设置
+                    const settings = QQ_GetFromWorldBook('QQ_互动设置') || {};
+                    
+                    // 默认设置
+                    const defaultSettings = {
+                        enableKeywordTrigger: false,        // 默认关闭关键词触发
+                        enableDefaultKeywords: false,       // 默认关闭默认关键词
+                        customKeywords: [],                  // 自定义关键词列表
+                        lastUpdated: new Date().toISOString()
+                    };
+                    
+                    // 合并设置
+                    return Object.assign(defaultSettings, settings);
+                } catch (error) {
+                    console.error('获取互动设置失败:', error);
+                    return {
+                        enableKeywordTrigger: false,
+                        enableDefaultKeywords: false,
+                        customKeywords: [],
+                        lastUpdated: new Date().toISOString()
+                    };
+                }
+            }
+            
+            /**
+             * *** 新增：保存互动设置 ***
+             */
+            function QQ_SaveInteractiveSettings(settings) {
+                try {
+                    settings.lastUpdated = new Date().toISOString();
+                    QQ_SafeSaveToWorldBook('QQ_互动设置', settings, 'QQ_互动设置');
+                    console.log('🔧 互动设置已保存:', settings);
+                    return true;
+                } catch (error) {
+                    console.error('保存互动设置失败:', error);
+                    return false;
+                }
+            }
+            
+            /**
+             * *** 新增：显示互动设置界面 ***
+             */
+            function QQ_ShowInteractiveSettings() {
+                // 移除现有设置界面
+                $('.QQ_interactive_settings_panel').remove();
+                
+                const currentSettings = QQ_GetInteractiveSettings();
+                
+                const panelHtml = `
+                    <div class="QQ_interactive_settings_panel" style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 15px;
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                        z-index: 99999999;
+                        overflow: hidden;
+                        animation: settingsPanelSlideIn 0.3s ease;
+                        max-width: 90%;
+                        max-height: 80%;
+                        width: 400px;
+                    ">
+                        <div class="panel-header" style="
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                            padding: 20px;
+                            text-align: center;
+                            font-weight: 600;
+                        ">
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                <span style="font-size: 20px;">⚙️</span>
+                                <span style="font-size: 16px;">互动内容触发设置</span>
+                            </div>
+                        </div>
+                        
+                        <div class="panel-content" style="padding: 20px;">
+                            <!-- 特殊符号说明 -->
+                            <div style="
+                                background: linear-gradient(135deg, #E8F5E8 0%, #F0F8FF 100%);
+                                padding: 15px;
+                                border-radius: 8px;
+                                margin-bottom: 20px;
+                                border-left: 4px solid #4CAF50;
+                            ">
+                                <div style="font-weight: 600; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                    <span>✅</span>
+                                    <span>特殊符号触发（永久启用）</span>
+                                </div>
+                                <div style="font-size: 13px; color: #666; line-height: 1.4;">
+                                    使用 <code style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 3px; font-weight: 600;">&&</code> 符号可以随时触发互动内容，例如：<br>
+                                    <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px; margin-top: 4px; display: inline-block;">&&想要拥抱你</code>
+                                </div>
+                            </div>
+                            
+                            <!-- 关键词触发设置 -->
+                            <div style="margin-bottom: 20px;">
+                                <label style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 10px;
+                                    cursor: pointer;
+                                    font-weight: 600;
+                                    margin-bottom: 15px;
+                                ">
+                                    <input type="checkbox" id="enableKeywordTrigger" ${currentSettings.enableKeywordTrigger ? 'checked' : ''} style="
+                                        width: 18px;
+                                        height: 18px;
+                                        accent-color: #667eea;
+                                    ">
+                                    <span>启用关键词触发</span>
+                                </label>
+                                
+                                <div id="keywordSettings" style="
+                                    margin-left: 28px;
+                                    ${currentSettings.enableKeywordTrigger ? '' : 'opacity: 0.5; pointer-events: none;'}
+                                ">
+                                    <!-- 默认关键词设置 -->
+                                    <label style="
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                        cursor: pointer;
+                                        margin-bottom: 15px;
+                                    ">
+                                        <input type="checkbox" id="enableDefaultKeywords" ${currentSettings.enableDefaultKeywords ? 'checked' : ''} style="
+                                            width: 16px;
+                                            height: 16px;
+                                            accent-color: #667eea;
+                                        ">
+                                        <span style="font-size: 14px;">使用默认关键词（拥抱、亲吻、触摸等）</span>
+                                    </label>
+                                    
+                                    <!-- 自定义关键词设置 -->
+                                    <div style="margin-bottom: 15px;">
+                                        <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px; color: #333;">
+                                            自定义关键词
+                                        </div>
+                                        <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+                                            输入您想要触发互动内容的关键词，用英文逗号分隔：
+                                        </div>
+                                        <textarea id="customKeywords" placeholder="例如：想你了,抱抱,一起玩" style="
+                                            width: 100%;
+                                            height: 60px;
+                                            padding: 8px;
+                                            border: 1px solid #ddd;
+                                            border-radius: 6px;
+                                            font-size: 13px;
+                                            resize: none;
+                                            box-sizing: border-box;
+                                        ">${currentSettings.customKeywords.join(',')}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 触发条件说明 -->
+                            <div style="
+                                background: #f8f9fa;
+                                padding: 12px;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                color: #666;
+                                line-height: 1.4;
+                            ">
+                                <div style="font-weight: 600; margin-bottom: 6px;">📝 触发条件说明：</div>
+                                <div>• 特殊符号 && 总是优先触发（无需设置）</div>
+                                <div>• 自定义关键词：包含任一关键词即触发</div>
+                                <div>• 默认关键词：需要满足2个关键词或1个动作模式</div>
+                                <div>• AI回复无格式时也会自动触发互动模式</div>
+                            </div>
+                        </div>
+                        
+                        <div class="panel-actions" style="
+                            padding: 20px;
+                            background: #fafafa;
+                            display: flex;
+                            gap: 10px;
+                        ">
+                            <button class="save-settings-btn" style="
+                                flex: 1;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                border: none;
+                                color: white;
+                                padding: 12px 16px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                font-weight: 500;
+                                transition: all 0.2s ease;
+                            ">
+                                保存设置
+                            </button>
+                            <button class="cancel-settings-btn" style="
+                                flex: 1;
+                                background: #e9ecef;
+                                border: none;
+                                color: #666;
+                                padding: 12px 16px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                font-weight: 500;
+                                transition: all 0.2s ease;
+                            ">
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <style>
+                        @keyframes settingsPanelSlideIn {
+                            from {
+                                opacity: 0;
+                                transform: translate(-50%, -60%);
+                            }
+                            to {
+                                opacity: 1;
+                                transform: translate(-50%, -50%);
+                            }
+                        }
+                        
+                        .QQ_interactive_settings_panel .save-settings-btn:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+                        }
+                        
+                        .QQ_interactive_settings_panel .cancel-settings-btn:hover {
+                            background: #dee2e6;
+                        }
+                    </style>
+                `;
+                
+                // 添加到页面
+                $('body').append(panelHtml);
+                
+                // 绑定关键词触发开关事件
+                $('#enableKeywordTrigger').on('change', function() {
+                    const isEnabled = this.checked;
+                    const keywordSettings = $('#keywordSettings');
+                    
+                    if (isEnabled) {
+                        keywordSettings.css({
+                            'opacity': '1',
+                            'pointer-events': 'auto'
+                        });
+                    } else {
+                        keywordSettings.css({
+                            'opacity': '0.5',
+                            'pointer-events': 'none'
+                        });
+                    }
+                });
+                
+                // 绑定保存按钮事件
+                $('.save-settings-btn').on('click', function() {
+                    const newSettings = {
+                        enableKeywordTrigger: $('#enableKeywordTrigger').prop('checked'),
+                        enableDefaultKeywords: $('#enableDefaultKeywords').prop('checked'),
+                        customKeywords: $('#customKeywords').val()
+                            .split(',')
+                            .map(k => k.trim())
+                            .filter(k => k.length > 0)
+                    };
+                    
+                    if (QQ_SaveInteractiveSettings(newSettings)) {
+                        $('.QQ_interactive_settings_panel').remove();
+                        
+                        // 显示保存成功提示
+                        const message = `✅ 设置已保存！
+                        
+🎯 特殊符号触发：永久启用 (&&)
+🔍 关键词触发：${newSettings.enableKeywordTrigger ? '已启用' : '已禁用'}
+📝 默认关键词：${newSettings.enableDefaultKeywords ? '已启用' : '已禁用'}
+🏷️ 自定义关键词：${newSettings.customKeywords.length}个`;
+                        
+                        alert(message);
+                    } else {
+                        alert('❌ 保存设置失败，请重试');
+                    }
+                });
+                
+                // 绑定取消按钮事件
+                $('.cancel-settings-btn').on('click', function() {
+                    $('.QQ_interactive_settings_panel').remove();
+                });
+                
+                // 点击外部关闭面板
+                $(document).one('click', function(e) {
+                    if (!$(e.target).closest('.QQ_interactive_settings_panel').length) {
+                        $('.QQ_interactive_settings_panel').remove();
+                    }
+                });
+                
+                // 阻止面板内部点击事件冒泡
+                $('.QQ_interactive_settings_panel').on('click', function(e) {
+                    e.stopPropagation();
+                });
+            }
+
             /**
              * 智能处理互动内容 - 决定显示在公共空间还是角色专属空间
              * @param {string} content - AI回复的互动内容
@@ -9390,7 +9721,7 @@
                             </button>
                         </div>
                         
-                        <!-- 新增：互动符号提示 -->
+                        <!-- 新增：互动状态提示 -->
                         <div class="interactive-tip" style="
                             padding: 12px 20px;
                             background: linear-gradient(135deg, #E8F5E8 0%, #F0F8FF 100%);
@@ -9417,20 +9748,10 @@
                                     line-height: 16px;
                                     font-size: 10px;
                                 ">💡</span>
-                                <span style="color: #4CAF50;">快速互动小贴士</span>
+                                <span style="color: #4CAF50;">当前互动触发状态</span>
                             </div>
-                            <div style="margin-left: 24px;">
-                                在聊天中使用 <span style="
-                                    background: #4CAF50;
-                                    color: white;
-                                    padding: 2px 6px;
-                                    border-radius: 3px;
-                                    font-family: monospace;
-                                    font-weight: 600;
-                                ">&&</span> 符号可以直接触发互动内容
-                            </div>
-                            <div style="margin-left: 24px; margin-top: 4px; color: #888;">
-                                例如：<code style="background: #f8f9fa; padding: 1px 4px; border-radius: 2px;">&&想要拥抱你</code>
+                            <div id="interactive-status-content" style="margin-left: 24px; font-size: 11px;">
+                                <!-- 状态内容将通过JS动态填充 -->
                             </div>
                         </div>
                     </div>
@@ -9451,6 +9772,9 @@
                 
                 // 添加到页面
                 $('body').append(panelHtml);
+                
+                // 动态更新互动状态
+                QQ_UpdateInteractiveStatus();
                 
                 // 绑定事件
                 $('.QQ_character_spirit_panel').on('click', function(e) {
@@ -16522,6 +16846,63 @@ msg_end
 
                          // *** 添加到全局作用域便于调试 ***
             window.QQ_Check_Comment_Backup_Status = QQ_Check_Comment_Backup_Status;
+            
+            /**
+             * *** 新增：测试互动设置功能的调试工具 ***
+             */
+            function QQ_Test_Interactive_Settings() {
+                console.log('=== 互动设置功能测试 ===');
+                
+                try {
+                    // 获取当前设置
+                    const currentSettings = QQ_GetInteractiveSettings();
+                    console.log('📋 当前设置:', currentSettings);
+                    
+                    // 测试不同类型的消息
+                    const testMessages = [
+                        '&&想要拥抱你',          // 特殊符号
+                        '我想拥抱你和抚摸你',     // 默认关键词（需要启用）
+                        '想你了',               // 可能的自定义关键词
+                        '今天天气真好',          // 普通消息
+                        '*伸出双手*想要拥抱',    // 动作模式
+                    ];
+                    
+                    console.log('🧪 测试消息检测结果:');
+                    testMessages.forEach(message => {
+                        const result = QQ_DetectInteractiveIntent(message);
+                        console.log(`消息: "${message}"`);
+                        console.log(`结果:`, result);
+                        console.log('---');
+                    });
+                    
+                    // 显示触发统计
+                    console.log('📊 触发机制状态:');
+                    console.log(`🎯 特殊符号触发: 永久启用`);
+                    console.log(`🔍 关键词触发: ${currentSettings.enableKeywordTrigger ? '已启用' : '已禁用'}`);
+                    console.log(`📝 默认关键词: ${currentSettings.enableDefaultKeywords ? '已启用' : '已禁用'}`);
+                    console.log(`🏷️ 自定义关键词: ${currentSettings.customKeywords.length}个`);
+                    if (currentSettings.customKeywords.length > 0) {
+                        console.log(`   关键词列表: ${currentSettings.customKeywords.join(', ')}`);
+                    }
+                    
+                    // 功能检查
+                    console.log('🔧 功能状态检查:');
+                    console.log(`• 获取设置函数: ${typeof QQ_GetInteractiveSettings === 'function' ? '✅' : '❌'}`);
+                    console.log(`• 保存设置函数: ${typeof QQ_SaveInteractiveSettings === 'function' ? '✅' : '❌'}`);
+                    console.log(`• 显示设置界面: ${typeof QQ_ShowInteractiveSettings === 'function' ? '✅' : '❌'}`);
+                    console.log(`• 更新状态显示: ${typeof QQ_UpdateInteractiveStatus === 'function' ? '✅' : '❌'}`);
+                    console.log(`• 互动检测函数: ${typeof QQ_DetectInteractiveIntent === 'function' ? '✅' : '❌'}`);
+                    
+                } catch (error) {
+                    console.error('❌ 测试过程中出现错误:', error);
+                }
+                
+                console.log('=== 测试完成 ===');
+                console.log('💡 提示: 可以通过 QQ_ShowInteractiveSettings() 打开设置界面');
+            }
+            
+            // *** 添加到全局作用域便于调试 ***
+            window.QQ_Test_Interactive_Settings = QQ_Test_Interactive_Settings;
 
             /**
              * *** 新增：检查互动内容保存状态的调试函数 ***
@@ -26304,7 +26685,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                                 QQ_SyncAllData();
                                 break;
                             case 'settings':
-                                QQ_ShowUserSettingsMenu();
+                                QQ_ShowInteractiveSettings();
                                 break;
                             case 'view_public_spaces':
                                 QQ_ShowPublicInteractiveSpaces();
@@ -26324,6 +26705,46 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 });
             }
             
+            /**
+             * *** 新增：更新精灵面板中的互动状态显示 ***
+             */
+            function QQ_UpdateInteractiveStatus() {
+                const statusContainer = $('#interactive-status-content');
+                if (statusContainer.length === 0) return;
+                
+                try {
+                    const settings = QQ_GetInteractiveSettings();
+                    const symbolStatus = '🟢 特殊符号 (&&)：永久启用';
+                    const keywordStatus = settings.enableKeywordTrigger ? 
+                        '🟢 关键词触发：已启用' : 
+                        '🔴 关键词触发：已禁用';
+                    const customCount = settings.customKeywords.length;
+                    const customStatus = customCount > 0 ? 
+                        `🟢 自定义关键词：${customCount}个` : 
+                        '⚪ 自定义关键词：暂无';
+                    
+                    const statusHtml = `
+                        <div>${symbolStatus}</div>
+                        <div>${keywordStatus}</div>
+                        <div>${customStatus}</div>
+                        <div style="margin-top: 4px; color: #888;">
+                            点击"设定"按钮可修改关键词触发设置
+                        </div>
+                    `;
+                    
+                    statusContainer.html(statusHtml);
+                } catch (error) {
+                    console.error('更新互动状态显示失败:', error);
+                    statusContainer.html(`
+                        <div>🟢 特殊符号 (&&)：永久启用</div>
+                        <div>⚪ 关键词触发：获取状态失败</div>
+                        <div style="margin-top: 4px; color: #888;">
+                            点击"设定"按钮配置互动触发
+                        </div>
+                    `);
+                }
+            }
+
             /**
              * *** 新增：显示用户设定菜单（原下拉菜单功能） ***
              */
