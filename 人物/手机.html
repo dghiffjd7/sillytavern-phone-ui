@@ -6607,6 +6607,75 @@
             }
 
             /**
+             * 测试不完整content标签处理功能
+             * 用于验证系统是否能正确处理AI回复的边缘情况
+             */
+            function QQ_TestIncompleteContentHandling() {
+                console.log('=== 不完整content标签处理测试 ===');
+                
+                const testCases = [
+                    {
+                        name: '完整content标签',
+                        content: '角色名--正常回复\n<content>\n这是一个完整的互动内容\n</content>',
+                        expected: '这是一个完整的互动内容'
+                    },
+                    {
+                        name: '不完整content标签',
+                        content: '角色名--正常回复\n<content>\n这是一个不完整的互动内容\n<tableThink>这是思考内容</tableThink>',
+                        expected: '这是一个不完整的互动内容'
+                    },
+                    {
+                        name: '带consider注释的内容',
+                        content: '角色名--正常回复\n<!--consider: 这是一个考虑注释-->\n<content>\n纯净的互动内容\n</content>',
+                        expected: '纯净的互动内容'
+                    },
+                    {
+                        name: '复杂混合情况',
+                        content: '角色名--正常回复\n<!--consider: 考虑一下-->\n<content>\n混合内容\n<thinking>思考</thinking>\n<disclaimer>免责声明</disclaimer>',
+                        expected: '混合内容'
+                    }
+                ];
+                
+                let passedTests = 0;
+                testCases.forEach((testCase, index) => {
+                    console.log(`\n测试 ${index + 1}: ${testCase.name}`);
+                    console.log('输入内容:', testCase.content);
+                    
+                    // 测试content标签检测
+                    const hasContent = QQ_HasContentTag(testCase.content);
+                    const hasIncomplete = QQ_HasIncompleteContentTag(testCase.content);
+                    
+                    console.log('检测结果 - 有content标签:', hasContent);
+                    console.log('检测结果 - 有不完整标签:', hasIncomplete);
+                    
+                    // 测试content标签清理
+                    const cleanedContent = QQ_CleanContentTags(testCase.content);
+                    console.log('清理后内容:', cleanedContent);
+                    console.log('期望内容:', testCase.expected);
+                    
+                    // 验证结果
+                    const trimmedCleaned = cleanedContent.trim();
+                    const trimmedExpected = testCase.expected.trim();
+                    
+                    if (trimmedCleaned === trimmedExpected) {
+                        console.log('✅ 测试通过');
+                        passedTests++;
+                    } else {
+                        console.log('❌ 测试失败');
+                        console.log('差异分析:');
+                        console.log('- 清理结果长度:', trimmedCleaned.length);
+                        console.log('- 期望结果长度:', trimmedExpected.length);
+                    }
+                });
+                
+                console.log(`\n=== 测试总结 ===`);
+                console.log(`通过测试: ${passedTests}/${testCases.length}`);
+                console.log(`测试成功率: ${(passedTests / testCases.length * 100).toFixed(1)}%`);
+                
+                return passedTests === testCases.length;
+            }
+
+            /**
              * 清理content标签和其他标签（支持不完整的content标签）
              * @param {string} content - 原始内容
              * @returns {string} 清理后的内容
@@ -6637,6 +6706,9 @@
                 cleanContent = cleanContent.replace(/<tableThink>[\s\S]*?<\/tableThink>/gi, '');
                 cleanContent = cleanContent.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, '');
                 cleanContent = cleanContent.replace(/<disclaimer>[\s\S]*?<\/disclaimer>/gi, '');
+                
+                // 移除HTML注释格式的consider标签（新增）
+                cleanContent = cleanContent.replace(/<!--\s*consider:\s*[\s\S]*?-->/gi, '');
                 
                 // 移除未闭合的系统标签
                 cleanContent = cleanContent.replace(/<(?:consider|thinking|tableThink|tableEdit|disclaimer)>[\s\S]*$/gi, '');
@@ -7784,24 +7856,33 @@
                 // 获取聊天页面容器并添加菜单
                 const chatPageContainer = element.closest('.QQ_chat_page');
                 if (chatPageContainer) {
-                    // 创建菜单容器
+                    console.log('找到聊天页面容器，准备插入菜单');
+                    
+                    // 创建菜单容器，使用fixed定位确保显示
                     const menuContainer = document.createElement('div');
                     menuContainer.style.cssText = `
-                        position: relative;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        z-index: 9998;
+                        position: fixed;
+                        top: 60px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        width: 90%;
+                        max-width: 320px;
+                        z-index: 99999;
+                        background: transparent;
+                        pointer-events: none;
                     `;
                     menuContainer.innerHTML = menuHtml;
                     
-                    // 插入到聊天头部之后
-                    const chatHeader = chatPageContainer.querySelector('[style*="backdrop-filter"]');
-                    if (chatHeader) {
-                        chatHeader.parentNode.insertBefore(menuContainer, chatHeader.nextSibling);
-                    } else {
-                        chatPageContainer.insertBefore(menuContainer, chatPageContainer.firstChild);
+                    // 确保菜单内容可以点击
+                    const menuContent = menuContainer.querySelector('.QQ_character_menu');
+                    if (menuContent) {
+                        menuContent.style.pointerEvents = 'auto';
                     }
+                    
+                    // 直接添加到body，确保显示
+                    document.body.appendChild(menuContainer);
+                    
+                    console.log('菜单已添加到页面，容器:', menuContainer);
                     
                     // 绑定事件
                     menuContainer.addEventListener('click', function(e) {
@@ -7832,6 +7913,8 @@
                     $(document).one('click', function() {
                         $('.QQ_character_menu').remove();
                     });
+                } else {
+                    console.error('未找到聊天页面容器，无法显示菜单');
                 }
             }
             
