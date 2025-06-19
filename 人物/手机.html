@@ -7734,31 +7734,84 @@
                     // 尝试多种方式获取头像
                     let avatarUrl = null;
                     
+                    console.log(`=== 开始获取角色 ${characterName} 的头像 ===`);
+                    
                     // 方法1: 从当前聊天界面获取
                     const chatAvatar = $(`.QQ_chat_item[data-name="${characterName}"] img`).attr('src');
-                    if (chatAvatar && chatAvatar !== 'undefined') {
+                    console.log(`方法1 - 聊天界面头像: ${chatAvatar}`);
+                    if (chatAvatar && chatAvatar !== 'undefined' && chatAvatar !== '' && !chatAvatar.includes('undefined')) {
                         avatarUrl = chatAvatar;
+                        console.log(`✅ 使用聊天界面头像: ${avatarUrl}`);
                     }
                     
                     // 方法2: 从SillyTavern的角色数据获取
                     if (!avatarUrl && typeof getCharacterAvatar === 'function') {
-                        avatarUrl = getCharacterAvatar(characterName);
-                    }
-                    
-                    // 方法3: 使用SillyTavern的内置函数
-                    if (!avatarUrl && typeof characters !== 'undefined' && Array.isArray(characters)) {
-                        const character = characters.find(char => char.name === characterName || char.avatar === characterName);
-                        if (character && character.avatar) {
-                            avatarUrl = character.avatar;
+                        try {
+                            const stAvatar = getCharacterAvatar(characterName);
+                            console.log(`方法2 - SillyTavern函数头像: ${stAvatar}`);
+                            if (stAvatar && stAvatar !== 'undefined' && stAvatar !== '') {
+                                avatarUrl = stAvatar;
+                                console.log(`✅ 使用SillyTavern函数头像: ${avatarUrl}`);
+                            }
+                        } catch (e) {
+                            console.warn('SillyTavern getCharacterAvatar函数调用失败:', e);
                         }
                     }
                     
-                    // 方法4: 构建默认路径
-                    if (!avatarUrl) {
-                        avatarUrl = `characters/${characterName}.png`;
+                    // 方法3: 使用SillyTavern的内置数据
+                    if (!avatarUrl && typeof characters !== 'undefined' && Array.isArray(characters)) {
+                        const character = characters.find(char => char.name === characterName || char.avatar === characterName);
+                        console.log(`方法3 - 找到的角色数据:`, character);
+                        if (character && character.avatar) {
+                            avatarUrl = character.avatar;
+                            console.log(`✅ 使用角色数据头像: ${avatarUrl}`);
+                        }
                     }
                     
-                    console.log(`获取角色 ${characterName} 头像: ${avatarUrl}`);
+                    // 方法4: 从全局变量获取
+                    if (!avatarUrl && typeof window.SillyTavern !== 'undefined') {
+                        try {
+                            const context = window.SillyTavern.getContext();
+                            if (context && context.characters) {
+                                const character = context.characters.find(char => char.name === characterName);
+                                if (character && character.avatar) {
+                                    avatarUrl = character.avatar;
+                                    console.log(`✅ 使用SillyTavern context头像: ${avatarUrl}`);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('获取SillyTavern context失败:', e);
+                        }
+                    }
+                    
+                    // 方法5: 尝试从聊天标题中获取头像
+                    if (!avatarUrl) {
+                        const titleAvatar = $(`.QQ_chat_title[data-name="${characterName}"] img`).attr('src');
+                        console.log(`方法5 - 聊天标题头像: ${titleAvatar}`);
+                        if (titleAvatar && titleAvatar !== 'undefined' && titleAvatar !== '') {
+                            avatarUrl = titleAvatar;
+                            console.log(`✅ 使用聊天标题头像: ${avatarUrl}`);
+                        }
+                    }
+                    
+                    // 方法6: 构建默认路径
+                    if (!avatarUrl) {
+                        avatarUrl = `characters/${characterName}.png`;
+                        console.log(`⚠️ 使用默认头像路径: ${avatarUrl}`);
+                    }
+                    
+                    // 处理相对路径和完整URL
+                    if (avatarUrl && !avatarUrl.startsWith('http') && !avatarUrl.startsWith('data:')) {
+                        // 如果是相对路径，尝试构建完整路径
+                        if (avatarUrl.startsWith('./') || avatarUrl.startsWith('../')) {
+                            // 保持相对路径
+                        } else if (!avatarUrl.startsWith('/')) {
+                            // 添加根路径
+                            avatarUrl = '/' + avatarUrl;
+                        }
+                    }
+                    
+                    console.log(`=== 最终获取的头像URL: ${avatarUrl} ===`);
                     return avatarUrl;
                 } catch (error) {
                     console.error('获取角色头像失败:', error);
@@ -7819,7 +7872,7 @@
                                     border: 3px solid white;
                                     margin-bottom: 10px;
                                     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-                                ">
+                                " onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiByeD0iMzAiIGZpbGw9IiNGRjZCNkIiLz4KPHRLEHA+4pWpPC90ZXh0Pgo8L3N2Zz4K'; console.log('精灵面板头像加载失败: ${characterName}');">
                                 <h3 style="margin: 0; font-size: 18px; font-weight: 600;">${characterName}</h3>
                                 <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">专属互动精灵</p>
                                 <button class="QQ_close_spirit_panel" style="
@@ -8268,10 +8321,102 @@
                 toastr.info(`精灵系统状态: ${spiritCount}个精灵, ${spaceCount}个空间, ${pageCount}个页面`, '系统状态');
             }
             
-            // 添加到全局作用域供调试使用
-            window.QQ_Test_Character_Spirit_System = QQ_Test_Character_Spirit_System;
-            window.QQ_Debug_Show_Character_Spirit = QQ_Debug_Show_Character_Spirit;
-            window.QQ_Show_Spirit_System_Stats = QQ_Show_Spirit_System_Stats;
+                         /**
+              * 测试头像获取功能
+              * @param {string} characterName - 角色名称
+              */
+             function QQ_Test_Avatar_Loading(characterName) {
+                 if (!characterName) {
+                     // 获取当前聊天角色
+                     const currentChatPage = $('.QQ_chat_page:visible');
+                     characterName = currentChatPage.length > 0 ? currentChatPage.attr('data-name') : null;
+                     
+                     if (!characterName) {
+                         toastr.error('请先打开一个私聊页面或提供角色名称', '头像测试');
+                         return;
+                     }
+                 }
+                 
+                 console.log(`=== 开始测试角色 ${characterName} 的头像获取 ===`);
+                 
+                 // 获取头像URL
+                 const avatarUrl = QQ_GetCharacterAvatar(characterName);
+                 
+                 // 创建测试界面
+                 const testHtml = `
+                     <div class="QQ_avatar_test_panel" style="
+                         position: fixed;
+                         top: 50px;
+                         right: 50px;
+                         width: 300px;
+                         background: white;
+                         border-radius: 15px;
+                         padding: 20px;
+                         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                         z-index: 999999999;
+                         border: 2px solid #FF6B6B;
+                     ">
+                         <h3 style="margin: 0 0 15px 0; color: #333; text-align: center;">头像测试面板</h3>
+                         <p style="margin: 5px 0; color: #666;"><strong>角色名称:</strong> ${characterName}</p>
+                         <p style="margin: 5px 0; color: #666; word-break: break-all;"><strong>头像URL:</strong> ${avatarUrl}</p>
+                         
+                         <div style="text-align: center; margin: 15px 0;">
+                             <img src="${avatarUrl}" alt="${characterName}" style="
+                                 width: 80px;
+                                 height: 80px;
+                                 border-radius: 50%;
+                                 border: 3px solid #FF6B6B;
+                                 object-fit: cover;
+                             " onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiByeD0iMzAiIGZpbGw9IiNGRjZCNkIiLz4KPHRLEHA+4pWpPC90ZXh0Pgo8L3N2Zz4K'; this.style.border='3px solid red'; console.log('测试头像加载失败: ${characterName}');">
+                         </div>
+                         
+                         <div style="text-align: center; gap: 10px; display: flex; justify-content: space-between;">
+                             <button class="QQ_test_show_spirit" style="
+                                 background: #FF6B6B;
+                                 color: white;
+                                 border: none;
+                                 padding: 8px 12px;
+                                 border-radius: 8px;
+                                 cursor: pointer;
+                                 font-size: 12px;
+                             ">显示精灵</button>
+                             <button class="QQ_test_close" style="
+                                 background: #999;
+                                 color: white;
+                                 border: none;
+                                 padding: 8px 12px;
+                                 border-radius: 8px;
+                                 cursor: pointer;
+                                 font-size: 12px;
+                             ">关闭</button>
+                         </div>
+                     </div>
+                 `;
+                 
+                 // 移除现有测试面板
+                 $('.QQ_avatar_test_panel').remove();
+                 
+                 // 添加新的测试面板
+                 $('body').append(testHtml);
+                 
+                 // 绑定事件
+                 $('.QQ_test_show_spirit').on('click', function() {
+                     QQ_ShowCharacterSpirit(characterName);
+                     toastr.success(`已显示 ${characterName} 的精灵按钮`, '测试');
+                 });
+                 
+                 $('.QQ_test_close').on('click', function() {
+                     $('.QQ_avatar_test_panel').remove();
+                 });
+                 
+                 toastr.info(`头像测试面板已显示，请查看右上角`, '头像测试');
+             }
+             
+             // 添加到全局作用域供调试使用
+             window.QQ_Test_Character_Spirit_System = QQ_Test_Character_Spirit_System;
+             window.QQ_Debug_Show_Character_Spirit = QQ_Debug_Show_Character_Spirit;
+             window.QQ_Show_Spirit_System_Stats = QQ_Show_Spirit_System_Stats;
+             window.QQ_Test_Avatar_Loading = QQ_Test_Avatar_Loading;
             
             /**
              * 显示角色专属精灵按钮
@@ -8332,7 +8477,7 @@
                             'border-radius: 50%;' +
                             'object-fit: cover;' +
                             'border: 2px solid white;' +
-                        '">' +
+                        '" onerror="this.onerror=null; this.src=\'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiByeD0iMzAiIGZpbGw9IiNGRjZCNkIiLz4KPHRLEHA+4pWpPC90ZXh0Pgo8L3N2Zz4K\'; console.log(\'头像加载失败，使用默认头像: ' + characterName + '\');">' +
                         '<div style="' +
                             'position: absolute;' +
                             'bottom: -5px;' +
