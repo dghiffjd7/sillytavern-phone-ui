@@ -7497,15 +7497,214 @@ MiPhone_end
                     console.log('工具调用系统世界书已保存');
                 }
             }
+            
+            // ================== 分级诊疗系统：AI响应智能处理 ==================
+            
+            /**
+             * 🩹 自动修复"脏JSON"的函数
+             * 这是我们的"急救包"，可以修复AI常见的JSON语法错误
+             * @param {string} dirtyJsonString - 可能包含错误的JSON字符串
+             * @returns {string} - 尝试修复后的JSON字符串
+             */
+            function QQ_AttemptToFixJson(dirtyJsonString) {
+                let repairedJson = dirtyJsonString;
+                console.log("🩹 [JSON修复] 尝试修复常见语法错误...");
+                
+                // 1. 移除末尾多余的逗号 (最常见的错误)
+                // 匹配: , 后跟空白和 } 或 ]
+                repairedJson = repairedJson.replace(/,\s*(}|])/g, "$1");
+                
+                // 2. 移除注释 (如果AI意外生成了JS或Python风格的注释)
+                repairedJson = repairedJson.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, ''); // 移除 /*...*/ 和 //...
+                repairedJson = repairedJson.replace(/#.*/g, ''); // 移除 #...
+                
+                // 3. 修复未闭合的引号（尝试智能配对）
+                const quoteCount = (repairedJson.match(/"/g) || []).length;
+                if (quoteCount % 2 !== 0) {
+                    console.log("🩹 检测到未闭合的引号，尝试修复...");
+                    // 在字符串末尾添加引号
+                    if (repairedJson.lastIndexOf('"') > repairedJson.lastIndexOf('}')) {
+                        repairedJson += '"';
+                    }
+                }
+                
+                // 4. 修复缺失的括号
+                const openBraces = (repairedJson.match(/{/g) || []).length;
+                const closeBraces = (repairedJson.match(/}/g) || []).length;
+                if (openBraces > closeBraces) {
+                    console.log(`🩹 缺少 ${openBraces - closeBraces} 个闭合花括号，自动补充`);
+                    repairedJson += '}'.repeat(openBraces - closeBraces);
+                }
+                
+                // 5. 修复特殊的tool_calls格式问题
+                // 有时AI会返回 tool_calls: [{...}] 而不是 "tool_calls": [{...}]
+                repairedJson = repairedJson.replace(/(\w+):\s*\[/g, '"$1": [');
+                repairedJson = repairedJson.replace(/(\w+):\s*{/g, '"$1": {');
+                
+                // 6. 修复单引号字符串（JSON只支持双引号）
+                repairedJson = repairedJson.replace(/'([^']*)'/g, '"$1"');
+                
+                if (repairedJson !== dirtyJsonString) {
+                    console.log("🩹 [JSON修复] 已执行自动修复");
+                }
+                
+                return repairedJson;
+            }
+            
+            /**
+             * 🔍 启发式内容提取函数
+             * 当JSON完全损坏时，尝试用正则表达式提取关键信息
+             * @param {string} rawResponse - AI返回的原始文本
+             * @returns {Array} - 包含提取出的部分信息的对象数组
+             */
+            function QQ_SalvageContentWithRegex(rawResponse) {
+                console.log("🔍 [内容提取] JSON无法解析，启动智能内容提取...");
+                const salvagedData = [];
+                
+                // 1. 尝试提取 sendMessage 的内容
+                // 寻找各种可能的消息格式
+                const patterns = [
+                    // 标准JSON格式: "content": "..."
+                    /"content"\s*:\s*"([^"]+)"/g,
+                    // 中文键名: "内容": "..."
+                    /"内容"\s*:\s*"([^"]+)"/g,
+                    // 旧格式: 给XXX发消息:YYY
+                    /给(.+?)发消息[:：](.+?)(?=\n|$)/g,
+                    // 旧格式: 在群聊XXX中发送:YYY
+                    /在群聊(.+?)中发送[:：](.+?)(?=\n|$)/g,
+                    // 私聊格式: XXX:YYY 或 XXX：YYY
+                    /^([^:：\n]+?)[:：](.+?)$/gm
+                ];
+                
+                // 2. 提取target/sender信息
+                const targetPatterns = [
+                    /"target"\s*:\s*"([^"]+)"/g,
+                    /"sender"\s*:\s*"([^"]+)"/g,
+                    /"角色"\s*:\s*"([^"]+)"/g
+                ];
+                
+                // 收集所有可能的目标
+                const possibleTargets = new Set();
+                targetPatterns.forEach(pattern => {
+                    const matches = [...rawResponse.matchAll(pattern)];
+                    matches.forEach(match => possibleTargets.add(match[1]));
+                });
+                
+                // 3. 尝试各种模式提取内容
+                patterns.forEach(pattern => {
+                    const matches = [...rawResponse.matchAll(pattern)];
+                    matches.forEach(match => {
+                        let target = '未知角色';
+                        let content = '';
+                        
+                        if (match.length === 3) {
+                            // 旧格式，有明确的target和content
+                            target = match[1].trim();
+                            content = match[2].trim();
+                        } else if (match.length === 2) {
+                            // 标准JSON格式，只有content
+                            content = match[1].trim();
+                            // 尝试从可能的目标中选择一个
+                            if (possibleTargets.size > 0) {
+                                target = [...possibleTargets][0];
+                            }
+                        }
+                        
+                        if (content) {
+                            salvagedData.push({
+                                tool_name: 'sendMessage',
+                                arguments: {
+                                    type: QQ_Groups.includes(target) ? 'group' : 'private',
+                                    target: target,
+                                    content: content,
+                                    sender: target // 假设发送者就是目标角色
+                                }
+                            });
+                            console.log(`🔍 提取到消息: ${target} -> "${content}"`);
+                        }
+                    });
+                });
+                
+                // 4. 尝试提取动态内容
+                const momentPatterns = [
+                    /发动态[:：](.+?)(?=\n|$)/g,
+                    /"moment"\s*:\s*"([^"]+)"/g,
+                    /\[动态\](.+?)(?=\n|$)/g
+                ];
+                
+                momentPatterns.forEach(pattern => {
+                    const matches = [...rawResponse.matchAll(pattern)];
+                    matches.forEach(match => {
+                        if (match[1]) {
+                            salvagedData.push({
+                                tool_name: 'publishMoment',
+                                arguments: {
+                                    content: match[1].trim(),
+                                    author: [...possibleTargets][0] || '未知角色'
+                                }
+                            });
+                            console.log(`🔍 提取到动态: "${match[1].trim()}"`);
+                        }
+                    });
+                });
+                
+                console.log(`🔍 [内容提取] 共提取到 ${salvagedData.length} 条有效信息`);
+                return salvagedData;
+            }
+            
+            /**
+             * 🏥 处理旧格式响应（向后兼容）
+             * 处理非JSON格式的传统响应
+             * @param {string} result - AI返回的原始响应
+             */
+            async function QQ_HandleLegacyFormat(result) {
+                console.log("🏥 [旧格式处理] 检测到传统格式响应");
+                
+                // 使用正则提取旧格式内容
+                const salvagedData = QQ_SalvageContentWithRegex(result);
+                
+                if (salvagedData.length > 0) {
+                    console.log("🏥 [旧格式处理] 成功转换为工具调用格式");
+                    
+                    // 执行提取到的工具调用
+                    for (const call of salvagedData) {
+                        try {
+                            switch (call.tool_name) {
+                                case 'sendMessage':
+                                    await QQ_HandleSendMessage(call.arguments);
+                                    break;
+                                case 'publishMoment':
+                                    await QQ_HandlePublishMoment(call.arguments);
+                                    break;
+                                default:
+                                    console.warn(`🏥 未知的工具: ${call.tool_name}`);
+                            }
+                        } catch (error) {
+                            console.error(`🏥 执行失败:`, error);
+                        }
+                    }
+                    
+                    // 更新界面
+                    QQ_UpdateNewTips();
+                    await QQ_Save_Msg();
+                    
+                    return true; // 成功处理
+                }
+                
+                return false; // 无法处理
+            }
 
             /**
-             * 核心结果处理函数 - 只处理JSON格式
+             * 核心结果处理函数 - 升级版分级诊疗系统
              * @param {string} result - AI的回复内容
              * @param {boolean} isRetry - 是否为重试调用
              */
             async function ResultHandle(result, isRetry = false) {
+                console.log("🏥 ========== 分级诊疗系统启动 ==========");
+                
                 // 1. 空回复处理
                 if (!result || result.trim() === "") {
+                    console.log("🏥 [第四层] 空回复，进入重试流程");
                     if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                         QQ_RetryCount++;
                         console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
@@ -7533,96 +7732,184 @@ MiPhone_end
                 }
                 
                 result = System_TagCompletion(result);
-                console.log(`开始对结果进行处理:\n${result}`);
+                console.log(`🏥 收到AI响应 (前100字符):\n${result.substring(0, 100)}...`);
                 
-                                // 2. 🧠 智能JSON提取器 - 严格匹配 + 模糊匹配双重策略
+                // ========== 第零层：检测旧格式 ==========
+                // 首先检查是否为旧格式响应（非JSON格式）
+                if (!result.includes('MiPhone') && !result.includes('{') && !result.includes('tool_calls')) {
+                    console.log("🏥 [第零层] 检测到旧格式响应，尝试兼容处理");
+                    const handled = await QQ_HandleLegacyFormat(result);
+                    if (handled) {
+                        console.log("✅ [第零层] 旧格式处理成功");
+                        QQ_ResetRetry();
+                        return;
+                    }
+                    console.log("❌ [第零层] 旧格式处理失败，继续尝试其他方法");
+                }
+                
+                // ========== 第一层：严格JSON解析 ==========
+                console.log("🏥 [第一层] 尝试严格JSON解析");
                 const jsonPayload = QQ_ExtractJsonPayload(result);
                 
                 if (!jsonPayload) {
-                    // 如果两种方式都找不到JSON，进入错误处理
-                    console.error("❌ 智能解析器无法提取有效JSON");
-                    await QQ_HandleFormatError(result, isRetry);
+                    // 找不到JSON结构，直接进入第三层内容提取
+                    console.log("❌ [第一层] 无法提取JSON结构，跳转到第三层");
+                    const salvagedData = QQ_SalvageContentWithRegex(result);
+                    if (salvagedData.length > 0) {
+                        console.log("✅ [第三层] 内容提取成功，执行提取到的任务");
+                        for (const call of salvagedData) {
+                            try {
+                                await QQ_ExecuteToolCall(call);
+                            } catch (error) {
+                                console.error(`❌ [第三层] 执行失败:`, error);
+                            }
+                        }
+                        QQ_UpdateNewTips();
+                        await QQ_Save_Msg();
+                        QQ_ResetRetry();
                         return;
                     }
                     
+                    // 第三层也失败，进入第四层重试
+                    console.error("❌ [第三层] 内容提取失败，进入第四层");
+                    await QQ_HandleFormatError(result, isRetry);
+                    return;
+                }
+                
+                let responseData = null;
                 try {
-                    // 3. 🚀 核心任务：解析智能提取的JSON
-                    const responseData = JSON.parse(jsonPayload);
-                    console.log("🎯 工具调用JSON解析成功!", responseData);
+                    // 第一层：直接解析
+                    responseData = JSON.parse(jsonPayload);
+                    console.log("✅ [第一层] 严格JSON解析成功!");
+                } catch (e) {
+                    // ========== 第二层：自动修复 ==========
+                    console.log("⚠️ [第一层] JSON解析失败，进入第二层自动修复");
+                    console.error("错误信息:", e.message);
+                    
+                    try {
+                        const repairedJson = QQ_AttemptToFixJson(jsonPayload);
+                        responseData = JSON.parse(repairedJson);
+                        console.log("✅ [第二层] JSON自动修复成功!");
+                        
+                        // 显示修复提示
+                        triggerSlash("/echo severity=info 🩹 已自动修复AI返回的JSON格式错误");
+                    } catch (e2) {
+                        // ========== 第三层：内容提取 ==========
+                        console.error("❌ [第二层] JSON修复失败，进入第三层内容提取");
+                        console.error("修复错误:", e2.message);
+                        
+                        const salvagedData = QQ_SalvageContentWithRegex(result);
+                        if (salvagedData.length > 0) {
+                            console.log("✅ [第三层] 内容提取成功，将执行提取到的任务");
+                            // 将提取到的数据转换为标准格式
+                            responseData = { tool_calls: salvagedData };
+                            
+                            // 显示提取提示
+                            triggerSlash(`/echo severity=warning 🔍 已从损坏的响应中提取到 ${salvagedData.length} 条有效信息`);
+                        } else {
+                            // ========== 第四层：最后的重试 ==========
+                            console.error("❌ [第三层] 内容提取失败，进入第四层重试");
+                            await QQ_HandleFormatError(result, isRetry, jsonPayload);
+                            return;
+                        }
+                    }
+                }
+                
+                // 成功获得responseData（无论从哪一层），执行工具调用
+                if (responseData) {
+                    console.log("🎯 最终获得有效数据，准备执行工具调用");
                     
                     // 成功后，重置重试计数器
                     QQ_ResetRetry();
                     
-                    // 4. 🎯 总调度室 - 执行AI工具调用指令
-                    if (responseData.tool_calls && Array.isArray(responseData.tool_calls)) {
-                        // ✨ 新的工具调用格式 - 直接执行工具调用
-                        console.log(`🎯 [总调度室] 收到 ${responseData.tool_calls.length} 个工具调用任务`);
-                        if (responseData.reasoning) {
-                            console.log(`🧠 [AI思考过程] ${responseData.reasoning}`);
-                        }
-
-                        // 🔄 遍历AI要求调用的所有工具
-                        for (const call of responseData.tool_calls) {
-                            if (!call.tool_name) {
-                                console.warn('⚠️ 工具调用缺少tool_name，跳过');
-                                continue;
-                            }
-
-                            console.log(`🚀 [执行中] ${call.tool_name}`, call.arguments);
-                            
-                            // 🎛️ 根据工具名称，调用对应的前端"执行者"函数
-                            try {
-                                switch (call.tool_name) {
-                                    case 'sendMessage':
-                                        await QQ_HandleSendMessage(call.arguments);
-                                        break;
-                                    case 'scheduleProactiveEvent':
-                                        await QQ_HandleScheduleProactiveEvent(call.arguments);
-                                        break;
-                                    case 'publishMoment':
-                                        await QQ_HandlePublishMoment(call.arguments);
-                                        break;
-                                    case 'commentOnMoment':
-                                        await QQ_HandleCommentOnMoment(call.arguments);
-                                        break;
-                                    case 'updateSystemState':
-                                        await QQ_HandleSystemUpdate(call.arguments);
-                                        break;
-                                    case 'updateMemory':
-                                        await QQ_HandleUpdateMemory(call.arguments);
-                                        break;
-                                    default:
-                                        console.warn(`❌ [总调度室] 未知的工具调用: ${call.tool_name}`);
-                                        // 尝试通过世界引擎兜底处理
-                                        await WorldEngine.processApiResponse(responseData);
-                                }
-                                console.log(`✅ [完成] ${call.tool_name} 执行成功`);
-                            } catch (error) {
-                                console.error(`❌ [错误] ${call.tool_name} 执行失败:`, error);
-                            }
-                        }
-                        
-                        // 🌍 通过世界引擎记录活动
-                        await WorldEngine.processApiResponse(responseData);
-                    } else if (responseData.messages || responseData.events || responseData.timeline) {
-                        // 📋 旧的JSON格式（向后兼容）
-                        console.log("🔄 使用传统JSON格式处理");
-                        await QQ_HandleJSONResponse(responseData);
-                    } else {
-                        // 🤖 尝试智能识别
-                        console.warn("⚠️ 未识别的JSON格式，尝试兼容处理");
-                        await QQ_HandleJSONResponse(responseData);
-                    }
+                    // 执行工具调用（使用原有逻辑）
+                    await QQ_ProcessToolCalls(responseData);
                     
-                    // 5. 更新界面和保存
+                    // 更新界面和保存
                     QQ_UpdateNewTips();
                     await QQ_Save_Msg();
+                }
+            }
+            
+            /**
+             * 🎛️ 统一的工具调用执行器
+             * @param {object} call - 工具调用对象，包含tool_name和arguments
+             */
+            async function QQ_ExecuteToolCall(call) {
+                if (!call.tool_name) {
+                    console.warn('⚠️ 工具调用缺少tool_name，跳过');
+                    return;
+                }
+                
+                console.log(`🚀 [执行] ${call.tool_name}`, call.arguments);
+                
+                switch (call.tool_name) {
+                    case 'sendMessage':
+                        await QQ_HandleSendMessage(call.arguments);
+                        break;
+                    case 'scheduleProactiveEvent':
+                        await QQ_HandleScheduleProactiveEvent(call.arguments);
+                        break;
+                    case 'publishMoment':
+                        await QQ_HandlePublishMoment(call.arguments);
+                        break;
+                    case 'commentOnMoment':
+                        await QQ_HandleCommentOnMoment(call.arguments);
+                        break;
+                    case 'updateSystemState':
+                        await QQ_HandleSystemUpdate(call.arguments);
+                        break;
+                    case 'updateMemory':
+                        await QQ_HandleUpdateMemory(call.arguments);
+                        break;
+                    default:
+                        console.warn(`❌ 未知的工具调用: ${call.tool_name}`);
+                        // 尝试通过世界引擎兜底处理
+                        if (worldEngine && worldEngine.toolLibrary && worldEngine.toolLibrary[call.tool_name]) {
+                            await worldEngine.toolLibrary[call.tool_name](call.arguments);
+                        }
+                }
+                console.log(`✅ [完成] ${call.tool_name} 执行完成`);
+            }
+            
+            /**
+             * 🎯 处理工具调用响应
+             * @param {object} responseData - 包含tool_calls的响应数据
+             */
+            async function QQ_ProcessToolCalls(responseData) {
                     
-                } catch (e) {
-                    // JSON解析失败，进入错误处理和重试逻辑
-                    console.error("❌ JSON解析错误:", e);
-                    console.error("📄 失败的JSON内容:", jsonPayload.substring(0, 200) + '...');
-                    await QQ_HandleFormatError(result, isRetry, jsonPayload);
+                if (responseData.tool_calls && Array.isArray(responseData.tool_calls)) {
+                    // ✨ 新的工具调用格式 - 直接执行工具调用
+                    console.log(`🎯 [总调度室] 收到 ${responseData.tool_calls.length} 个工具调用任务`);
+                    if (responseData.reasoning) {
+                        console.log(`🧠 [AI思考过程] ${responseData.reasoning}`);
+                    }
+
+                    // 🔄 遍历AI要求调用的所有工具
+                    for (const call of responseData.tool_calls) {
+                        try {
+                            await QQ_ExecuteToolCall(call);
+                        } catch (error) {
+                            console.error(`❌ [错误] ${call.tool_name} 执行失败:`, error);
+                        }
+                    }
+                    
+                    // 🌍 通过世界引擎记录活动
+                    if (typeof WorldEngine !== 'undefined' && WorldEngine.processApiResponse) {
+                        await WorldEngine.processApiResponse(responseData);
+                    }
+                } else if (responseData.messages || responseData.events || responseData.timeline) {
+                    // 📋 旧的JSON格式（向后兼容）
+                    console.log("🔄 使用传统JSON格式处理");
+                    if (typeof QQ_HandleJSONResponse === 'function') {
+                        await QQ_HandleJSONResponse(responseData);
+                    }
+                } else {
+                    // 🤖 尝试智能识别
+                    console.warn("⚠️ 未识别的JSON格式，尝试兼容处理");
+                    if (typeof QQ_HandleJSONResponse === 'function') {
+                        await QQ_HandleJSONResponse(responseData);
+                    }
                 }
             }
             
@@ -27618,6 +27905,120 @@ MiPhone_end`;
                     ready: true,
                     message: '任务队列已准备就绪，调用QQ_SendMsg()开始处理'
                 };
+            };
+            
+            /**
+             * 🏥 测试分级诊疗系统
+             * 用各种异常输入测试系统的容错能力
+             */
+            window.QQ_Test_Graded_Diagnosis_System = function() {
+                console.log('🏥 ========== 分级诊疗系统测试 ==========');
+                
+                // 测试用例
+                const testCases = [
+                    {
+                        name: '完美JSON',
+                        input: `MiPhone_start
+{
+    "tool_calls": [
+        {
+            "tool_name": "sendMessage",
+            "arguments": {
+                "type": "private",
+                "target": "测试角色",
+                "content": "这是完美的JSON格式"
+            }
+        }
+    ]
+}
+MiPhone_end`
+                    },
+                    {
+                        name: '脏JSON（多余逗号）',
+                        input: `MiPhone_start
+{
+    "tool_calls": [
+        {
+            "tool_name": "sendMessage",
+            "arguments": {
+                "type": "private",
+                "target": "测试角色",
+                "content": "这个JSON有多余的逗号",
+            },
+        }
+    ]
+}
+MiPhone_end`
+                    },
+                    {
+                        name: '损坏的JSON（缺少引号）',
+                        input: `MiPhone_start
+{
+    tool_calls: [
+        {
+            tool_name: "sendMessage",
+            arguments: {
+                type: "private",
+                target: "测试角色",
+                content: "缺少引号的JSON"
+            }
+        }
+    ]
+}
+MiPhone_end`
+                    },
+                    {
+                        name: '旧格式消息',
+                        input: `给贝尔法斯特发消息：你好，主人
+在群聊港区中发送：大家好
+发动态：今天天气真好`
+                    },
+                    {
+                        name: '完全损坏的内容',
+                        input: `这是一些随机文本
+"content": "但是里面有一些内容"
+"target": "贝尔法斯特"
+还有一些其他文字`
+                    }
+                ];
+                
+                // 测试每个用例
+                testCases.forEach((testCase, index) => {
+                    console.log(`\n📝 测试用例 ${index + 1}: ${testCase.name}`);
+                    console.log('输入:', testCase.input.substring(0, 50) + '...');
+                    
+                    // 测试JSON提取
+                    const jsonPayload = QQ_ExtractJsonPayload(testCase.input);
+                    if (jsonPayload) {
+                        console.log('✅ JSON提取成功');
+                        
+                        // 尝试解析
+                        try {
+                            const parsed = JSON.parse(jsonPayload);
+                            console.log('✅ 第一层：直接解析成功');
+                        } catch (e) {
+                            console.log('⚠️ 第一层失败，尝试第二层修复...');
+                            try {
+                                const repaired = QQ_AttemptToFixJson(jsonPayload);
+                                const parsed = JSON.parse(repaired);
+                                console.log('✅ 第二层：JSON修复成功');
+                            } catch (e2) {
+                                console.log('❌ 第二层失败');
+                            }
+                        }
+                    } else {
+                        console.log('⚠️ 无法提取JSON，尝试第三层内容提取...');
+                        const salvaged = QQ_SalvageContentWithRegex(testCase.input);
+                        if (salvaged.length > 0) {
+                            console.log(`✅ 第三层：提取到 ${salvaged.length} 条信息`);
+                        } else {
+                            console.log('❌ 第三层失败，需要进入第四层重试');
+                        }
+                    }
+                });
+                
+                console.log('\n🏥 分级诊疗系统测试完成！');
+                console.log('提示：可以调用 ResultHandle() 函数测试完整流程');
             };
             
             /**
