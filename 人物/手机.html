@@ -12854,7 +12854,7 @@ ${index + 1}. ${space.name}
                 const result = await QQ_Gen(sendvalue);
                 
                 // *** 新增：保存消息数据 ***
-                QQ_Save_Msg();
+                await QQ_Save_Msg();
                 
                 // *** 新增：智能处理AI回复（评论和私聊） ***
                 if (result) {
@@ -12876,10 +12876,19 @@ ${index + 1}. ${space.name}
                     if (hasMomentFormat || hasMsgFormat) {
                         // 处理动态评论和私聊消息
                         await QQ_Handle_AI_Comments(cleanedResult, $closest);
+                        
+                        // *** 使用强制保存函数确保所有数据都被保存 ***
+                        await QQ_Force_Save_All_Data();
                     } else {
                         // 如果不是特定格式，使用原有的处理方式
                         await ResultHandle(cleanedResult);
+                        
+                        // *** 使用强制保存函数确保所有数据都被保存 ***
+                        await QQ_Force_Save_All_Data();
                     }
+                } else {
+                    // *** 即使AI没有回复，也要保存用户的评论 ***
+                    await QQ_Force_Save_All_Data();
                 }
             }
             
@@ -13060,12 +13069,107 @@ ${index + 1}. ${space.name}
                          
                          // 处理私聊消息
                          await QQ_Msg_Parse(msgContent);
-                         console.log('私聊消息处理完成');
+                         
+                         // *** 确保私聊消息处理后立即保存 ***
+                         await QQ_Save_Msg();
+                         console.log('私聊消息处理完成，已保存到备份');
                      }
                  } catch (error) {
                      console.error('处理私聊消息时出错:', error);
                  }
              }
+
+             /**
+              * *** 新增：强制保存所有动态相关数据 ***
+              */
+             async function QQ_Force_Save_All_Data() {
+                 try {
+                     console.log('开始强制保存所有数据...');
+                     
+                     // 保存动态数据
+                     await QQ_Save_Moments();
+                     console.log('✓ 动态数据已保存到世界书');
+                     
+                     // 保存消息数据
+                     await QQ_Save_Msg();
+                     console.log('✓ 消息数据已保存到世界书');
+                     
+                     console.log('所有数据保存完成');
+                     
+                     // 显示保存统计
+                     if (typeof window.QQ_Show_Moments_Stats === 'function') {
+                         window.QQ_Show_Moments_Stats();
+                     }
+                     
+                 } catch (error) {
+                     console.error('强制保存数据时出错:', error);
+                 }
+             }
+
+             // *** 新增：添加到全局作用域便于调试 ***
+             window.QQ_Force_Save_All_Data = QQ_Force_Save_All_Data;
+
+             /**
+              * *** 新增：检查动态评论保存状态的调试函数 ***
+              */
+             function QQ_Check_Comment_Backup_Status() {
+                 console.log('=== 动态评论备份状态检查 ===');
+                 
+                 // 检查内存中的动态数据
+                 console.log(`内存中动态数量: ${QQ_MomentsData.length}`);
+                 
+                 let totalComments = 0;
+                 let momentsWithComments = 0;
+                 
+                 QQ_MomentsData.forEach((moment, index) => {
+                     if (moment.comments && moment.comments.length > 0) {
+                         totalComments += moment.comments.length;
+                         momentsWithComments++;
+                         console.log(`动态 ${index + 1} (${moment.userName}): ${moment.comments.length}条评论`);
+                         
+                         // 显示最近的几条评论
+                         const recentComments = moment.comments.slice(-3);
+                         recentComments.forEach((comment, commentIndex) => {
+                             console.log(`  - ${comment.name}: ${comment.content} (${comment.timestamp})`);
+                         });
+                     }
+                 });
+                 
+                 console.log(`总计: ${momentsWithComments}个动态有评论，共${totalComments}条评论`);
+                 
+                 // 检查世界书中的备份
+                 if (worldbook && entries) {
+                     const momentEntry = entries.find(entry => entry.comment === "手机-动态内容存储");
+                     if (momentEntry) {
+                         try {
+                             const backupData = JSON.parse(momentEntry.content);
+                             let backupComments = 0;
+                             let backupMomentsWithComments = 0;
+                             
+                             backupData.forEach(moment => {
+                                 if (moment.comments && moment.comments.length > 0) {
+                                     backupComments += moment.comments.length;
+                                     backupMomentsWithComments++;
+                                 }
+                             });
+                             
+                             console.log(`世界书备份: ${backupData.length}个动态，${backupMomentsWithComments}个有评论，共${backupComments}条评论`);
+                             console.log('✓ 世界书备份存在且有效');
+                         } catch (error) {
+                             console.error('世界书备份数据解析失败:', error);
+                         }
+                     } else {
+                         console.warn('未找到动态内容的世界书备份条目');
+                     }
+                 } else {
+                     console.warn('无法访问世界书或entries');
+                 }
+                 
+                 console.log('=== 检查完成 ===');
+             }
+
+             // *** 添加到全局作用域便于调试 ***
+             window.QQ_Check_Comment_Backup_Status = QQ_Check_Comment_Backup_Status;
              function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
@@ -13183,8 +13287,9 @@ ${index + 1}. ${space.name}
                 
                 // *** 新增：自动保存动态内容 ***
                 if (QQ_MomentsData.length > 0) {
-                    setTimeout(() => {
-                        QQ_Save_Moments();
+                    setTimeout(async () => {
+                        await QQ_Save_Moments();
+                        console.log('动态解析完成，已保存到世界书备份');
                     }, 1000); // 延迟保存，确保所有处理完成
                 }
             }
