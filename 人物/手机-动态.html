@@ -25577,10 +25577,428 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
              */
             
             /**
-             * 切换用户名下拉菜单
+             * *** 修改：点击用户名显示精灵 ***
              */
             function QQ_ToggleUserMenu() {
-                console.log('点击用户名，显示下拉菜单');
+                console.log('点击用户名，显示用户精灵');
+                
+                // 检查是否已存在精灵
+                let existingSpirit = document.getElementById('QQ_user_spirit');
+                if (existingSpirit) {
+                    existingSpirit.remove();
+                    return;
+                }
+                
+                QQ_ShowUserSpirit();
+            }
+            
+            /**
+             * *** 新增：显示用户精灵 ***
+             */
+            function QQ_ShowUserSpirit() {
+                // 移除现有精灵
+                const existingSpirit = document.getElementById('QQ_user_spirit');
+                if (existingSpirit) {
+                    existingSpirit.remove();
+                }
+                
+                // 获取用户名和头像
+                const userName = QQ_GetUserName() || 'User';
+                const userAvatar = QQ_GetUserAvatar() || 'default_avatar.png';
+                
+                // 创建精灵按钮
+                const spirit = document.createElement('div');
+                spirit.id = 'QQ_user_spirit';
+                spirit.style.cssText = `
+                    position: fixed;
+                    top: 120px;
+                    right: 30px;
+                    width: 60px;
+                    height: 60px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    border-radius: 50%;
+                    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+                    cursor: pointer;
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    animation: userSpiritPulse 2s infinite ease-in-out;
+                    border: 3px solid white;
+                    transition: all 0.3s ease;
+                `;
+                
+                // 精灵内容（用户头像或图标）
+                spirit.innerHTML = `
+                    <img src="${userAvatar}" alt="${userName}" style="
+                        width: 45px;
+                        height: 45px;
+                        border-radius: 50%;
+                        object-fit: cover;
+                    " onerror="this.outerHTML='<div style=&quot;color: white; font-size: 24px;&quot;>👤</div>';">
+                `;
+                
+                // 精灵悬停效果
+                spirit.addEventListener('mouseenter', () => {
+                    spirit.style.transform = 'scale(1.1)';
+                    spirit.style.boxShadow = '0 8px 25px rgba(102, 126, 234, 0.6)';
+                });
+                
+                spirit.addEventListener('mouseleave', () => {
+                    spirit.style.transform = 'scale(1)';
+                    spirit.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.4)';
+                });
+                
+                // 点击精灵显示用户面板
+                spirit.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    QQ_ShowUserSpiritPanel();
+                    spirit.remove();
+                });
+                
+                // 添加精灵动画样式
+                if (!document.getElementById('user_spirit_styles')) {
+                    const style = document.createElement('style');
+                    style.id = 'user_spirit_styles';
+                    style.textContent = `
+                        @keyframes userSpiritPulse {
+                            0%, 100% {
+                                transform: scale(1);
+                            }
+                            50% {
+                                transform: scale(1.05);
+                            }
+                        }
+                        
+                        @keyframes userSpiritSlideIn {
+                            from {
+                                opacity: 0;
+                                transform: translateX(100px);
+                            }
+                            to {
+                                opacity: 1;
+                                transform: translateX(0);
+                            }
+                        }
+                        
+                        #QQ_user_spirit {
+                            animation: userSpiritSlideIn 0.3s ease, userSpiritPulse 2s infinite ease-in-out 0.3s;
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
+                
+                // 添加到页面
+                document.body.appendChild(spirit);
+                
+                // 5秒后自动消失
+                setTimeout(() => {
+                    if (spirit && spirit.parentNode) {
+                        spirit.style.opacity = '0';
+                        spirit.style.transform = 'translateX(100px)';
+                        setTimeout(() => {
+                            if (spirit.parentNode) {
+                                spirit.remove();
+                            }
+                        }, 300);
+                    }
+                }, 5000);
+                
+                console.log('用户精灵已显示');
+            }
+            
+            /**
+             * *** 新增：获取用户头像 ***
+             */
+            function QQ_GetUserAvatar() {
+                // 尝试多种方式获取用户头像
+                const methods = [
+                    () => window.userAvatarPath,
+                    () => window.selectedAvatarData,
+                    () => document.querySelector('#QQ_home_UserAvatar img')?.src,
+                    () => document.querySelector('.user-avatar img')?.src,
+                    () => document.querySelector('[data-user-avatar]')?.src
+                ];
+                
+                for (const method of methods) {
+                    try {
+                        const result = method();
+                        if (result && typeof result === 'string' && result !== 'default_avatar.png') {
+                            return result;
+                        }
+                    } catch (error) {
+                        // 忽略错误，尝试下一个方法
+                    }
+                }
+                
+                // 如果没有找到头像，返回默认值
+                return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiM2NjdlZWEiLz4KPHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4PSI4IiB5PSI4Ij4KPHBhdGggZD0iTTEyIDEyQzE0LjIwOTEgMTIgMTYgMTAuMjA5MSAxNiA4QzE2IDUuNzkwODYgMTQuMjA5MSA0IDEyIDRDOS43OTA4NiA0IDggNS43OTA4NiA4IDhDOCAxMC4yMDkxIDkuNzkwODYgMTIgMTIgMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTIgMTRDOC4xMzQwMSAxNCA1IDE3LjEzNDAxIDUgMjFIMTlDMTkgMTcuMTM0MDEgMTUuODY2IDE0IDEyIDE0WiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+Cgo8L3N2Zz4K';
+            }
+            
+            /**
+             * *** 新增：显示用户精灵面板 ***
+             */
+            function QQ_ShowUserSpiritPanel() {
+                console.log('显示用户精灵面板');
+                
+                // 移除现有面板
+                $('.QQ_user_spirit_panel').remove();
+                
+                const userName = QQ_GetUserName() || 'User';
+                const userAvatar = QQ_GetUserAvatar();
+                
+                // 创建面板HTML
+                const panelHtml = `
+                    <div class="QQ_user_spirit_panel" style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 15px;
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                        z-index: 99999999;
+                        overflow: hidden;
+                        animation: userPanelSlideIn 0.3s ease;
+                        max-width: 90%;
+                        max-height: 80%;
+                        width: 350px;
+                    ">
+                        <div class="panel-header" style="
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                            padding: 20px;
+                            text-align: center;
+                            font-weight: 600;
+                        ">
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                <img src="${userAvatar}" alt="${userName}" style="
+                                    width: 40px;
+                                    height: 40px;
+                                    border-radius: 50%;
+                                    border: 2px solid white;
+                                " onerror="this.outerHTML='<div style=&quot;width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 20px;&quot;>👤</div>';">
+                                <span style="font-size: 16px;">👑 ${userName} 的控制面板</span>
+                            </div>
+                        </div>
+                        
+                        <div class="panel-content" style="padding: 20px;">
+                            <div style="
+                                display: grid;
+                                grid-template-columns: 1fr 1fr;
+                                gap: 10px;
+                                margin-bottom: 20px;
+                            ">
+                                <button class="panel-btn" data-action="interactive_guide" style="
+                                    background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 8px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    transition: all 0.2s ease;
+                                    display: flex;
+                                    flex-direction: column;
+                                    align-items: center;
+                                    gap: 4px;
+                                ">
+                                    <span style="font-size: 16px;">💫</span>
+                                    <span>互动指南</span>
+                                </button>
+                                
+                                <button class="panel-btn" data-action="phone_status" style="
+                                    background: linear-gradient(135deg, #4FACFE 0%, #00F2FE 100%);
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 8px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    transition: all 0.2s ease;
+                                    display: flex;
+                                    flex-direction: column;
+                                    align-items: center;
+                                    gap: 4px;
+                                ">
+                                    <span style="font-size: 16px;">📱</span>
+                                    <span>手机状态</span>
+                                </button>
+                                
+                                <button class="panel-btn" data-action="sync_data" style="
+                                    background: linear-gradient(135deg, #43E97B 0%, #38F9D7 100%);
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 8px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    transition: all 0.2s ease;
+                                    display: flex;
+                                    flex-direction: column;
+                                    align-items: center;
+                                    gap: 4px;
+                                ">
+                                    <span style="font-size: 16px;">🔄</span>
+                                    <span>同步数据</span>
+                                </button>
+                                
+                                <button class="panel-btn" data-action="settings" style="
+                                    background: linear-gradient(135deg, #FA709A 0%, #FEE140 100%);
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 8px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    transition: all 0.2s ease;
+                                    display: flex;
+                                    flex-direction: column;
+                                    align-items: center;
+                                    gap: 4px;
+                                ">
+                                    <span style="font-size: 16px;">⚙️</span>
+                                    <span>设定</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- 新增：互动符号提示 -->
+                        <div class="interactive-tip" style="
+                            padding: 12px 20px;
+                            background: linear-gradient(135deg, #E8F5E8 0%, #F0F8FF 100%);
+                            border-top: 1px solid #e9ecef;
+                            font-size: 12px;
+                            color: #666;
+                            line-height: 1.4;
+                        ">
+                            <div style="
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                margin-bottom: 6px;
+                                font-weight: 500;
+                            ">
+                                <span style="
+                                    display: inline-block;
+                                    width: 16px;
+                                    height: 16px;
+                                    background: #4CAF50;
+                                    border-radius: 50%;
+                                    color: white;
+                                    text-align: center;
+                                    line-height: 16px;
+                                    font-size: 10px;
+                                ">💡</span>
+                                <span style="color: #4CAF50;">快速互动小贴士</span>
+                            </div>
+                            <div style="margin-left: 24px;">
+                                在聊天中使用 <span style="
+                                    background: #4CAF50;
+                                    color: white;
+                                    padding: 2px 6px;
+                                    border-radius: 3px;
+                                    font-family: monospace;
+                                    font-weight: 600;
+                                ">&&</span> 符号可以直接触发互动内容
+                            </div>
+                            <div style="margin-left: 24px; margin-top: 4px; color: #888;">
+                                例如：<code style="background: #f8f9fa; padding: 1px 4px; border-radius: 2px;">&&想要拥抱你</code>
+                            </div>
+                        </div>
+                        
+                        <div class="panel-actions" style="
+                            padding: 20px;
+                            background: #fafafa;
+                            display: flex;
+                            gap: 10px;
+                        ">
+                            <button class="close-panel-btn" style="
+                                flex: 1;
+                                background: #e9ecef;
+                                border: none;
+                                color: #666;
+                                padding: 12px 16px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                font-weight: 500;
+                                transition: all 0.2s ease;
+                            ">
+                                关闭
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <style>
+                        @keyframes userPanelSlideIn {
+                            from {
+                                opacity: 0;
+                                transform: translate(-50%, -60%);
+                            }
+                            to {
+                                opacity: 1;
+                                transform: translate(-50%, -50%);
+                            }
+                        }
+                        
+                        .QQ_user_spirit_panel .panel-btn:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                        }
+                    </style>
+                `;
+                
+                // 添加到页面
+                $('body').append(panelHtml);
+                
+                // 绑定事件
+                $('.QQ_user_spirit_panel').on('click', function(e) {
+                    e.stopPropagation();
+                    
+                    const panelBtn = e.target.closest('.panel-btn');
+                    const closePanelBtn = e.target.closest('.close-panel-btn');
+                    
+                    if (panelBtn) {
+                        const action = panelBtn.getAttribute('data-action');
+                        console.log(`点击用户面板按钮: ${action}`);
+                        
+                        $('.QQ_user_spirit_panel').remove();
+                        
+                        switch (action) {
+                            case 'interactive_guide':
+                                QQ_ShowInteractiveGuide();
+                                break;
+                            case 'phone_status':
+                                QQ_ShowPhoneStatus();
+                                break;
+                            case 'sync_data':
+                                QQ_SyncAllData();
+                                break;
+                            case 'settings':
+                                QQ_ShowUserSettingsMenu();
+                                break;
+                        }
+                    } else if (closePanelBtn) {
+                        $('.QQ_user_spirit_panel').remove();
+                    }
+                });
+                
+                // 点击外部关闭面板
+                $(document).one('click', function() {
+                    $('.QQ_user_spirit_panel').remove();
+                });
+            }
+            
+            /**
+             * *** 新增：显示用户设定菜单（原下拉菜单功能） ***
+             */
+            function QQ_ShowUserSettingsMenu() {
+                console.log('显示用户设定菜单');
                 
                 // 检查是否已存在菜单
                 let existingMenu = document.getElementById('QQ_user_dropdown_menu');
@@ -25726,8 +26144,98 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 }, 100);
             }
             
+            /**
+             * *** 新增：显示手机状态 ***
+             */
+            function QQ_ShowPhoneStatus() {
+                console.log('显示手机状态');
+                
+                const info = `📱 手机界面状态信息
+
+👤 当前用户: ${QQ_GetUserName()}
+🎭 当前角色: ${getCurrentCharacterId() || '未知'}
+📚 世界书状态: ${QQ_IsWorldBookAvailable() ? '✅ 可用' : '❌ 不可用'}
+
+📋 数据统计:
+• 联系人分组: ${contactGroups ? contactGroups.length : 0} 个
+• 公共互动空间: ${Object.keys(QQ_InteractiveSpaces || {}).length} 个
+• 私人互动空间: ${Object.keys(QQ_CharacterSpaces || {}).reduce((sum, char) => sum + Object.keys(QQ_CharacterSpaces[char]).length, 0)} 个
+• 动态数量: ${QQ_MomentsData ? QQ_MomentsData.length : 0} 个
+
+⚙️ 功能状态:
+• 消息发送: ${typeof QQ_SendMsg === 'function' ? '✅' : '❌'}
+• 动态评论: ${typeof QQ_Moment_Comment === 'function' ? '✅' : '❌'}
+• 互动检测: ${typeof QQ_DetectInteractiveIntent === 'function' ? '✅' : '❌'}
+• 角色精灵: ${typeof QQ_ShowCharacterSpirit === 'function' ? '✅' : '❌'}
+
+🕒 系统时间: ${new Date().toLocaleString('zh-CN')}`;
+                
+                alert(info);
+            }
+            
+            /**
+             * *** 新增：同步所有数据到世界书 ***
+             */
+            function QQ_SyncAllData() {
+                console.log('🔄 开始同步所有数据到世界书...');
+                
+                if (!QQ_IsWorldBookAvailable()) {
+                    alert('❌ 世界书功能不可用，无法同步数据');
+                    return;
+                }
+                
+                let syncCount = 0;
+                let totalCount = 0;
+                
+                try {
+                    // 同步分组数据
+                    if (typeof saveGroupsToStorage === 'function') {
+                        console.log('🔄 同步分组数据...');
+                        saveGroupsToStorage();
+                        syncCount++;
+                    }
+                    totalCount++;
+                    
+                    // 同步动态数据
+                    if (typeof QQ_Save_Moments === 'function' && QQ_MomentsData) {
+                        console.log('🔄 同步动态数据...');
+                        QQ_Save_Moments();
+                        syncCount++;
+                    }
+                    totalCount++;
+                    
+                    // 同步互动空间数据
+                    if (typeof QQ_Save_Interactive_Spaces === 'function') {
+                        console.log('🔄 同步互动空间数据...');
+                        QQ_Save_Interactive_Spaces();
+                        syncCount++;
+                    }
+                    totalCount++;
+                    
+                    // 同步已读状态
+                    if (typeof QQ_SaveReadStatus === 'function') {
+                        console.log('🔄 同步已读状态...');
+                        QQ_SaveReadStatus();
+                        syncCount++;
+                    }
+                    totalCount++;
+                    
+                    console.log(`✅ 数据同步完成: ${syncCount}/${totalCount} 项成功`);
+                    alert(`✅ 数据同步完成\n成功同步: ${syncCount}/${totalCount} 项数据`);
+                    
+                } catch (error) {
+                    console.error('❌ 数据同步失败:', error);
+                    alert(`❌ 数据同步失败: ${error.message}`);
+                }
+            }
+            
             // 确保函数全局可用
             window.QQ_ToggleUserMenu = QQ_ToggleUserMenu;
+            window.QQ_ShowUserSpirit = QQ_ShowUserSpirit;
+            window.QQ_ShowUserSpiritPanel = QQ_ShowUserSpiritPanel;
+            window.QQ_ShowUserSettingsMenu = QQ_ShowUserSettingsMenu;
+            window.QQ_ShowPhoneStatus = QQ_ShowPhoneStatus;
+            window.QQ_SyncAllData = QQ_SyncAllData;
             
         </script>
     </body>
