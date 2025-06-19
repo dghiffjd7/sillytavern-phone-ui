@@ -7125,32 +7125,31 @@ MiPhone_end`;
                 }
             }
 
-            /**
-             * 核心结果处理函数 - 只处理JSON格式
-             * @param {string} result - AI的回复内容
-             * @param {boolean} isRetry - 是否为重试调用
-             */
             async function ResultHandle(result, isRetry = false) {
-                // 1. 空回复处理
-                if (!result || result.trim() === "") {
+                if (!result) {
+                    // 空回复处理 - 使用重试机制
                     if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                         QQ_RetryCount++;
                         console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
                         triggerSlash(`/echo AI空回复，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
+                        // 使用保存的最后请求重新生成
                         if (QQ_LastRequest) {
+                            // 确保重试时设置gening状态
                             gening = true;
                             try {
+                                // 添加延迟避免过快重试（防止缓存问题）
                                 await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                                const retryResult = await QQ_Gen(QQ_LastRequest);
-                                return await ResultHandle(retryResult, true);
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
                             } finally {
                                 gening = false;
                             }
                         }
                     } else {
+                        // 重试次数用完或其他情况
                         if (QQ_RetryCount >= QQ_MAX_RETRY) {
-                            triggerSlash("/echo severity=error AI连续空回复，可能存在问题，已停止重试");
+                            triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
                         } else {
                             triggerSlash("/echo 空回复了");
                         }
@@ -7162,166 +7161,185 @@ MiPhone_end`;
                 result = System_TagCompletion(result);
                 console.log(`开始对结果进行处理:\n${result}`);
                 
-                // 2. 尝试寻找并解析唯一的JSON块
-                const match = result.match(/MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/);
-                
-                if (!match || !match[1]) {
-                    // 如果连MiPhone标签都找不到，进入错误处理
-                    console.error("AI回复中未找到MiPhone_JSON标签");
-                    await QQ_HandleFormatError(result, isRetry);
-                    return;
-                }
-                
-                try {
-                    // 3. 核心任务：解析JSON
-                    const responseData = JSON.parse(match[1].trim());
-                    console.log("JSON解析成功!", responseData);
+                // 首先检查是否是新的JSON格式
+                if (QQ_HasJSONFormat(result)) {
+                    console.log('检测到JSON格式，开始解析...');
+                    const jsonData = QQ_ExtractJSON(result);
                     
-                    // 成功后，重置重试计数器
-                    QQ_ResetRetry();
-                    
-                    // 4. 将解析后的数据交给处理器
-                    await QQ_HandleJSONResponse(responseData);
-                    
-                    // 5. 更新界面和保存
-                    QQ_UpdateNewTips();
-                    await QQ_Save_Msg();
-                    
-                } catch (e) {
-                    // JSON解析失败，进入错误处理和重试逻辑
-                    console.error("JSON解析失败:", e);
-                    await QQ_HandleFormatError(result, isRetry, match[1]);
-                }
-            }
-            
-            /**
-             * 智能错误处理和重试逻辑
-             * @param {string} rawResponse - 原始回复
-             * @param {boolean} isRetry - 是否已经是重试
-             * @param {string} failedJsonString - 解析失败的JSON字符串
-             */
-            async function QQ_HandleFormatError(rawResponse, isRetry, failedJsonString = null) {
-                // 1. 尝试修复"脏"JSON
-                if (failedJsonString) {
-                    try {
-                        const fixedJson = QQ_FixDirtyJSON(failedJsonString);
-                        const responseData = JSON.parse(fixedJson);
-                        console.warn("成功修复了有语法错误的JSON!");
+                    if (jsonData) {
+                        // 成功解析JSON，处理数据
+                        await QQ_HandleJSONResponse(jsonData);
+                        
+                        // 成功处理，重置重试计数
                         QQ_ResetRetry();
-                        await QQ_HandleJSONResponse(responseData);
                         QQ_UpdateNewTips();
                         await QQ_Save_Msg();
                         return;
-                    } catch (fixError) {
-                        console.error("JSON修复失败，进入重试流程", fixError);
+                    } else {
+                        // JSON解析失败，继续尝试旧格式
+                        console.warn('JSON解析失败，尝试旧格式处理');
                     }
                 }
                 
-                // 2. 启动重试机制
-                if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
-                    QQ_RetryCount++;
-                    triggerSlash(`/echo severity=warning AI响应格式错误，正在进行第 ${QQ_RetryCount} 次重试...`);
-                    
-                    // 构建带有修正指令的新Prompt
-                    const correctionPrompt = `[系统修正指令]
-你上次的回复未使用要求的JSON格式。请严格按照以下格式重新生成回复：
-
-MiPhone_JSON_START
-{
-    "messages": [...],      // 聊天消息数组
-    "events": [...],        // 延迟事件数组
-    "system": {...},        // 系统事件
-    "timeline": [...],      // 动态更新
-    "memory": {...}         // 记忆更新
-}
-MiPhone_JSON_END
-
-请重新处理以下请求：
-${QQ_LastRequest}`;
-                    
-                    // 使用修正后的Prompt重新生成
-                    gening = true;
-                    try {
-                        await new Promise(resolve => setTimeout(resolve, 1500 + QQ_RetryCount * 500));
-                        const retryResult = await QQ_Gen(correctionPrompt);
-                        await ResultHandle(retryResult, true);
-                    } finally {
-                        gening = false;
+                // 旧格式处理逻辑
+                const matches = [
+                    ...result.matchAll(/MiPhone_start([\s\S]+?)MiPhone_end/g),
+                ];
+                
+                if (matches.length == 0) {
+                    // 没有回复线上格式 - 先检查是否有content标签的互动内容
+                    if (QQ_HasContentTag(result)) {
+                        // 有content标签，直接显示互动空间
+                        console.log("检测到content标签包裹的互动内容，显示互动空间");
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                        QQ_ResetRetry();
+                        return;
                     }
                     
-                } else {
-                    // 3. 重试次数用尽，最终处理
-                    console.error("AI多次重试后仍无法生成正确格式！");
-                    triggerSlash("/echo severity=error AI响应失败，请检查世界书配置或手动重试");
-                    
-                    // 检查是否为互动内容（保留这个功能作为最后的兜底）
-                    if (QQ_HasContentTag(rawResponse)) {
-                        console.log("检测到content标签，尝试作为互动内容处理");
-                        QQ_HandleInteractiveContent(rawResponse, QQ_LastRequestName);
-                    } else {
-                        // 输出原始回复便于调试
-                        const cleanedResponse = rawResponse
-                            .replace(/MiPhone_JSON_START[\s\S]*?MiPhone_JSON_END/g, '')
-                            .replace(/MiPhone_start[\s\S]*?MiPhone_end/g, '')
-                            .trim();
+                    // 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI没有回复线上格式，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
-                        if (cleanedResponse) {
-                            triggerSlash(`/sendas name={{char}} [系统提示：AI未能按JSON格式回复，以下是原始内容]\n${cleanedResponse}`);
+                        if (QQ_LastRequest) {
+                            // 重要：设置gening状态和异步执行重试
+                            gening = true;
+                            try {
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
+                        }
+                    } else {
+                        // 重试用完，判断是否为互动内容
+                        if (QQ_IsInteractiveContent(result)) {
+                            // 在手机界面显示互动内容
+                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                        } else {
+                            triggerSlash("/echo AI没有回复线上格式,原文直接输出到新楼层");
+                            triggerSlash(`/sendas name={{char}} ${result}`);
+                        }
+                        QQ_ResetRetry();
+                    }
+                    return;
+                } else if (matches.length > 1) {
+                    // 回复了多个线上格式 - 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI回复了多个线上格式，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI回复多个格式，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                        
+                        if (QQ_LastRequest) {
+                            // 重要：设置gening状态和异步执行重试
+                            gening = true;
+                            try {
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
+                        }
+                    } else {
+                        // 重试用完，判断是否为互动内容
+                        if (QQ_IsInteractiveContent(result)) {
+                            // 在手机界面显示互动内容
+                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                        } else {
+                            triggerSlash("/echo AI回复了多个线上格式,直接输出到新楼层");
+                            triggerSlash(`/sendas name={{char}} ${result}`);
+                        }
+                        QQ_ResetRetry();
+                    }
+                    return;
+                } else {
+                    result = matches[0][1];
+                }
+                let ok = false;
+                if (
+                    result.indexOf("msg_start") < 0 ||
+                    result.indexOf("msg_end") < 0
+                ) {
+                    // 自动补全tag
+                    if (result.indexOf("msg_start") < 0) {
+                        // 没有起始标识
+                        let start = result.match(
+                            /MiPhone_start[\s\S]*?(<群聊:.+?>|<[^/]+和.+的(?:聊天|私聊)>)/,
+                        );
+                        if (start) {
+                            result = result.replace(
+                                start[1],
+                                `msg_start\n${start[1]}`,
+                            );
                         }
                     }
-                    
+                    if (result.indexOf("msg_end") < 0) {
+                        // 没有结束标识
+                        let end = result.match(
+                            /<\/群聊:.+?>|<\/.+和.+的(?:聊天|私聊)>/gm,
+                        );
+                        if (end) {
+                            result = result.replace(
+                                end[end.length - 1],
+                                `${end[end.length - 1]}\nmsg_end`,
+                            );
+                        }
+                    }
+                }
+                const msg = result.match(/msg_start([\s\S]+?)msg_end/);
+                if (msg) {
+                    ok = true;
+                    let json = JsonYamlParse(msg[1]);
+                    if (!json) {
+                        QQ_Error("AI输出的格式不正确，双击自己头像重Roll");
+                        return;
+                    }
+                    // triggerSlash(`/echo 生成结果${msg[1]}`);
+                    json = QQ_Msg_DeletOld(json);
+                    await QQ_Msg_Parse(JSON.stringify(json));
+                }
+                const momentes = result.matchAll(
+                    /moment_start([\s\S]+?)moment_end/g,
+                );
+                if (momentes) {
+                    ok = true;
+                    for (const moment of momentes) {
+                        // *** 修复：检查是否在动态评论上下文中 ***
+                        const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                        QQ_Moment_Parse(moment[1], isInCommentContext);
+                    }
+                }
+                
+                // 成功处理后重置重试状态
+                if (ok) {
                     QQ_ResetRetry();
                 }
-            }
-            
-            /**
-             * 尝试修复常见的JSON错误
-             * @param {string} dirtyJson - 有语法错误的JSON字符串
-             * @returns {string} 修复后的JSON字符串
-             */
-            function QQ_FixDirtyJSON(dirtyJson) {
-                let fixed = dirtyJson.trim();
-                
-                // 1. 移除多余的逗号
-                fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
-                
-                // 2. 修复缺失的引号
-                fixed = fixed.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-                
-                // 3. 修复单引号为双引号
-                fixed = fixed.replace(/'/g, '"');
-                
-                // 4. 移除末尾多余的逗号
-                fixed = fixed.replace(/,\s*$/g, '');
-                
-                // 5. 尝试补全缺失的括号
-                const openBraces = (fixed.match(/{/g) || []).length;
-                const closeBraces = (fixed.match(/}/g) || []).length;
-                const openBrackets = (fixed.match(/\[/g) || []).length;
-                const closeBrackets = (fixed.match(/\]/g) || []).length;
-                
-                // 补全缺失的花括号
-                if (openBraces > closeBraces) {
-                    fixed += '}'.repeat(openBraces - closeBraces);
+                if (!ok) {
+                    // 最后的格式检查失败 - 判断是否为互动内容
+                    if (QQ_IsInteractiveContent(result)) {
+                        // 在手机界面显示互动内容
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                    } else {
+                        triggerSlash("/echo 回复不为空但不存在手机格式,输出到新楼层");
+                        triggerSlash(
+                            `/sendas name={{char}} ${result
+                                .replace("MiPhone_start", "")
+                                .replace("MiPhone_end", "")}`,
+                        );
+                    }
+                    QQ_ResetRetry();
+                    return;
                 }
                 
-                // 补全缺失的方括号
-                if (openBrackets > closeBrackets) {
-                    fixed += ']'.repeat(openBrackets - closeBrackets);
-                }
-                
-                // 6. 移除注释
-                fixed = fixed.replace(/\/\/.*$/gm, '');
-                fixed = fixed.replace(/\/\*[\s\S]*?\*\//g, '');
-                
-                // 7. 处理尾随的undefined或null文本
-                fixed = fixed.replace(/,\s*(undefined|null)\s*([,}\]])/g, '$2');
-                
-                console.log('JSON修复前后对比:');
-                console.log('修复前:', dirtyJson.substring(0, 100) + '...');
-                console.log('修复后:', fixed.substring(0, 100) + '...');
-                
-                return fixed;
+                // 成功处理，重置重试计数
+                QQ_ResetRetry();
+                QQ_UpdateNewTips();
+                QQ_Save_Msg();
             }
 
             /**
@@ -25117,16 +25135,15 @@ MiPhone_end`;
             window.QQ_CheckJSONMigrationStatus = function() {
                 console.log('=== JSON格式迁移状态检查 ===');
                 
-                // 检查JSON格式世界书条目
-                const jsonEntry = entries?.find(e => e.comment === '手机界面统一JSON响应格式');
+                // 检查是否存在JSON格式世界书条目
+                const jsonEntry = entries.find(e => e.keys.includes('手机-统一JSON响应格式'));
                 if (jsonEntry) {
-                    console.log('✅ JSON格式世界书已创建');
-                    console.log('  - 启用状态:', jsonEntry.enabled ? '已启用' : '已禁用');
-                    console.log('  - 关键词:', jsonEntry.key);
-                    console.log('  - 优先级:', jsonEntry.order);
+                    console.log('✅ JSON格式世界书条目已存在');
+                    console.log('- 启用状态:', jsonEntry.enabled ? '已启用' : '已禁用');
+                    console.log('- 优先级:', jsonEntry.order);
                 } else {
-                    console.log('❌ JSON格式世界书未创建');
-                    console.log('  运行 QQ_CreateJSONWorldBookEntry() 创建');
+                    console.log('❌ JSON格式世界书条目不存在');
+                    console.log('运行 QQ_CreateJSONWorldBookEntry() 来创建');
                 }
                 
                 // 检查旧格式世界书条目状态
@@ -25139,135 +25156,20 @@ MiPhone_end`;
                 ];
                 
                 console.log('\n旧格式世界书条目状态:');
-                let enabledOldEntries = 0;
-                let disabledOldEntries = 0;
-                let deletedOldEntries = 0;
-                
-                oldFormatEntries.forEach(entryName => {
-                    const entry = entries?.find(e => e.comment === entryName);
+                oldFormatEntries.forEach(key => {
+                    const entry = entries.find(e => e.comment === key);
                     if (entry) {
-                        if (entry.enabled) {
-                            console.log(`  ${entryName}: ⚠️ 仍在启用（建议禁用）`);
-                            enabledOldEntries++;
-                        } else {
-                            console.log(`  ${entryName}: ✅ 已禁用`);
-                            disabledOldEntries++;
-                        }
+                        console.log(`- ${key}: ${entry.enabled ? '已启用' : '已禁用'}`);
                     } else {
-                        console.log(`  ${entryName}: 🗑️ 已删除`);
-                        deletedOldEntries++;
+                        console.log(`- ${key}: 不存在`);
                     }
                 });
                 
-                console.log('\n统计:');
-                console.log(`- 已删除: ${deletedOldEntries}/${oldFormatEntries.length}`);
-                console.log(`- 已禁用: ${disabledOldEntries}/${oldFormatEntries.length}`);
-                console.log(`- 仍启用: ${enabledOldEntries}/${oldFormatEntries.length}`);
-                
-                console.log('\n建议操作:');
-                if (!jsonEntry) {
-                    console.log('🔴 立即运行: QQ_CreateJSONWorldBookEntry()');
-                } else if (enabledOldEntries > 0) {
-                    console.log('🟡 运行: QQ_DisableOldFormats() 禁用所有旧格式');
-                    console.log('🟡 或运行: QQ_CleanupOldFormats() 彻底删除旧格式');
-                } else if (disabledOldEntries > 0) {
-                    console.log('🟢 系统已准备就绪，旧格式已禁用');
-                    console.log('💡 可选: QQ_CleanupOldFormats() 彻底删除旧格式');
-                } else {
-                    console.log('✨ 完美！系统已完全迁移到JSON格式');
-                }
-            };
-            
-            /**
-             * 禁用所有旧格式世界书条目
-             */
-            window.QQ_DisableOldFormats = async function() {
-                console.log('=== 禁用旧格式世界书条目 ===');
-                
-                const oldFormatEntries = [
-                    '手机-格式1-格式开头',
-                    '手机-格式2-QQ聊天',
-                    '手机-格式3-QQ空间',
-                    '手机-格式4-discord论坛',
-                    '手机-格式999-格式结尾'
-                ];
-                
-                let disabledCount = 0;
-                const updates = [];
-                
-                for (const entryName of oldFormatEntries) {
-                    const entry = entries?.find(e => e.comment === entryName);
-                    if (entry && entry.enabled) {
-                        entry.enabled = false;
-                        updates.push({ uid: entry.uid, enabled: false });
-                        disabledCount++;
-                        console.log(`✅ 已禁用: ${entryName}`);
-                    }
-                }
-                
-                if (disabledCount > 0) {
-                    // 使用setLorebookEntries批量更新
-                    try {
-                        await setLorebookEntries(worldbook, updates);
-                        console.log(`\n成功禁用 ${disabledCount} 个旧格式条目`);
-                        // 重新加载条目以确保更新
-                        entries = await getLorebookEntries(worldbook);
-                    } catch (error) {
-                        console.error('禁用条目时出错:', error);
-                    }
-                } else {
-                    console.log('没有需要禁用的条目');
-                }
-                
-                console.log('\n下一步: 测试AI是否能正确使用JSON格式');
-            };
-            
-            /**
-             * 彻底删除所有旧格式世界书条目
-             * ⚠️ 警告：此操作不可逆！
-             */
-            window.QQ_CleanupOldFormats = async function() {
-                console.log('=== 彻底删除旧格式世界书条目 ===');
-                console.log('⚠️ 警告：此操作不可逆！');
-                
-                // 二次确认
-                const confirmed = confirm('确定要彻底删除所有旧格式世界书条目吗？\n\n此操作不可逆！');
-                if (!confirmed) {
-                    console.log('操作已取消');
-                    return;
-                }
-                
-                const oldFormatEntries = [
-                    '手机-格式1-格式开头',
-                    '手机-格式2-QQ聊天',
-                    '手机-格式3-QQ空间',
-                    '手机-格式4-discord论坛',
-                    '手机-格式999-格式结尾'
-                ];
-                
-                let deletedCount = 0;
-                
-                for (const entryName of oldFormatEntries) {
-                    const entry = entries?.find(e => e.comment === entryName);
-                    if (entry) {
-                        try {
-                            await deleteLorebookEntry(worldbook, entry.uid);
-                            deletedCount++;
-                            console.log(`✅ 已删除: ${entryName}`);
-                        } catch (error) {
-                            console.error(`❌ 删除失败: ${entryName}`, error);
-                        }
-                    }
-                }
-                
-                if (deletedCount > 0) {
-                    // 重新加载世界书条目
-                    entries = await getLorebookEntries(worldbook);
-                    console.log(`\n成功删除 ${deletedCount} 个旧格式条目`);
-                    console.log('✨ 系统已完全迁移到JSON格式！');
-                } else {
-                    console.log('没有需要删除的条目');
-                }
+                console.log('\n建议:');
+                console.log('1. 运行 QQ_CreateJSONWorldBookEntry() 创建新格式');
+                console.log('2. 禁用所有旧格式条目');
+                console.log('3. 测试新JSON格式是否正常工作');
+                console.log('4. 确认无误后可删除旧格式条目');
             };
             
             // 自动创建或更新JSON世界书条目
@@ -25278,15 +25180,11 @@ MiPhone_end`;
                     QQ_CreateJSONWorldBookEntry();
                     console.log('JSON格式世界书条目处理完成');
                     console.log('');
-                    console.log('📌 可用的JSON系统命令:');
-                    console.log('- QQ_CheckJSONMigrationStatus() - 检查迁移状态');
-                    console.log('- QQ_CreateJSONWorldBookEntry() - 创建/更新JSON格式');
-                    console.log('- QQ_DisableOldFormats() - 禁用所有旧格式');
-                    console.log('- QQ_CleanupOldFormats() - 彻底删除旧格式（不可逆）');
-                    console.log('');
-                    console.log('🧪 测试工具:');
+                    console.log('📌 可用的JSON系统调试命令:');
                     console.log('- QQ_TestJSONSystem() - 测试JSON系统');
                     console.log('- QQ_TestSpecialContent() - 测试特殊内容处理');
+                    console.log('- QQ_CheckJSONMigrationStatus() - 检查迁移状态');
+                    console.log('- QQ_CreateJSONWorldBookEntry() - 手动创建/更新JSON格式');
                     console.log('========================');
                 } else {
                     console.warn('世界书系统未初始化，3秒后重试...');
