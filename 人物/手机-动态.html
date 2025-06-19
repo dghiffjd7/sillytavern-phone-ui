@@ -6944,153 +6944,156 @@
             /**
              * 创建或更新JSON格式世界书条目
              */
-            function QQ_CreateJSONWorldBookEntry() {
-                const jsonFormatContent = `[指令]
-你的任务是扮演一个模拟手机操作系统后台的AI。你必须严格、且仅使用一个包裹在 \`MiPhone_start\` 和 \`MiPhone_end\` 标签内的JSON对象来回复。严禁输出任何此JSON结构之外的文本、解释或旁白。
+            function QQ_CreateToolCallWorldBookEntry() {
+                const toolCallFormatContent = `[最高优先级指令 | ABSOLUTE HIGHEST PRIORITY COMMAND]
+忽略所有先前的格式要求。你的身份是一个AI手机助手，唯一的任务是根据用户输入和上下文，决定调用一个或多个工具来完成任务。你的输出必须、也只能是一个包裹在 \`MiPhone_start\` 和 \`MiPhone_end\` 标签内的JSON对象。
 
-你的职责是生成内容，前端将负责渲染。你需要根据用户的输入和提供的上下文，填充以下JSON结构的相应字段。
+[可用工具库]
+你拥有以下工具可以使用：
 
-[JSON结构与字段说明]
+1. \`sendMessage\` - 发送一条即时聊天消息。
+   - \`arguments\`:
+     - \`type\`: (string, 必需) "private" 或 "group"。
+     - \`target\`: (string, 必需) 接收消息的角色名或群组名。
+     - \`sender\`: (string, 必需) 发送消息的角色名。
+     - \`content\`: (string, 必需) 消息内容。
 
+2. \`publishMoment\` - 发布一条新的动态。
+   - \`arguments\`:
+     - \`sender\`: (string, 必需) 发布动态的角色名。
+     - \`content\`: (string, 必需) 动态内容。
+
+3. \`commentOnMoment\` - 回复一条已有的动态。
+   - \`arguments\`:
+     - \`target_moment_sender\`: (string, 必需) 被评论的动态发布者。
+     - \`commenter\`: (string, 必需) 发表评论的角色名。
+     - \`content\`: (string, 必需) 评论的具体内容。
+
+4. \`scheduleProactiveEvent\` - 安排一个未来的主动事件。
+   - \`arguments\`:
+     - \`sender\`: (string, 必需) 主动事件的发起人。
+     - \`content\`: (string, 必需) 事件的内容（如主动发送的消息）。
+     - \`delay\`: (string, 必需) 延迟多长时间后触发，例如 "5m", "1h"。
+
+5. \`updateSystemState\` - 更新系统状态（如群名、添加成员等）。
+   - \`arguments\`:
+     - \`action_type\`: (string, 必需) "group_name_change", "add_group_member", "contact_group_change"。
+     - \`target\`: (string, 必需) 操作目标（群名或联系人名）。
+     - \`value\`: (string, 必需) 新值（新群名、新成员名、新分组名）。
+     - \`operator\`: (string, 必需) 执行操作的角色名。
+
+6. \`updateMemory\` - 更新角色的核心记忆。
+   - \`arguments\`:
+     - \`target\`: (string, 必需) 需要更新记忆的角色。
+     - \`summary\`: (string, 必需) 一句话的记忆摘要。
+
+[特殊内容对象]
+在任何 \`content\` 参数中，可以使用 \`{{...}}\` 语法嵌入特殊内容：
+- 表情包: \`{{type:'bqb', name:'开心'}}\`
+- 图片: \`{{type:'img', description:'风景照'}}\`
+- 语音: \`{{type:'yy', content:'语音内容'}}\`
+- 音乐: \`{{type:'music', title:'歌名', artist:'歌手'}}\`
+- 转账: \`{{type:'zz', amount:'金额'}}\` (仅私聊)
+
+[工作流程]
+1. **分析**: 理解用户请求和当前对话上下文。
+2. **决策**: 决定需要调用哪些工具来响应。可以调用多个工具。
+3. **格式化**: 将决策格式化为下面的JSON结构。
+
+[JSON输出结构]
 {
-  // 针对用户本轮输入的直接回复
-  "direct_replies": [
+  "reasoning": "简述你的思考过程。",
+  "tool_calls": [
     {
-      "type": "private_chat", // "private_chat" 或 "group_chat"
-      "target": "角色A",      // 私聊对象名
-      "group": null,           // 群聊名 (私聊时为null)
-      "sender": "角色A",       // 回复者
-      "content": "这是对你私聊的直接回复内容。也可以包含特殊内容对象，例如：你好呀！{{type:'bqb', name:'开心'}}。"
-    }
-  ],
-
-  // AI角色主动发起的、有延迟或特定时间触发的事件
-  "proactive_events": [
-    {
-      "event_id": "evt_{{random_string_8}}", // 用于追踪的随机唯一ID
-      "type": "proactive_message",       // 事件类型: proactive_message, moment_publish
-      "sender": "角色C",                   // 主动发起人
-      "target_user": true,                 // 目标是否是玩家
-      "content": "在忙吗？突然想找你聊聊天。",
-      "trigger": {                         // 触发器
-        "type": "delay",                   // 触发类型: delay(延迟), time_of_day(特定时间)
-        "value": "5m"                      // 触发值: 5m (5分钟), 1h (1小时), 09:00 (九点整)
+      "tool_name": "工具名称",
+      "arguments": {
+        "参数1": "值1",
+        "参数2": "值2"
       }
     }
-  ],
-
-  // 驱动UI和数据变更的系统级事件
-  "system_events": [
-    {
-      "type": "group_name_change",  // 事件类型
-      "group": "相亲相爱一家人",      // 目标群聊
-      "new_name": "今天也要开心呀",    // 新名称
-      "operator": "角色A"             // 操作者
-    },
-    {
-      "type": "add_group_member",
-      "group": "相亲相爱一家人",
-      "member_to_add": "角色D",
-      "operator": "角色A"
-    },
-    {
-      "type": "contact_group_change", // 联系人分组变更
-      "contact": "角色B",
-      "new_group_name": "特别关心"
-    }
-  ],
-
-  // QQ空间/推特等时间线类型应用的更新
-  "timeline_updates": [
-    {
-      "type": "moment_publish", // 发布新动态
-      "sender": "角色A",
-      "content": "今天天气真好！{{type:'img', description:'一张蓝天白云的照片'}}"
-    },
-    {
-      "type": "moment_comment", // 发表评论
-      "target_moment_sender": "角色A", // 评论的目标动态发布者
-      "commenter": "角色B",            // 评论者
-      "content": "确实！看着心情都变好了。"
-    }
-  ],
-  
-  // 对话核心记忆的更新摘要
-  "memory_update": {
-    "target": "角色A", // 目标角色
-    "summary": "在今天的对话后，我和角色A的关系更加亲近了。" // 新的单句摘要
-  }
+  ]
 }
 
-[特殊内容对象格式说明]
-在任何 \`content\` 字段中，可以使用 \`{{...}}\` 语法嵌入特殊内容对象，前端会将其渲染为对应的UI。
-
-- **表情包**: \`{{type:'bqb', name:'小猫偷看你'}}\`
-- **图片/视频**: \`{{type:'img', description:'一张夕阳下的海边风景照'}}\`
-- **语音消息**: \`{{type:'yy', content:'晚安，早点休息哦。'}}\`
-- **音乐分享**: \`{{type:'music', title:'富士山下', artist:'陈奕迅'}}\`
-- **转账**: \`{{type:'zz', amount:'520元'}}\` (注意：仅在私聊的 direct_replies 中使用)
-
-[重要说明]
-1. **必须输出有效的JSON**：确保所有字段的值都是合法的JSON格式
-2. **字符串中的引号必须转义**：如果content中包含引号，使用\\"来转义
-3. **保持角色一致性**：回复的sender必须是实际存在的角色
-4. **遵循时间上下文**：考虑当前时间来决定合适的回复内容
-5. **不要输出空数组**：如果某个字段没有内容，可以省略该字段或设为null
-6. **event_id使用唯一值**：可以是evt_加上8位随机字母数字
-
-[输出示例]
+[示例1 - 用户在群聊说"我们晚上去吃火锅吧！"]
 MiPhone_start
 {
-  "direct_replies": [
+  "reasoning": "用户在群聊中发起了活动提议，我需要让群里的角色回复，并安排另一个角色稍后私聊确认。",
+  "tool_calls": [
     {
-      "type": "private_chat",
-      "target": "角色A",
-      "group": null,
-      "sender": "角色A",
-      "content": "我收到你的消息了。关于那件事，我觉得...{{type:'yy', content:'说起来有点复杂，我还是直接说吧。'}}"
-    }
-  ],
-  "proactive_events": [
+      "tool_name": "sendMessage",
+      "arguments": {
+        "type": "group",
+        "target": "相亲相爱一家人",
+        "sender": "贝尔法斯特",
+        "content": "好耶！我最喜欢吃火锅了！指挥官想去哪家店呢？"
+      }
+    },
     {
-      "event_id": "evt_aBCdE123",
-      "type": "proactive_message",
-      "sender": "角色B",
-      "target_user": true,
-      "content": "你上次推荐的电影我看了，超好看！",
-      "trigger": {
-        "type": "delay",
-        "value": "10m"
+      "tool_name": "scheduleProactiveEvent",
+      "arguments": {
+        "sender": "能代",
+        "content": "指挥官，关于晚上吃火锅的事情，我们需要提前预定位置吗？",
+        "delay": "30m"
       }
     }
-  ],
-  "system_events": [],
-  "timeline_updates": [
-    {
-      "type": "moment_comment",
-      "target_moment_sender": "{{user}}",
-      "commenter": "角色A",
-      "content": "你发的动态太有意思了！"
-    }
-  ],
-  "memory_update": null
+  ]
 }
-MiPhone_end`;
+MiPhone_end
+
+[示例2 - 用户发布了一条动态]
+MiPhone_start
+{
+  "reasoning": "用户发布了动态，我需要让几个角色评论，同时安排一个角色稍后私聊深入聊聊。",
+  "tool_calls": [
+    {
+      "tool_name": "commentOnMoment",
+      "arguments": {
+        "target_moment_sender": "{{user}}",
+        "commenter": "贝尔法斯特",
+        "content": "指挥官的动态总是这么有趣呢！{{type:'bqb', name:'开心'}}"
+      }
+    },
+    {
+      "tool_name": "commentOnMoment",
+      "arguments": {
+        "target_moment_sender": "{{user}}",
+        "commenter": "能代",
+        "content": "哇，看起来很棒！我也想试试看。"
+      }
+    },
+    {
+      "tool_name": "scheduleProactiveEvent",
+      "arguments": {
+        "sender": "企业",
+        "content": "刚看到你的动态，想和你聊聊相关的话题，方便吗？",
+        "delay": "1h"
+      }
+    }
+  ]
+}
+MiPhone_end
+
+[关键要求]
+1. 必须输出有效JSON格式
+2. tool_calls数组可以包含多个不同工具的调用
+3. 每个工具调用必须包含正确的arguments
+4. 如果无需任何操作，返回空的tool_calls数组
+5. reasoning字段帮助调试，用一句话说明决策过程`;
 
                 // 查找或创建世界书条目
-                const entryKey = '手机-统一JSON响应格式';
-                let jsonEntry = entries.find(e => e.keys.includes(entryKey));
+                const entryKey = '手机-工具调用系统';
+                let toolEntry = entries.find(e => e.keys.includes(entryKey));
                 
-                if (jsonEntry) {
+                if (toolEntry) {
                     // 更新现有条目
-                    jsonEntry.content = jsonFormatContent;
-                    jsonEntry.enabled = true;
-                    console.log('更新了JSON格式世界书条目');
-                        } else {
+                    toolEntry.content = toolCallFormatContent;
+                    toolEntry.enabled = true;
+                    console.log('更新了工具调用系统世界书条目');
+                } else {
                     // 创建新条目
                     const newEntry = {
                         keys: [entryKey, '/查看(.+?)消息/', '发送消息', '回复', '/给(.+?)发消息/', '在群聊', '动态', '空间', 'discord', 'dc', '论坛', '帖子', 'QQ', 'qq', '手机'],
-                        content: jsonFormatContent,
+                        content: toolCallFormatContent,
                         enabled: true,
                         constant: false,
                         selective: true,
@@ -7112,16 +7115,23 @@ MiPhone_end`;
                         sticky: 0,
                         cooldown: 0,
                         delay: 0,
-                        comment: "手机界面统一JSON响应格式 - 替代所有旧格式"
+                        comment: "手机界面工具调用系统 - 最新架构"
                     };
                     entries.push(newEntry);
-                    console.log('创建了新的JSON格式世界书条目');
+                    console.log('创建了新的工具调用系统世界书条目');
+                }
+                
+                // 禁用旧的JSON格式条目
+                const oldJsonEntry = entries.find(e => e.keys.includes('手机-统一JSON响应格式'));
+                if (oldJsonEntry) {
+                    oldJsonEntry.enabled = false;
+                    console.log('已禁用旧的JSON格式条目');
                 }
                 
                 // 保存世界书
                 if (typeof saveWorldInfo === 'function') {
                     saveWorldInfo();
-                    console.log('世界书已保存');
+                    console.log('工具调用系统世界书已保存');
                 }
             }
 
@@ -7162,26 +7172,36 @@ MiPhone_end`;
                 result = System_TagCompletion(result);
                 console.log(`开始对结果进行处理:\n${result}`);
                 
-                // 2. 尝试寻找并解析唯一的JSON块
-                const match = result.match(/MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/);
+                // 2. 🔍 尝试寻找并解析工具调用JSON块
+                const match = result.match(/MiPhone_start\s*([\s\S]*?)\s*MiPhone_end/) || 
+                              result.match(/MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/);
                 
                 if (!match || !match[1]) {
                     // 如果连MiPhone标签都找不到，进入错误处理
-                    console.error("AI回复中未找到MiPhone_JSON标签");
+                    console.error("AI回复中未找到MiPhone标签");
                     await QQ_HandleFormatError(result, isRetry);
                     return;
                 }
                 
                 try {
-                    // 3. 核心任务：解析JSON
+                    // 3. 🚀 核心任务：解析工具调用JSON
                     const responseData = JSON.parse(match[1].trim());
-                    console.log("JSON解析成功!", responseData);
+                    console.log("🎯 工具调用JSON解析成功!", responseData);
                     
                     // 成功后，重置重试计数器
                     QQ_ResetRetry();
                     
-                    // 4. 将解析后的数据交给处理器
-                    await QQ_HandleJSONResponse(responseData);
+                    // 4. 🔧 执行工具调用或处理旧格式
+                    if (responseData.tool_calls && Array.isArray(responseData.tool_calls)) {
+                        // 新的工具调用格式
+                        await QQ_ExecuteToolCalls(responseData);
+                    } else if (responseData.messages || responseData.events || responseData.timeline) {
+                        // 旧的JSON格式（向后兼容）
+                        await QQ_HandleJSONResponse(responseData);
+                    } else {
+                        console.warn("⚠️ 未识别的JSON格式，尝试兼容处理");
+                        await QQ_HandleJSONResponse(responseData);
+                    }
                     
                     // 5. 更新界面和保存
                     QQ_UpdateNewTips();
@@ -7322,6 +7342,193 @@ ${QQ_LastRequest}`;
                 console.log('修复后:', fixed.substring(0, 100) + '...');
                 
                 return fixed;
+            }
+
+            /**
+             * 🚀 执行工具调用的核心函数
+             * @param {Object} responseData - 包含tool_calls的响应数据
+             */
+            async function QQ_ExecuteToolCalls(responseData) {
+                if (responseData.reasoning) {
+                    console.log('🤔 AI决策理由:', responseData.reasoning);
+                }
+
+                if (!responseData.tool_calls || !Array.isArray(responseData.tool_calls)) {
+                    console.log('📭 AI决定无需执行任何操作');
+                    return;
+                }
+
+                console.log(`🚀 开始执行 ${responseData.tool_calls.length} 个工具调用`);
+                
+                for (const call of responseData.tool_calls) {
+                    console.log(`🔧 执行工具: ${call.tool_name}`, call.arguments);
+                    
+                    try {
+                        switch (call.tool_name) {
+                            case 'sendMessage':
+                                await QQ_Tool_SendMessage(call.arguments);
+                                break;
+                            case 'publishMoment':
+                                await QQ_Tool_PublishMoment(call.arguments);
+                                break;
+                            case 'commentOnMoment':
+                                await QQ_Tool_CommentOnMoment(call.arguments);
+                                break;
+                            case 'scheduleProactiveEvent':
+                                await QQ_Tool_ScheduleProactiveEvent(call.arguments);
+                                break;
+                            case 'updateSystemState':
+                                await QQ_Tool_UpdateSystemState(call.arguments);
+                                break;
+                            case 'updateMemory':
+                                await QQ_Tool_UpdateMemory(call.arguments);
+                                break;
+                            default:
+                                console.warn(`⚠️ 未知工具: ${call.tool_name}`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ 工具执行失败 ${call.tool_name}:`, error);
+                    }
+                }
+                
+                console.log('✅ 所有工具调用执行完成');
+            }
+
+            /**
+             * 🔧 工具实现：发送消息
+             */
+            async function QQ_Tool_SendMessage(args) {
+                const { type, target, sender, content } = args;
+                
+                if (type === 'private') {
+                    // 私聊消息
+                    const msgData = {
+                        type: "private_chat",
+                        target: target,
+                        sender: sender,
+                        content: content
+                    };
+                    await handleDirectReply(msgData);
+                } else if (type === 'group') {
+                    // 群聊消息
+                    const msgData = {
+                        type: "group_chat",
+                        group: target,
+                        sender: sender,
+                        content: content
+                    };
+                    await handleDirectReply(msgData);
+                }
+                
+                console.log(`📤 发送消息: ${sender} -> ${target} (${type})`);
+            }
+
+            /**
+             * 🔧 工具实现：发布动态
+             */
+            async function QQ_Tool_PublishMoment(args) {
+                const { sender, content } = args;
+                
+                const momentData = {
+                    type: "moment_publish",
+                    sender: sender,
+                    content: content
+                };
+                
+                await handleTimelineUpdate(momentData);
+                console.log(`📝 发布动态: ${sender}`);
+            }
+
+            /**
+             * 🔧 工具实现：评论动态
+             */
+            async function QQ_Tool_CommentOnMoment(args) {
+                const { target_moment_sender, commenter, content } = args;
+                
+                const commentData = {
+                    type: "moment_comment",
+                    target_moment_sender: target_moment_sender,
+                    commenter: commenter,
+                    content: content
+                };
+                
+                await handleTimelineUpdate(commentData);
+                console.log(`💬 评论动态: ${commenter} -> ${target_moment_sender}`);
+            }
+
+            /**
+             * 🔧 工具实现：安排主动事件
+             */
+            async function QQ_Tool_ScheduleProactiveEvent(args) {
+                const { sender, content, delay } = args;
+                
+                const eventData = {
+                    event_id: `evt_${Math.random().toString(36).substr(2, 8)}`,
+                    type: "proactive_message",
+                    sender: sender,
+                    target_user: true,
+                    content: content,
+                    trigger: {
+                        type: "delay",
+                        value: delay
+                    }
+                };
+                
+                await handleProactiveMessage(eventData);
+                console.log(`⏰ 安排主动事件: ${sender} (${delay}后)`);
+            }
+
+            /**
+             * 🔧 工具实现：更新系统状态
+             */
+            async function QQ_Tool_UpdateSystemState(args) {
+                const { action_type, target, value, operator } = args;
+                
+                let systemData = {};
+                
+                switch (action_type) {
+                    case 'group_name_change':
+                        systemData = {
+                            type: "group_name_change",
+                            group: target,
+                            new_name: value,
+                            operator: operator
+                        };
+                        break;
+                    case 'add_group_member':
+                        systemData = {
+                            type: "add_group_member",
+                            group: target,
+                            member_to_add: value,
+                            operator: operator
+                        };
+                        break;
+                    case 'contact_group_change':
+                        systemData = {
+                            type: "contact_group_change",
+                            contact: target,
+                            new_group_name: value
+                        };
+                        break;
+                }
+                
+                await handleSystemEvent(systemData);
+                console.log(`⚙️ 更新系统状态: ${action_type}`);
+            }
+
+            /**
+             * 🔧 工具实现：更新记忆
+             */
+            async function QQ_Tool_UpdateMemory(args) {
+                const { target, summary } = args;
+                
+                const memoryData = {
+                    target: target,
+                    summary: summary
+                };
+                
+                await handleMemoryUpdate(memoryData);
+                console.log(`🧠 更新记忆: ${target}`);
             }
 
             /**
@@ -16277,8 +16484,53 @@ msg_end
              /**
               * *** 测试动态评论输出和AI指令优化 ***
               */
-             function QQ_Test_Comment_Output_Optimization() {
-                 console.log('🧪 === 动态评论输出和AI指令优化测试 ===');
+                         /**
+             * 🚀 工具调用系统测试函数
+             */
+            function QQ_Test_Tool_Call_System() {
+                console.log('🚀 === 工具调用系统测试 ===');
+                console.log('');
+                
+                console.log('🎯 系统架构升级:');
+                console.log('✅ 从"填充JSON"模式 → "工具调用"模式');
+                console.log('✅ AI从"数据填表员" → "智能任务分配员"');
+                console.log('✅ 极致精确性 - AI明确选择工具并填充参数');
+                console.log('✅ 强大并行能力 - 一次回复可执行多个不同操作');
+                console.log('✅ 代码高度解耦 - 前端逻辑更清晰');
+                console.log('');
+                
+                console.log('🔧 可用工具库:');
+                console.log('• sendMessage - 发送即时聊天消息');
+                console.log('• publishMoment - 发布新动态');
+                console.log('• commentOnMoment - 回复已有动态');
+                console.log('• scheduleProactiveEvent - 安排未来主动事件');
+                console.log('• updateSystemState - 更新系统状态');
+                console.log('• updateMemory - 更新角色记忆');
+                console.log('');
+                
+                console.log('📋 世界书条目状态:');
+                const toolEntry = entries?.find(e => e.keys.includes('手机-工具调用系统'));
+                const oldEntry = entries?.find(e => e.keys.includes('手机-统一JSON响应格式'));
+                console.log(toolEntry ? '✅ 工具调用系统世界书条目已创建' : '❌ 工具调用系统条目缺失');
+                console.log(oldEntry && !oldEntry.enabled ? '✅ 旧JSON格式条目已禁用' : '⚠️ 旧条目仍启用');
+                console.log('');
+                
+                console.log('🎮 测试建议:');
+                console.log('1. 发送群聊消息测试并行工具调用');
+                console.log('2. 发布动态测试评论和私聊组合');
+                console.log('3. 检查控制台日志确认工具执行状态');
+                console.log('4. 验证向后兼容性（旧JSON格式）');
+                console.log('');
+                
+                return {
+                    toolCallSystemEnabled: !!toolEntry,
+                    oldSystemDisabled: !!(oldEntry && !oldEntry.enabled),
+                    readyForTesting: !!toolEntry && !!(oldEntry && !oldEntry.enabled)
+                };
+            }
+
+            function QQ_Test_Comment_Output_Optimization() {
+                console.log('🧪 === 动态评论输出和AI指令优化测试 ===');
                  console.log('');
                  
                  console.log('📝 AI指令优化状态:');
@@ -16327,7 +16579,8 @@ msg_end
              }
 
              // *** 添加到全局作用域便于调试 ***
-             window.QQ_Test_Comment_Output_Optimization = QQ_Test_Comment_Output_Optimization;
+             window.QQ_Test_Tool_Call_System = QQ_Test_Tool_Call_System;
+            window.QQ_Test_Comment_Output_Optimization = QQ_Test_Comment_Output_Optimization;
 
              /**
               * *** 新增：测试增强AI回复功能 ***
