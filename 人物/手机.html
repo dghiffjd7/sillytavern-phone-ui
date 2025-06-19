@@ -6386,8 +6386,10 @@
                             // 确保重试时设置gening状态
                             gening = true;
                             try {
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
                             } finally {
                                 gening = false;
                             }
@@ -6430,6 +6432,8 @@
                             // 重要：设置gening状态和异步执行重试
                             gening = true;
                             try {
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
                                 const retryResult = await QQ_Gen(QQ_LastRequest);
                                 return await ResultHandle(retryResult, true);
                             } finally {
@@ -6459,6 +6463,8 @@
                             // 重要：设置gening状态和异步执行重试
                             gening = true;
                             try {
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
                                 const retryResult = await QQ_Gen(QQ_LastRequest);
                                 return await ResultHandle(retryResult, true);
                             } finally {
@@ -6577,34 +6583,70 @@
              * @returns {boolean} 是否包含content标签
              */
             function QQ_HasContentTag(content) {
-                return /<content>[\s\S]*?<\/content>/i.test(content);
+                // 检查完整的content标签
+                if (/<content>[\s\S]*?<\/content>/i.test(content)) {
+                    return true;
+                }
+                
+                // 检查以<content>开头但没有结尾的情况
+                if (/<content>/i.test(content) && !/<\/content>/i.test(content)) {
+                    console.log('检测到不完整的content标签：以<content>开头但缺少结尾');
+                    return true;
+                }
+                
+                return false;
             }
 
             /**
-             * 清理content标签和consider标签
+             * 检查是否有不完整的content标签
+             * @param {string} content - 内容
+             * @returns {boolean} 是否为不完整的content标签
+             */
+            function QQ_HasIncompleteContentTag(content) {
+                return /<content>/i.test(content) && !/<\/content>/i.test(content);
+            }
+
+            /**
+             * 清理content标签和其他标签（支持不完整的content标签）
              * @param {string} content - 原始内容
              * @returns {string} 清理后的内容
              */
             function QQ_CleanContentTags(content) {
-                // 提取content标签内的内容
-                const contentMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
-                if (contentMatch) {
-                    let cleanContent = contentMatch[1];
-                    
-                    // 移除consider标签及其内容
-                    cleanContent = cleanContent.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
-                    
-                    // 移除其他可能的标签
-                    cleanContent = cleanContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
-                    
-                    // 清理多余的空白
-                    cleanContent = cleanContent.replace(/\n\s*\n/g, '\n').trim();
-                    
-                    return cleanContent;
+                let cleanContent;
+                
+                // 处理完整的content标签
+                const completeMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
+                if (completeMatch) {
+                    cleanContent = completeMatch[1];
+                    console.log('处理完整的content标签');
+                } else {
+                    // 处理不完整的content标签（以<content>开头到结尾）
+                    const incompleteMatch = content.match(/<content>([\s\S]*?)$/i);
+                    if (incompleteMatch) {
+                        cleanContent = incompleteMatch[1];
+                        console.log('处理不完整的content标签，提取<content>之后的所有内容');
+                    } else {
+                        // 没有content标签，返回原内容
+                        return content;
+                    }
                 }
                 
-                // 如果没有content标签，返回原内容
-                return content;
+                // 移除其他系统标签及其内容
+                cleanContent = cleanContent.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
+                cleanContent = cleanContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                cleanContent = cleanContent.replace(/<tableThink>[\s\S]*?<\/tableThink>/gi, '');
+                cleanContent = cleanContent.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, '');
+                cleanContent = cleanContent.replace(/<disclaimer>[\s\S]*?<\/disclaimer>/gi, '');
+                
+                // 移除未闭合的系统标签
+                cleanContent = cleanContent.replace(/<(?:consider|thinking|tableThink|tableEdit|disclaimer)>[\s\S]*$/gi, '');
+                
+                // 清理多余的空白和换行
+                cleanContent = cleanContent.replace(/\n\s*\n/g, '\n').trim();
+                
+                console.log('content标签清理完成，提取的内容:', cleanContent);
+                
+                return cleanContent;
             }
 
             /**
@@ -6826,6 +6868,102 @@
                     return false;
                 }
                 
+                return true;
+            }
+            
+            /**
+             * 测试不完整content标签处理功能
+             * 用于验证AI回复格式修复
+             */
+            function QQ_TestIncompleteContentHandling() {
+                console.log('=== 测试不完整content标签处理 ===');
+                
+                // 测试用例1：完整的content标签
+                const completeCase = `角色回复内容
+<content>
+*轻轻走过来，伸出手* "来，我们一起去那边看看吧"
+</content>`;
+                
+                // 测试用例2：不完整的content标签
+                const incompleteCase = `角色回复内容
+<content>
+*轻轻走过来，伸出手* "来，我们一起去那边看看吧"
+<tableThink>
+思考内容...
+</tableThink>
+<disclaimer>
+免责声明内容
+</disclaimer>`;
+                
+                // 测试用例3：没有content标签
+                const noContentCase = `普通的角色回复内容，没有特殊标签`;
+                
+                console.log('--- 测试完整content标签 ---');
+                console.log('原文:', completeCase);
+                console.log('检测结果:', QQ_HasContentTag(completeCase));
+                console.log('是否不完整:', QQ_HasIncompleteContentTag(completeCase));
+                console.log('清理结果:', QQ_CleanContentTags(completeCase));
+                
+                console.log('\n--- 测试不完整content标签 ---');
+                console.log('原文:', incompleteCase);
+                console.log('检测结果:', QQ_HasContentTag(incompleteCase));
+                console.log('是否不完整:', QQ_HasIncompleteContentTag(incompleteCase));
+                console.log('清理结果:', QQ_CleanContentTags(incompleteCase));
+                
+                console.log('\n--- 测试无content标签 ---');
+                console.log('原文:', noContentCase);
+                console.log('检测结果:', QQ_HasContentTag(noContentCase));
+                console.log('是否不完整:', QQ_HasIncompleteContentTag(noContentCase));
+                console.log('清理结果:', QQ_CleanContentTags(noContentCase));
+                
+                return true;
+            }
+            
+            /**
+             * 测试重试机制状态和延迟功能
+             * 用于验证重试是否正常工作
+             */
+            function QQ_TestRetryMechanism() {
+                console.log('=== 重试机制状态测试 ===');
+                console.log('当前重试次数:', QQ_RetryCount);
+                console.log('最大重试次数:', QQ_MAX_RETRY);
+                console.log('最后请求内容:', QQ_LastRequest ? '有内容' : '无内容');
+                console.log('最后请求角色名:', QQ_LastRequestName);
+                console.log('当前gening状态:', typeof gening !== 'undefined' ? gening : '未定义');
+                
+                // 测试延迟计算
+                for (let i = 1; i <= QQ_MAX_RETRY; i++) {
+                    const delay = 1000 + i * 500;
+                    console.log(`第${i}次重试延迟: ${delay}ms`);
+                }
+                
+                return {
+                    retryCount: QQ_RetryCount,
+                    maxRetry: QQ_MAX_RETRY,
+                    hasLastRequest: !!QQ_LastRequest,
+                    lastRequestName: QQ_LastRequestName
+                };
+            }
+            
+            /**
+             * 模拟重试延迟测试
+             * 用于验证延迟机制是否工作
+             */
+            async function QQ_TestRetryDelay() {
+                console.log('=== 模拟重试延迟测试 ===');
+                
+                for (let i = 1; i <= 3; i++) {
+                    const delay = 1000 + i * 500;
+                    console.log(`模拟第${i}次重试，延迟${delay}ms...`);
+                    const startTime = Date.now();
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    
+                    const actualDelay = Date.now() - startTime;
+                    console.log(`第${i}次重试完成，实际延迟: ${actualDelay}ms`);
+                }
+                
+                console.log('延迟测试完成');
                 return true;
             }
             
