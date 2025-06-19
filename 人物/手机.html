@@ -13090,9 +13090,12 @@ ${index + 1}. ${space.name}
                      await QQ_Save_Moments();
                      console.log('✓ 动态数据已保存到世界书');
                      
-                     // 保存消息数据
+                     // 保存消息数据（包括私聊和群聊）
                      await QQ_Save_Msg();
                      console.log('✓ 消息数据已保存到世界书');
+                     
+                     // *** 新增：额外保存群聊消息到专用存储 ***
+                     await QQ_Force_Save_Group_Messages();
                      
                      console.log('所有数据保存完成');
                      
@@ -13103,6 +13106,64 @@ ${index + 1}. ${space.name}
                      
                  } catch (error) {
                      console.error('强制保存数据时出错:', error);
+                 }
+             }
+
+             /**
+              * *** 新增：强制保存群聊消息到专用存储 ***
+              */
+             async function QQ_Force_Save_Group_Messages() {
+                 try {
+                     console.log('开始强制保存群聊消息到专用存储...');
+                     
+                     // 检查QQ_msgjson.群聊中的所有群聊
+                     if (QQ_msgjson.群聊 && typeof QQ_msgjson.群聊 === 'object') {
+                         const groups = await loadGroupChatsFromWorldbook();
+                         
+                         for (const groupName in QQ_msgjson.群聊) {
+                             const groupData = QQ_msgjson.群聊[groupName];
+                             if (groupData && groupData.msgs && Array.isArray(groupData.msgs)) {
+                                 // 找到对应的群聊存储
+                                 const targetGroup = groups.find(g => g.name === groupName);
+                                 if (targetGroup) {
+                                     // 保存最近的消息（避免重复保存）
+                                     const recentMessages = groupData.msgs.slice(-10); // 只处理最近10条消息
+                                     
+                                     for (const msg of recentMessages) {
+                                         const parts = msg.split('--');
+                                         if (parts.length >= 2) {
+                                             const messageObj = {
+                                                 sender: parts[0],
+                                                 content: parts[1],
+                                                 timestamp: parts.length >= 3 ? parts[2] : new Date().toLocaleTimeString('zh-CN', { hour12: false })
+                                             };
+                                             
+                                             // 使用现有的saveGroupMessage函数（已经有去重逻辑）
+                                             saveGroupMessage(targetGroup.id, messageObj);
+                                         }
+                                     }
+                                     
+                                     // 更新最后消息
+                                     if (groupData.msgs.length > 0) {
+                                         const lastMsg = groupData.msgs[groupData.msgs.length - 1];
+                                         const lastMsgParts = lastMsg.split('--');
+                                         if (lastMsgParts.length >= 2) {
+                                             await updateGroupLastMessage(targetGroup.id, lastMsgParts[1]);
+                                         }
+                                     }
+                                     
+                                     console.log(`✓ 群聊 ${groupName} 的消息已强制保存到专用存储`);
+                                 } else {
+                                     console.log(`⚠ 群聊 ${groupName} 在专用存储中不存在，跳过保存`);
+                                 }
+                             }
+                         }
+                     }
+                     
+                     console.log('群聊消息强制保存完成');
+                     
+                 } catch (error) {
+                     console.error('强制保存群聊消息时出错:', error);
                  }
              }
 
@@ -13170,6 +13231,88 @@ ${index + 1}. ${space.name}
 
              // *** 添加到全局作用域便于调试 ***
              window.QQ_Check_Comment_Backup_Status = QQ_Check_Comment_Backup_Status;
+
+             /**
+              * *** 新增：检查群聊消息保存状态的调试函数 ***
+              */
+             function QQ_Check_Group_Message_Backup_Status() {
+                 console.log('=== 群聊消息备份状态检查 ===');
+                 
+                 // 检查QQ_msgjson.群聊中的数据
+                 if (QQ_msgjson.群聊 && typeof QQ_msgjson.群聊 === 'object') {
+                     const groupNames = Object.keys(QQ_msgjson.群聊);
+                     console.log(`QQ_msgjson.群聊中有 ${groupNames.length} 个群聊:`);
+                     
+                     let totalMessages = 0;
+                     groupNames.forEach(groupName => {
+                         const groupData = QQ_msgjson.群聊[groupName];
+                         const msgCount = groupData && groupData.msgs ? groupData.msgs.length : 0;
+                         totalMessages += msgCount;
+                         console.log(`  - ${groupName}: ${msgCount}条消息`);
+                         
+                         // 显示最近几条消息
+                         if (msgCount > 0) {
+                             const recentMsgs = groupData.msgs.slice(-3);
+                             recentMsgs.forEach(msg => {
+                                 console.log(`    ${msg}`);
+                             });
+                         }
+                     });
+                     
+                     console.log(`总计: ${totalMessages}条群聊消息`);
+                 } else {
+                     console.log('QQ_msgjson.群聊 为空或不存在');
+                 }
+                 
+                 // 检查QQ_Groups数组
+                 console.log(`QQ_Groups数组: [${QQ_Groups.join(', ')}] (${QQ_Groups.length}个)`);
+                 
+                 // 检查世界书备份
+                 if (worldbook && entries) {
+                     const chatEntry = entries.find(entry => entry.comment === "QQ聊天备份数据");
+                     if (chatEntry) {
+                         try {
+                             const backupData = JSON.parse(chatEntry.content);
+                             if (backupData.群聊) {
+                                 const backupGroupNames = Object.keys(backupData.群聊);
+                                 let backupTotalMessages = 0;
+                                 
+                                 backupGroupNames.forEach(groupName => {
+                                     const groupData = backupData.群聊[groupName];
+                                     const msgCount = groupData && groupData.msgs ? groupData.msgs.length : 0;
+                                     backupTotalMessages += msgCount;
+                                 });
+                                 
+                                 console.log(`世界书备份: ${backupGroupNames.length}个群聊，${backupTotalMessages}条消息`);
+                                 console.log('✓ 世界书群聊备份存在且有效');
+                             } else {
+                                 console.log('世界书备份中无群聊数据');
+                             }
+                         } catch (error) {
+                             console.error('世界书备份数据解析失败:', error);
+                         }
+                     } else {
+                         console.warn('未找到聊天备份的世界书条目');
+                     }
+                 } else {
+                     console.warn('无法访问世界书或entries');
+                 }
+                 
+                 // 异步检查群聊专用存储
+                 loadGroupChatsFromWorldbook().then(groups => {
+                     console.log(`群聊专用存储: ${groups.length}个群聊`);
+                     groups.forEach(group => {
+                         console.log(`  - ${group.name} (ID: ${group.id})`);
+                     });
+                 }).catch(error => {
+                     console.error('检查群聊专用存储失败:', error);
+                 });
+                 
+                 console.log('=== 群聊检查完成 ===');
+             }
+
+             // *** 添加到全局作用域便于调试 ***
+             window.QQ_Check_Group_Message_Backup_Status = QQ_Check_Group_Message_Backup_Status;
              function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
@@ -17354,12 +17497,76 @@ ${index + 1}. ${space.name}
             }
             
             /**
-             * 保存群聊消息到本地存储
+             * 保存群聊消息到本地存储和QQ_msgjson
              */
             function saveGroupMessage(groupId, message) {
-                // 新版本：群聊消息暂时不持久化，仅在内存中保存
-                console.log('群聊消息（内存）:', message);
-                // 可以在这里添加到QQ_msgjson.群聊中，但暂时简化处理
+                try {
+                    // *** 修复：实际保存群聊消息到QQ_msgjson.群聊 ***
+                    
+                    // 确保QQ_msgjson.群聊结构存在
+                    if (!QQ_msgjson.群聊) {
+                        QQ_msgjson.群聊 = {};
+                    }
+                    
+                    // 根据groupId找到对应的群聊名称
+                    let groupName = null;
+                    
+                    // 尝试从QQ_Groups数组中匹配
+                    for (const name of QQ_Groups) {
+                        if (name.includes(groupId) || groupId.includes(name)) {
+                            groupName = name;
+                            break;
+                        }
+                    }
+                    
+                    // 如果没有找到，尝试通过界面元素查找
+                    if (!groupName) {
+                        const groupElement = document.querySelector(`[data-group-id="${groupId}"]`);
+                        if (groupElement) {
+                            groupName = groupElement.getAttribute('data-name') || 
+                                       groupElement.textContent.trim() ||
+                                       groupId; // 最后使用groupId作为名称
+                        } else {
+                            groupName = groupId; // 直接使用groupId
+                        }
+                    }
+                    
+                    console.log(`保存群聊消息 - groupId: ${groupId}, groupName: ${groupName}`, message);
+                    
+                    // 确保该群聊在QQ_msgjson.群聊中存在
+                    if (!QQ_msgjson.群聊[groupName]) {
+                        QQ_msgjson.群聊[groupName] = {
+                            msgs: [],
+                            members: []
+                        };
+                        console.log(`初始化群聊数据结构: ${groupName}`);
+                    }
+                    
+                    // 构造消息格式：发送者--消息内容
+                    const msgString = `${message.sender}--${message.content}`;
+                    
+                    // 检查是否已存在相同消息（避免重复）
+                    const isDuplicate = QQ_msgjson.群聊[groupName].msgs.some(msg => 
+                        msg === msgString || msg.includes(message.content)
+                    );
+                    
+                    if (!isDuplicate) {
+                        // 添加消息到群聊记录中
+                        QQ_msgjson.群聊[groupName].msgs.push(msgString);
+                        console.log(`✓ 群聊消息已保存到QQ_msgjson.群聊[${groupName}], 当前消息数: ${QQ_msgjson.群聊[groupName].msgs.length}`);
+                        
+                        // *** 新增：立即保存到世界书 ***
+                        setTimeout(async () => {
+                            await QQ_Save_Msg();
+                            console.log('✓ 群聊消息已同步保存到世界书备份');
+                        }, 100);
+                    } else {
+                        console.log('跳过重复的群聊消息:', msgString);
+                    }
+                    
+                } catch (error) {
+                    console.error('保存群聊消息失败:', error);
+                }
             }
             
             /**
