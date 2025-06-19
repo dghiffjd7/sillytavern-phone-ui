@@ -7418,7 +7418,12 @@
                 };
                 
                 QQ_ActiveSpaceId = spaceId;
-                QQ_SaveCharacterSpaces();
+                
+                // 异步保存到世界书（非阻塞）
+                QQ_SaveCharacterSpaces().catch(error => {
+                    console.error('保存角色互动空间失败:', error);
+                });
+                
                 QQ_DisplayCharacterSpace(spaceId, charName);
             }
             
@@ -7464,8 +7469,8 @@
              */
             async function QQ_SaveCharacterSpaces() {
                 try {
-                    if (!worldbook || !saveWorldInfo) {
-                        console.warn('世界书功能未初始化，无法保存角色互动空间');
+                    if (!QQ_IsWorldBookAvailable()) {
+                        console.warn('世界书功能不可用，无法保存角色互动空间');
                         return;
                     }
                     
@@ -7492,11 +7497,13 @@
                         entry.content = JSON.stringify(spaceData);
                     }
                     
-                    await saveWorldInfo();
-                    const totalSpaces = Object.values(QQ_CharacterSpaces).reduce((sum, char) => sum + Object.keys(char).length, 0);
-                    console.log('角色互动空间数据已保存到世界书:', Object.keys(QQ_CharacterSpaces).length, '个角色,', totalSpaces, '个空间');
+                    const success = await QQ_SafeSaveWorldInfo("角色互动空间数据");
+                    if (success) {
+                        const totalSpaces = Object.values(QQ_CharacterSpaces).reduce((sum, char) => sum + Object.keys(char).length, 0);
+                        console.log('角色互动空间数据保存完成:', Object.keys(QQ_CharacterSpaces).length, '个角色,', totalSpaces, '个空间');
+                    }
                 } catch (error) {
-                    console.error('保存角色互动空间到世界书失败:', error);
+                    console.error('保存角色互动空间时发生错误:', error);
                 }
             }
             
@@ -7718,6 +7725,39 @@
                 
                 // 新逻辑：显示角色专属精灵按钮
                 QQ_ShowCharacterSpirit(characterName);
+            }
+            
+            // ===== 世界书保存功能检查 =====
+            
+            /**
+             * 检查世界书保存功能是否可用
+             * @returns {boolean} 世界书功能是否可用
+             */
+            function QQ_IsWorldBookAvailable() {
+                return typeof worldbook !== 'undefined' && 
+                       worldbook !== null && 
+                       typeof saveWorldInfo === 'function';
+            }
+            
+            /**
+             * 安全地保存到世界书
+             * @param {string} operation - 操作描述
+             * @returns {Promise<boolean>} 保存是否成功
+             */
+            async function QQ_SafeSaveWorldInfo(operation = "数据") {
+                try {
+                    if (!QQ_IsWorldBookAvailable()) {
+                        console.warn(`世界书功能不可用，无法保存${operation}`);
+                        return false;
+                    }
+                    
+                    await saveWorldInfo();
+                    console.log(`${operation}已成功保存到世界书`);
+                    return true;
+                } catch (error) {
+                    console.error(`保存${operation}到世界书失败:`, error);
+                    return false;
+                }
             }
             
             // ===== 角色专属精灵按钮系统 =====
@@ -8995,8 +9035,8 @@
              */
             async function QQ_SaveInteractiveSpaces() {
                 try {
-                    if (!worldbook || !saveWorldInfo) {
-                        console.warn('世界书功能未初始化，无法保存互动空间');
+                    if (!QQ_IsWorldBookAvailable()) {
+                        console.warn('世界书功能不可用，无法保存互动空间');
                         return;
                     }
                     
@@ -9024,10 +9064,12 @@
                     }
                     
                     // 保存到世界书
-                    await saveWorldInfo();
-                    console.log('互动空间数据已保存到世界书:', Object.keys(QQ_InteractiveSpaces).length, '个空间');
+                    const success = await QQ_SafeSaveWorldInfo("互动空间数据");
+                    if (success) {
+                        console.log('互动空间数据保存完成:', Object.keys(QQ_InteractiveSpaces).length, '个空间');
+                    }
                 } catch (error) {
-                    console.error('保存互动空间到世界书失败:', error);
+                    console.error('保存互动空间时发生错误:', error);
                 }
             }
             
