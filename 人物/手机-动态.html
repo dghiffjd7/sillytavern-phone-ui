@@ -19168,7 +19168,11 @@ msg_end
              * 创建新的联系人分组
              */
             async function createNewContactGroup() {
-                console.log('开始创建新分组...');
+                console.log('🆕 开始创建新分组...');
+                
+                // *** 关键优化：先从世界书重新加载分组数据 ***
+                await QQ_ForceReloadContactGroups();
+                
                 const input = document.getElementById('new_group_name_input');
                 if (!input) {
                     console.error('未找到分组名称输入框元素');
@@ -19229,9 +19233,12 @@ msg_end
             /**
              * 渲染分组界面
              */
-            function renderContactGroups() {
+            async function renderContactGroups() {
                 const contactsContainer = document.getElementById('QQ_home_chars');
                 if (!contactsContainer) return;
+                
+                // *** 关键优化：渲染前先从世界书重新加载分组数据 ***
+                await QQ_ForceReloadContactGroups();
 
                 // 使用jQuery来保存群聊和私聊联系人，确保事件绑定不丢失
                 const $originalGroupChats = $(contactsContainer).find('.QQ_home_usermsg[data-group-type="true"]');
@@ -19329,6 +19336,9 @@ msg_end
              * 切换分组折叠状态
              */
             async function toggleGroup(groupId) {
+                // *** 关键优化：先从世界书重新加载分组数据 ***
+                await QQ_ForceReloadContactGroups();
+                
                 const group = contactGroups.find(g => g.id === groupId);
                 if (!group) return;
                 
@@ -19372,9 +19382,12 @@ msg_end
                 input.select();
                 
                 // 处理保存
-                const saveEdit = () => {
+                const saveEdit = async () => {
                     const newName = input.value.trim();
                     if (newName && newName !== currentName) {
+                        // *** 关键优化：先从世界书重新加载分组数据 ***
+                        await QQ_ForceReloadContactGroups();
+                        
                         // 检查重名
                         if (contactGroups.some(g => g.id !== groupId && g.name === newName)) {
                             alert('分组名称已存在');
@@ -19386,7 +19399,8 @@ msg_end
                         const group = contactGroups.find(g => g.id === groupId);
                         if (group) {
                             group.name = newName;
-                            setTimeout(() => saveGroupsToStorage(), 100);
+                            console.log(`🏷️ 分组重命名: ${currentName} → ${newName}`);
+                            await saveGroupsToStorage();
                         }
                     }
                     
@@ -19421,10 +19435,14 @@ msg_end
             async function deleteContactGroup(event, groupId) {
                 event.stopPropagation();
                 
+                // *** 关键优化：先从世界书重新加载分组数据 ***
+                await QQ_ForceReloadContactGroups();
+                
                 const group = contactGroups.find(g => g.id === groupId);
                 if (!group) return;
                 
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
+                    console.log(`🗑️ 删除分组: ${group.name} (${group.contacts.length}人)`);
                     // 移除分组
                     contactGroups = contactGroups.filter(g => g.id !== groupId);
                     await saveGroupsToStorage();
@@ -19498,29 +19516,35 @@ msg_end
             /**
              * 联系人拖拽放置
              */
-            function handleContactDrop(event) {
+            async function handleContactDrop(event) {
                 event.preventDefault();
                 
                 const dropZone = event.target.closest('.drop-zone');
                 if (!dropZone || !draggedElement) return;
+                
+                // *** 关键优化：先从世界书重新加载分组数据 ***
+                await QQ_ForceReloadContactGroups();
                 
                 const targetGroupId = dropZone.getAttribute('data-group-id');
                 const contactName = draggedElement.querySelector('.QQ_home_name')?.textContent?.trim();
                 
                 if (!contactName) return;
                 
+                console.log(`🔄 拖拽联系人: ${contactName} → ${targetGroupId === 'ungrouped' ? '未分组' : '分组'}`);
+                
                 // 从原分组中移除联系人
                 if (draggedFromGroup) {
                     const fromGroup = contactGroups.find(g => g.id === draggedFromGroup);
                     if (fromGroup) {
                         fromGroup.contacts = fromGroup.contacts.filter(c => c.name !== contactName);
+                        console.log(`📤 从分组 "${fromGroup.name}" 移除 "${contactName}"`);
                     }
                 }
                 
                 // 处理目标位置
                 if (targetGroupId === 'ungrouped') {
                     // 拖拽到未分组区域，不需要添加到任何分组
-                    console.log(`联系人 "${contactName}" 已移动到未分组区域`);
+                    console.log(`📍 联系人 "${contactName}" 已移动到未分组区域`);
                 } else {
                     // 添加到目标分组
                     const targetGroup = contactGroups.find(g => g.id === targetGroupId);
@@ -19531,13 +19555,13 @@ msg_end
                                 name: contactName,
                                 html: draggedElement.outerHTML
                             });
+                            console.log(`📥 添加 "${contactName}" 到分组 "${targetGroup.name}"`);
                         }
-                        console.log(`联系人 "${contactName}" 已移动到分组 "${targetGroup.name}"`);
                     }
                 }
                 
                 // 保存并重新渲染
-                setTimeout(() => saveGroupsToStorage(), 100);
+                await saveGroupsToStorage();
                 renderContactGroups();
                 
                 // 重新初始化拖拽功能
@@ -25486,17 +25510,47 @@ msg_end
             window.saveGroupsToStorage = async function() {
                 try {
                     const characterId = getCurrentCharacterId() || 'default';
-                    console.log(`保存分组到世界书，角色ID: ${characterId}`);
+                    console.log(`🔄 保存分组到世界书，角色ID: ${characterId}, 分组数量: ${contactGroups.length}`);
                     
                     const success = QQ_SaveContactGroupsToWorldBook(characterId, contactGroups);
                     
                     if (success) {
-                        console.log(`角色 ${characterId} 的分组数据已保存到世界书，共 ${contactGroups.length} 个分组`);
+                        console.log(`✅ 角色 ${characterId} 的分组数据已保存到世界书`);
+                        console.log('📊 分组详情:', contactGroups.map(g => `${g.name}(${g.contacts.length}人)`).join(', '));
                     } else {
-                        console.error('分组数据保存到世界书失败');
+                        console.error('❌ 分组数据保存到世界书失败');
                     }
                 } catch (error) {
-                    console.error('保存分组到世界书时出错:', error);
+                    console.error('💥 保存分组到世界书时出错:', error);
+                }
+            };
+            
+            /**
+             * *** 新增：强制重新加载分组数据 ***
+             */
+            window.QQ_ForceReloadContactGroups = async function() {
+                try {
+                    const characterId = getCurrentCharacterId() || 'default';
+                    console.log(`🔄 强制从世界书重新加载分组数据，角色ID: ${characterId}`);
+                    
+                    // 清空内存缓存
+                    contactGroups.length = 0;
+                    
+                    // 从世界书重新加载
+                    const groups = QQ_LoadContactGroupsFromWorldBook(characterId);
+                    
+                    if (groups && Array.isArray(groups)) {
+                        contactGroups.push(...groups);
+                        console.log(`✅ 从世界书重新加载了 ${groups.length} 个分组`);
+                        console.log('📊 分组详情:', groups.map(g => `${g.name}(${g.contacts.length}人)`).join(', '));
+                    } else {
+                        console.log('📋 世界书中没有找到分组数据');
+                    }
+                    
+                    return contactGroups;
+                } catch (error) {
+                    console.error('💥 强制重新加载分组数据失败:', error);
+                    return [];
                 }
             };
             
@@ -26885,6 +26939,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_ShowPublicInteractiveSpaces = QQ_ShowPublicInteractiveSpaces;
             window.QQ_CreatePublicInteractiveSpace = QQ_CreatePublicInteractiveSpace;
             window.QQ_ForceReloadInteractiveSpaces = QQ_ForceReloadInteractiveSpaces;
+            window.QQ_ForceReloadContactGroups = QQ_ForceReloadContactGroups;
             
         </script>
     </body>
