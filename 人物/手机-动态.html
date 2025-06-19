@@ -19318,18 +19318,44 @@ console.log('- 内容长度: 评论2句以上，回复4句以上，私聊3句以
                     if (isUser) {
                         // 用户消息 - 使用用户消息模板（右侧气泡，用户头像）
                         const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), true);
-                        messageHtml = _.template(chat_user_message)({
-                            content: specialContent || messageContent
-                        });
+                        // 如果specialContent返回的是普通消息模板的结果，直接使用它
+                        if (specialContent && specialContent.includes('QQ_chat_msgdiv')) {
+                            // specialContent已经是完整的消息HTML
+                            messageHtml = _.template(chat_user_message)({
+                                content: specialContent
+                            });
+                        } else if (specialContent) {
+                            // specialContent是特殊消息的HTML
+                            messageHtml = specialContent;
+                        } else {
+                            // 没有特殊内容，使用普通消息
+                            messageHtml = _.template(chat_user_message)({
+                                content: messageContent
+                            });
+                        }
                         console.log('使用用户消息模板');
                     } else {
                         // 角色消息 - 使用角色消息模板（左侧气泡，角色头像）
                         const specialContent = QQ_Chat_SpecialMsg(messageContent, sender, QQ_Groups.includes(name), false);
-                        messageHtml = _.template(chat_char_msg)({
-                            content: specialContent || messageContent,
-                            name: sender,
-                            isgroup: QQ_Groups.includes(name)
-                        });
+                        // 如果specialContent返回的是普通消息模板的结果，直接使用它
+                        if (specialContent && specialContent.includes('QQ_chat_msgdiv')) {
+                            // specialContent已经是完整的消息HTML，需要包装在角色消息模板中
+                            messageHtml = _.template(chat_char_msg)({
+                                content: specialContent,
+                                name: sender,
+                                isgroup: QQ_Groups.includes(name)
+                            });
+                        } else if (specialContent) {
+                            // specialContent是特殊消息的HTML
+                            messageHtml = specialContent;
+                        } else {
+                            // 没有特殊内容，使用普通消息
+                            messageHtml = _.template(chat_char_msg)({
+                                content: messageContent,
+                                name: sender,
+                                isgroup: QQ_Groups.includes(name)
+                            });
+                        }
                         console.log('使用角色消息模板，角色名:', sender);
                     }
                     
@@ -19385,13 +19411,9 @@ console.log('- 内容长度: 评论2句以上，回复4句以上，私聊3句以
                         : xx[1];
                 }
                 if (!match) {
-                    // 使用普通消息模板
-                    //console.log(`自己的消息,使用的普通模板`);
-                    return _.template(chat_normal_message)({
-                        message: msg,
-                        isgroup: isgroup || false,
-                        username: username,
-                    });
+                    // 对于普通消息，直接返回消息内容，不使用模板
+                    // 模板应该在QQ_Chat_AddMsg中统一处理
+                    return msg;
                 }
                 const type = match[1];
                 if (type == "bqb") {
