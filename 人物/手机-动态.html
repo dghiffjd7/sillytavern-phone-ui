@@ -4333,7 +4333,7 @@
             /* harmony default export */ var moment_page = moment_page_code; // ./src/界面/discord/discord_card.html
             // Module
             var discord_card_code =
-                '<div class="discord-card" data-id="${id}"> <div class="discord-card-tags">${tag}</div> <span class="discord-card-author">${name}</span> <span style="color:#67686a;font-size:15px;margin-left:8px">${time}</span> <div class="discord-card-title">${cardtilte}</div> <div class="discord-card-content">${content}</div> <div class="discord-card-fakeimg">${img}</div> <div class="discord-card-interact"> <svg aria-hidden="true" role="img" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"> <path fill="#4d5059" d="M12 22a10 10 0 1 0-8.45-4.64c.13.19.11.44-.04.61l-2.06 2.37A1 1 0 0 0 2.2 22H12Z" class=""> </path> </svg> <div style="color:#333237;margin-left:5px">${messages}</div> <div class="discord-card-interact-icon"> <div>👍</div> <div>${likes}</div> </div> </div> </div>';
+                '<div class="discord-card" data-id="${id}"> <div class="discord-card-tags">${tag}</div> <span class="discord-card-author">${name}</span> <span style="color:#67686a;font-size:15px;margin-left:8px">${time}</span> <div class="discord-card-title">${cardtilte}</div> <div class="discord-card-content">${content}</div> <div class="discord-card-fakeimg">${img}</div> <div class="discord-card-interact"> <svg aria-hidden="true" role="img" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"> <path fill="#4d5059" d="M12 22a10 10 0 1 0-8.45-4.64c.13.19.11.44-.04.61l-2.06 2.37A1 1 0 0 0 2.2 22H12Z" class=""> </path> </svg> <div style="color:#333237;margin-left:5px">${messages}</div> <div class="discord-card-interact-icon moment-like-button" data-moment-id="${id}" data-liked="${likedByUser}"> <div class="like-emoji">👍</div> <div class="moment-like-count">${likeCount}</div> </div> </div> </div>';
             // Exports
             /* harmony default export */ var discord_discord_card =
                 discord_card_code; // ./src/界面/discord/discord_thread.html
@@ -14252,7 +14252,7 @@ ${index + 1}. ${space.name}
                                 timestamp: momentData.timestampText,
                                 additionalInfo: momentData.additionalInfo,
                                 randomPhone: momentData.randomPhone,
-                                extraContent: momentData.extraContent || '',
+                                extraContent: momentData.likes ? momentData.likes.count : 0, // 修正：点赞数用于extraContent
                                 imgcontent: momentData.imgcontent || '',
                                 momentId: momentData.id, // 传递动态ID到模板
                                 // 新增：点赞相关数据
@@ -27897,19 +27897,44 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         return;
                     }
                     
-                    // 更新点赞按钮颜色
-                    const likeButton = momentElement.find(`.moment-like-button[data-moment-id="${momentId}"]`);
-                    if (likes.userLiked) {
-                        likeButton.css('fill', '#1677ff');
-                        likeButton.addClass('liked');
-                    } else {
-                        likeButton.css('fill', '#000000');
-                        likeButton.removeClass('liked');
+                    // 支持两种类型的点赞按钮
+                    
+                    // 类型1：Discord卡片中的.moment-like-button
+                    const discordLikeButton = momentElement.find(`.moment-like-button[data-moment-id="${momentId}"]`);
+                    const discordLikeCount = momentElement.find(`.moment-like-count`);
+                    
+                    if (discordLikeButton.length > 0) {
+                        // Discord卡片样式更新
+                        if (likes.userLiked) {
+                            discordLikeButton.css('color', '#1677ff');
+                            discordLikeButton.addClass('liked');
+                        } else {
+                            discordLikeButton.css('color', '#000000');
+                            discordLikeButton.removeClass('liked');
+                        }
+                        discordLikeCount.text(likes.count);
                     }
                     
-                    // 更新点赞数量
-                    const likeCount = momentElement.find(`.moment-like-count[data-moment-id="${momentId}"]`);
-                    likeCount.text(`${likes.count}人已赞`);
+                    // 类型2：动态模板中的点赞结构（含👍的SVG部分）
+                    const momentLikeSection = momentElement.find('span:contains("人已赞")').parent();
+                    const momentLikeText = momentElement.find('span:contains("人已赞")');
+                    
+                    if (momentLikeText.length > 0) {
+                        // 更新动态模板中的点赞文本
+                        momentLikeText.text(`${likes.count}人已赞`);
+                        
+                        // 更新👍颜色 - 查找包含👍的SVG路径
+                        const thumbsUpSvg = momentLikeSection.find('svg path').first();
+                        if (thumbsUpSvg.length > 0) {
+                            if (likes.userLiked) {
+                                thumbsUpSvg.css('fill', '#1677ff');
+                                momentLikeSection.addClass('liked');
+                            } else {
+                                thumbsUpSvg.css('fill', '#000000');
+                                momentLikeSection.removeClass('liked');
+                            }
+                        }
+                    }
                     
                     console.log(`✅ 已更新动态 ${momentId} 的点赞UI: ${likes.count}人已赞, 用户已点赞: ${likes.userLiked}`);
                 } catch (error) {
@@ -27977,7 +28002,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
              */
             window.QQ_InitMomentLikes = function() {
                 try {
-                    // 绑定点赞按钮点击事件
+                    // 类型1：绑定Discord卡片中的点赞按钮
                     $(document).off('click', '.moment-like-button').on('click', '.moment-like-button', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -27988,7 +28013,39 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         }
                     });
                     
-                    console.log('✅ 动态点赞功能已初始化');
+                    // 类型2：绑定动态模板中的👍点赞区域
+                    $(document).off('click', '.moment_button svg').on('click', '.moment_button svg', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        // 查找动态ID - 向上查找包含data-moment-id的元素
+                        const momentElement = $(this).closest('.user_moment[data-moment-id]');
+                        const momentId = momentElement.data('moment-id');
+                        
+                        if (momentId) {
+                            // 判断这是否是点赞按钮（通过路径内容或父元素判断）
+                            const svgPath = $(this).find('path').attr('d');
+                            // 检查是否是👍按钮（根据SVG path特征判断）
+                            if (svgPath && svgPath.includes('471.411583')) { // 这是👍按钮的path特征
+                                QQ_LikeMoment(momentId);
+                            }
+                        }
+                    });
+                    
+                    // 类型3：直接绑定包含"人已赞"文本的区域
+                    $(document).off('click', 'span:contains("人已赞")').on('click', 'span:contains("人已赞")', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        const momentElement = $(this).closest('.user_moment[data-moment-id]');
+                        const momentId = momentElement.data('moment-id');
+                        
+                        if (momentId) {
+                            QQ_LikeMoment(momentId);
+                        }
+                    });
+                    
+                    console.log('✅ 动态点赞功能已初始化（支持多种点赞按钮类型）');
                 } catch (error) {
                     console.error('初始化动态点赞功能失败:', error);
                 }
