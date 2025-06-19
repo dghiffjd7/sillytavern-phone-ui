@@ -6529,7 +6529,9 @@
                 if (momentes) {
                     ok = true;
                     for (const moment of momentes) {
-                        QQ_Moment_Parse(moment[1]);
+                        // *** 修复：检查是否在动态评论上下文中 ***
+                        const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                        QQ_Moment_Parse(moment[1], isInCommentContext);
                     }
                 }
                 
@@ -12839,7 +12841,7 @@ ${index + 1}. ${space.name}
                 }
                 
                 // *** 新增：检测动态评论的互动意图 ***
-                let finalRequest = `<Request:本次响应必须使用线上格式回复，可以选择动态评论回复或私聊回复。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end>`;
+                let finalRequest = `<Request:本次响应必须使用线上格式回复，只能回复评论，严禁重复生成完整动态内容。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end 注意：只回复评论内容，不要重复原动态的文字、图片或任何内容>`;
                 
                 if (QQ_DetectInteractiveIntent(value)) {
                     console.log('检测到动态评论中的互动意图，将引导AI回复互动内容');
@@ -12903,16 +12905,39 @@ ${index + 1}. ${space.name}
                      // 查找对应的动态数据对象
                      const targetMoment = QQ_MomentsData.find(moment => moment.id === momentId);
                      
-                     // *** 新增AI评论到数据中（不删除旧评论） ***
+                     // *** 获取原动态信息用于过滤重复内容 ***
+                     const originalMessage = $momentDiv.find('.moment_message').text();
+                     const originalSender = $momentDiv.find('.moment_sender').text();
+                     
+                     // *** 新增AI评论到数据中（不删除旧评论），同时过滤重复动态内容 ***
                      const newComments = [];
                      for (const line of lines) {
                          const trimmedLine = line.trim();
                          if (!trimmedLine) continue;
                          
+                         // *** 检查是否为完整动态格式（5个字段），如果是则跳过 ***
+                         const fullMomentMatch = trimmedLine.match(/\s*(.+?)--(.+?)--(.+?)--(.+?)--(.+)/);
+                         if (fullMomentMatch) {
+                             console.log('检测到AI重复生成完整动态格式，已过滤:', trimmedLine);
+                             continue;
+                         }
+                         
                          // 匹配评论格式：角色名--评论内容
                          const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
                          if (commentMatch) {
                              const [, name, commentContent] = commentMatch;
+                             
+                             // *** 过滤重复的动态内容 ***
+                             if (commentContent.includes(originalMessage) && commentContent.length > originalMessage.length * 0.8) {
+                                 console.log('检测到AI重复原动态内容，已过滤:', commentContent);
+                                 continue;
+                             }
+                             
+                             // *** 过滤图片标签重复 ***
+                             if (commentContent.includes('[img-') && originalMessage.includes('[img-')) {
+                                 console.log('检测到AI重复动态图片，已过滤:', commentContent);
+                                 continue;
+                             }
                              
                              const commentData = {
                                  name: name,
@@ -13041,7 +13066,7 @@ ${index + 1}. ${space.name}
                      console.error('处理私聊消息时出错:', error);
                  }
              }
-             function QQ_Moment_Parse(content) {
+             function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
                 let list;
@@ -13054,6 +13079,12 @@ ${index + 1}. ${space.name}
                         /\s*(.+?)--(.+?)--(.+?)--(.+?)--(.+)/,
                     );
                     if (match) {
+                        // *** 新增：在评论上下文中跳过完整动态格式 ***
+                        if (isCommentContext) {
+                            console.log('在评论上下文中检测到完整动态格式，已跳过:', line);
+                            continue;
+                        }
+                        
                         // 是新动态内容
                         console.log(`匹配到动态内容:${match[0]}`);
                         

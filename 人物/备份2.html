@@ -3507,13 +3507,70 @@
                                         flex-direction: column;
                                         margin-left: 3px;
                                         gap: 3px;
+                                        position: relative;
                                     "
                                 >
                                     <span
-                                        style="font-size: 15px"
+                                        style="font-size: 15px; cursor: pointer; position: relative;"
                                         id="QQ_home_UserName"
+                                        onclick="QQ_ToggleUserMenu()"
                                         ><strong>{{user}}</strong></span
                                     >
+                                    <!-- 用户下拉菜单 -->
+                                    <div id="QQ_user_menu" style="
+                                        position: absolute;
+                                        top: 100%;
+                                        left: 0;
+                                        background: white;
+                                        border-radius: 8px;
+                                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                                        z-index: 1000;
+                                        min-width: 150px;
+                                        display: none;
+                                        animation: menuSlideDown 0.2s ease;
+                                    ">
+                                        <div class="user_menu_item" onclick="QQ_ShowSpiritButton(); QQ_HideUserMenu();" style="
+                                            padding: 12px 16px;
+                                            cursor: pointer;
+                                            border-bottom: 1px solid #f0f0f0;
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 8px;
+                                            font-size: 14px;
+                                            color: #333;
+                                            transition: background-color 0.2s ease;
+                                        " onmouseover="this.style.backgroundColor='#f5f5f5'" 
+                                           onmouseout="this.style.backgroundColor='transparent'">
+                                            🧚‍✨ <span>召唤互动精灵</span>
+                                        </div>
+                                        <div class="user_menu_item" onclick="QQ_ShowInteractiveStats(); QQ_HideUserMenu();" style="
+                                            padding: 12px 16px;
+                                            cursor: pointer;
+                                            border-bottom: 1px solid #f0f0f0;
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 8px;
+                                            font-size: 14px;
+                                            color: #333;
+                                            transition: background-color 0.2s ease;
+                                        " onmouseover="this.style.backgroundColor='#f5f5f5'" 
+                                           onmouseout="this.style.backgroundColor='transparent'">
+                                            📊 <span>互动统计</span>
+                                        </div>
+                                        <div class="user_menu_item" onclick="window.QQ_Show_Interactive_Stats(); QQ_HideUserMenu();" style="
+                                            padding: 12px 16px;
+                                            cursor: pointer;
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 8px;
+                                            font-size: 14px;
+                                            color: #333;
+                                            transition: background-color 0.2s ease;
+                                        " onmouseover="this.style.backgroundColor='#f5f5f5'" 
+                                           onmouseout="this.style.backgroundColor='transparent'">
+                                            🔧 <span>调试信息</span>
+                                        </div>
+                                    </div>
                                     <div
                                         style="
                                             display: flex;
@@ -3672,8 +3729,9 @@
                     "
                 >
                     <span
-                        style="font-size: 15px"
+                        style="font-size: 15px; cursor: pointer;"
                         id="QQ_message_list_UserName"
+                        onclick="QQ_ToggleUserMenu()"
                         ><strong>{{user}}</strong></span
                     >
                     <div
@@ -5531,6 +5589,68 @@
                 
                 console.log('=== 检查完成 ===');
             };
+
+            /**
+             * *** 新增：查看分组备份状态 ***
+             * 可在控制台调用 window.QQ_Show_Groups_Stats() 来查看分组备份统计
+             */
+            window.QQ_Show_Groups_Stats = function() {
+                const charId = getCurrentCharacterId();
+                
+                if (!worldbook || !entries) {
+                    console.log('📊 分组备份统计：世界书未初始化');
+                    return;
+                }
+                
+                const groupsKey = `QQ_分组备份_${charId}`;
+                const groupsEntry = entries.find(entry => 
+                    entry.keys.includes(groupsKey)
+                );
+                
+                let worldbookGroups = 0;
+                let lastUpdate = null;
+                
+                if (groupsEntry && groupsEntry.content) {
+                    try {
+                        const groupsData = JSON.parse(groupsEntry.content);
+                        worldbookGroups = groupsData.groups ? groupsData.groups.length : 0;
+                        lastUpdate = groupsData.lastUpdate;
+                    } catch (e) {
+                        console.error('解析世界书分组数据失败:', e);
+                    }
+                }
+                
+                // 检查localStorage中的旧数据
+                const localKey = getCharacterGroupsKey();
+                const localStored = localStorage.getItem(localKey);
+                let localGroups = 0;
+                if (localStored) {
+                    try {
+                        const localData = JSON.parse(localStored);
+                        localGroups = localData.length || 0;
+                    } catch (e) {}
+                }
+                
+                console.log(`📊 分组备份统计 (角色: ${charId})：
+                当前内存中分组: ${contactGroups.length}个
+                世界书中分组: ${worldbookGroups}个
+                localStorage中分组: ${localGroups}个
+                最后保存时间: ${lastUpdate ? new Date(lastUpdate).toLocaleString() : '未知'}
+                存储位置: ${worldbookGroups > 0 ? '世界书' : (localGroups > 0 ? 'localStorage' : '无数据')}`);
+                
+                if (localGroups > 0 && worldbookGroups === 0) {
+                    console.log('💡 提示：检测到localStorage中有旧的分组数据，建议创建新分组以迁移到世界书');
+                }
+                
+                return {
+                    characterId: charId,
+                    memoryGroups: contactGroups.length,
+                    worldbookGroups: worldbookGroups,
+                    localStorageGroups: localGroups,
+                    lastUpdate: lastUpdate,
+                    storageLocation: worldbookGroups > 0 ? 'worldbook' : (localGroups > 0 ? 'localStorage' : 'none')
+                };
+            };
             
             /**
              * *** 新增：动态删除功能 ***
@@ -6133,7 +6253,16 @@
                     }
                     QQ_CacheSendMsg = "";
                     if (value) {
-                        value += `\n${Request}`;
+                        // *** 新增：检测用户输入的互动意图 ***
+                        const userInput = content || SendValue || "";
+                        if (QQ_DetectInteractiveIntent(userInput)) {
+                            console.log('检测到用户互动意图，将引导AI回复互动内容');
+                            // 修改Request以引导AI生成互动内容
+                            const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
+                            value += `\n${modifiedRequest}`;
+                        } else {
+                            value += `\n${Request}`;
+                        }
                         const namevalue = QQ_GetValueName(value);
                         if (namevalue) {
                             for (const match of namevalue) {
@@ -6199,7 +6328,15 @@
                         User_LastMsgMap.私聊[name] =
                             `${UserName}--${SendValue}`;
                     }
-                    value += `\n${Request}`;
+                    
+                    // *** 新增：对SendValue也检测互动意图 ***
+                    if (QQ_DetectInteractiveIntent(SendValue)) {
+                        console.log('检测到SendValue中的互动意图，将引导AI回复互动内容');
+                        const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
+                        value += `\n${modifiedRequest}`;
+                    } else {
+                        value += `\n${Request}`;
+                    }
                 }
                 console.log(
                     `User_LastMsg:\n${JSON.stringify(User_LastMsgMap)}`,
@@ -6217,7 +6354,7 @@
                 } finally {
                     gening = false;
                     console.log(`生成结束`);
-                    QQ_Save_Msg();
+                    await QQ_Save_Msg(); // 确保异步保存完成
                 }
                 await ResultHandle(result);
             }
@@ -6226,6 +6363,15 @@
             const QQ_MAX_RETRY = 3;
             let QQ_LastRequest = "";
             let QQ_LastRequestName = "";
+            
+            /**
+             * 重置重试状态
+             */
+            function QQ_ResetRetry() {
+                QQ_RetryCount = 0;
+                QQ_LastRequest = "";
+                QQ_LastRequestName = "";
+            }
 
             async function ResultHandle(result, isRetry = false) {
                 if (!result) {
@@ -6237,8 +6383,14 @@
                         
                         // 使用保存的最后请求重新生成
                         if (QQ_LastRequest) {
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
+                            // 确保重试时设置gening状态
+                            gening = true;
+                            try {
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
                         }
                     } else {
                         // 重试次数用完或其他情况
@@ -6263,7 +6415,7 @@
                     if (QQ_HasContentTag(result)) {
                         // 有content标签，直接显示互动空间
                         console.log("检测到content标签包裹的互动内容，显示互动空间");
-                        QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         QQ_ResetRetry();
                         return;
                     }
@@ -6288,7 +6440,7 @@
                         // 重试用完，判断是否为互动内容
                         if (QQ_IsInteractiveContent(result)) {
                             // 在手机界面显示互动内容
-                            QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         } else {
                             triggerSlash("/echo AI没有回复线上格式,原文直接输出到新楼层");
                             triggerSlash(`/sendas name={{char}} ${result}`);
@@ -6317,7 +6469,7 @@
                         // 重试用完，判断是否为互动内容
                         if (QQ_IsInteractiveContent(result)) {
                             // 在手机界面显示互动内容
-                            QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         } else {
                             triggerSlash("/echo AI回复了多个线上格式,直接输出到新楼层");
                             triggerSlash(`/sendas name={{char}} ${result}`);
@@ -6380,11 +6532,16 @@
                         QQ_Moment_Parse(moment[1]);
                     }
                 }
+                
+                // 成功处理后重置重试状态
+                if (ok) {
+                    QQ_ResetRetry();
+                }
                 if (!ok) {
                     // 最后的格式检查失败 - 判断是否为互动内容
                     if (QQ_IsInteractiveContent(result)) {
                         // 在手机界面显示互动内容
-                        QQ_ShowInteractiveSpace(result, QQ_LastRequestName);
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                     } else {
                         triggerSlash("/echo 回复不为空但不存在手机格式,输出到新楼层");
                         triggerSlash(
@@ -6510,6 +6667,930 @@
                 return matchCount >= 2;
             }
 
+            // ===== 互动空间管理系统 =====
+            
+            // 全局变量管理互动空间
+            let QQ_InteractiveSpaces = {}; // 存储所有公共互动空间数据
+            let QQ_CharacterSpaces = {}; // 存储角色专属互动空间数据
+            let QQ_ActiveSpaceId = null; // 当前活动的互动空间ID
+            let QQ_SpiritVisible = false; // 精灵按钮是否可见
+            const QQ_INTERACTIVE_BACKUP_KEY = "QQ_互动空间备份";
+            const QQ_CHARACTER_SPACES_KEY = "QQ_角色互动空间备份";
+            
+            // ===== 主动互动检测系统 =====
+            
+            /**
+             * 检测用户消息是否包含明显的互动意图
+             * @param {string} content - 用户消息内容
+             * @returns {boolean} - 是否包含互动意图
+             */
+            function QQ_DetectInteractiveIntent(content) {
+                if (!content || typeof content !== 'string') return false;
+                
+                const text = content.toLowerCase().trim();
+                
+                // 身体接触类关键词
+                const physicalContactKeywords = [
+                    '拥抱', '抱住', '搂抱', '紧抱',
+                    '亲吻', 
+                    '触摸', '抚摸', '轻抚', 
+                    '握手', '牵手', '拉手', 
+                    '拍肩', '拍背', '轻拍', 
+                    '推', '拉', '扶', '搀扶', '扶着',
+                    '贴近', '靠近', '紧贴'
+                ];
+                
+                // 面对面互动类关键词
+                const faceToFaceKeywords = [
+                    '面对面', '当面', '面前', '眼神交流', '对视', '凝视',
+                    '现实中', '真实中', '现实里', '面对着',
+                    '走向', '走近', '走过去', '过来', '靠过来',
+                    '坐过来', '坐在身边', '坐在旁边',
+                    '躺着', '趴下',
+                    '蹲下', '跪下', '弯腰', '俯身'
+                ];
+                
+                // 情感表达类关键词
+                const emotionalKeywords = [
+                    '心跳', '颤抖',
+                    '微笑', '笑容', '高兴', '激动',
+                    '哭', '流泪', '哭泣', '眼泪', '哽咽',
+                    '愤怒', '恼火', '瞪眼',
+                    '体贴', '呵护'
+                ];
+                
+                // 动作描述类关键词
+                const actionKeywords = [
+                    '伸手', '张开手', '举手', '挥手', '招手',
+                    '转身', '回头', '侧身',
+                    '仰头', '俯视', '仰视',
+                    '踮脚', '跳跃', '跑过来', '冲过来'
+                ];
+                
+                // 组合关键词检测
+                const allKeywords = [
+                    ...physicalContactKeywords,
+                    ...faceToFaceKeywords, 
+                    ...emotionalKeywords,
+                    ...actionKeywords
+                ];
+                
+                let matchCount = 0;
+                let matchedKeywords = [];
+                
+                for (const keyword of allKeywords) {
+                    if (text.includes(keyword)) {
+                        matchCount++;
+                        matchedKeywords.push(keyword);
+                    }
+                }
+                
+                // 检测动作描述模式 *动作* 或 【情感】
+                const actionPatterns = [
+                    /\*[^*]+\*/g, // *动作*
+                    /【[^】]+】/g, // 【情感】
+                    /\([^)]*动作[^)]*\)/g, // (包含动作的描述)
+                    /\([^)]*表情[^)]*\)/g, // (包含表情的描述)
+                ];
+                
+                let patternMatches = 0;
+                for (const pattern of actionPatterns) {
+                    const matches = text.match(pattern);
+                    if (matches) {
+                        patternMatches += matches.length;
+                        matchedKeywords.push(...matches);
+                    }
+                }
+                
+                // 判断是否为互动意图
+                const isInteractive = matchCount >= 2 || patternMatches >= 1 || 
+                    (matchCount >= 1 && patternMatches >= 1);
+                
+                if (isInteractive) {
+                    console.log(`检测到互动意图: 关键词${matchCount}个, 模式${patternMatches}个`);
+                    console.log('匹配的关键词/模式:', matchedKeywords);
+                }
+                
+                return isInteractive;
+            }
+            
+            /**
+             * 智能处理互动内容 - 决定显示在公共空间还是角色专属空间
+             * @param {string} content - AI回复的互动内容
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_HandleInteractiveContent(content, characterName = "") {
+                // 清理内容
+                let cleanContent;
+                if (QQ_HasContentTag(content)) {
+                    cleanContent = QQ_CleanContentTags(content);
+                } else {
+                    cleanContent = content
+                        .replace(/MiPhone_start/g, "")
+                        .replace(/MiPhone_end/g, "")
+                        .trim();
+                }
+                
+                // 检测是否包含多个角色或群聊场景
+                const isMultiCharacter = QQ_DetectMultiCharacterInteraction(cleanContent);
+                const targetCharacter = characterName || QQ_LastRequestName || charcardname || "角色";
+                
+                if (isMultiCharacter) {
+                    // 多角色互动，显示在公共互动空间
+                    console.log("检测到多角色互动，显示在公共互动空间");
+                    QQ_ShowPublicInteractiveSpace(cleanContent, targetCharacter);
+                } else {
+                    // 单角色互动，显示在角色专属空间
+                    console.log(`检测到单角色互动，显示在${targetCharacter}的专属空间`);
+                    QQ_ShowCharacterInteractiveSpace(cleanContent, targetCharacter);
+                }
+            }
+            
+            /**
+             * 检测是否为多角色互动
+             * @param {string} content - 互动内容
+             * @returns {boolean} 是否为多角色互动
+             */
+            function QQ_DetectMultiCharacterInteraction(content) {
+                // 检测群聊相关关键词
+                const groupKeywords = [
+                    '群聊', '大家', '所有人', '一起', '我们', '他们',
+                    '众人', '全体', '集体', '共同', '同时'
+                ];
+                
+                if (groupKeywords.some(keyword => content.includes(keyword))) {
+                    return true;
+                }
+                
+                // 检测多个角色名提及
+                const characterMentions = content.match(/[@【（＜]\s*([^@【（＜】）＞\s]{2,8})\s*[】）＞]/g) || [];
+                const uniqueCharacters = [...new Set(characterMentions)];
+                
+                if (uniqueCharacters.length > 1) {
+                    return true;
+                }
+                
+                // 检测多人场景描述
+                const multiPersonPatterns = [
+                    /(\w+)和(\w+)(?:一起|同时|互相)/,
+                    /(?:和|与|跟)(\w+)(?:一起|同时)/,
+                    /(\w+)、(\w+)(?:等|们)/,
+                    /大家|众人|所有人/
+                ];
+                
+                if (multiPersonPatterns.some(pattern => pattern.test(content))) {
+                    return true;
+                }
+                
+                return false;
+            }
+            
+            /**
+             * 显示公共互动空间
+             * @param {string} content - 互动内容
+             * @param {string} characterName - 主要角色名称
+             */
+            function QQ_ShowPublicInteractiveSpace(content, characterName = "") {
+                const spaceId = QQ_GenerateSpaceId();
+                const spaceName = QQ_GetSpaceName(content, characterName);
+                const charName = characterName || charcardname || "角色";
+                const charAvatar = charAvatarPath || "default_avatar.png";
+                
+                // 保存到公共互动空间
+                QQ_InteractiveSpaces[spaceId] = {
+                    id: spaceId,
+                    name: spaceName,
+                    content: content,
+                    characterName: charName,
+                    characterAvatar: charAvatar,
+                    type: 'public',
+                    participants: QQ_ExtractParticipants(content),
+                    createdAt: new Date().toISOString(),
+                    lastAccess: new Date().toISOString()
+                };
+                
+                QQ_ActiveSpaceId = spaceId;
+                QQ_SaveInteractiveSpaces();
+                QQ_DisplayInteractiveSpace(spaceId, '公共互动空间');
+            }
+            
+            /**
+             * 显示角色专属互动空间
+             * @param {string} content - 互动内容
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_ShowCharacterInteractiveSpace(content, characterName) {
+                const charName = characterName || charcardname || "角色";
+                const spaceId = QQ_GenerateSpaceId();
+                const spaceName = `${charName}·${QQ_GetSceneFromContent(content)}`;
+                const charAvatar = charAvatarPath || "default_avatar.png";
+                
+                // 初始化角色专属空间数据
+                if (!QQ_CharacterSpaces[charName]) {
+                    QQ_CharacterSpaces[charName] = {};
+                }
+                
+                // 保存到角色专属空间
+                QQ_CharacterSpaces[charName][spaceId] = {
+                    id: spaceId,
+                    name: spaceName,
+                    content: content,
+                    characterName: charName,
+                    characterAvatar: charAvatar,
+                    type: 'character',
+                    createdAt: new Date().toISOString(),
+                    lastAccess: new Date().toISOString()
+                };
+                
+                QQ_ActiveSpaceId = spaceId;
+                QQ_SaveCharacterSpaces();
+                QQ_DisplayCharacterSpace(spaceId, charName);
+            }
+            
+            /**
+             * 从内容中提取参与者
+             * @param {string} content - 互动内容
+             * @returns {string[]} 参与者列表
+             */
+            function QQ_ExtractParticipants(content) {
+                const mentions = content.match(/[@【（＜]\s*([^@【（＜】）＞\s]{2,8})\s*[】）＞]/g) || [];
+                const participants = mentions.map(m => m.replace(/[@【（＜】）＞]/g, '').trim());
+                return [...new Set(participants)]; // 去重
+            }
+            
+            /**
+             * 从内容中提取场景关键词
+             * @param {string} content - 互动内容
+             * @returns {string} 场景名称
+             */
+            function QQ_GetSceneFromContent(content) {
+                const sceneKeywords = [
+                    { keywords: ['拥抱', '抱抱', '安慰'], name: '温暖时刻' },
+                    { keywords: ['聊天', '谈话', '交流'], name: '谈话' },
+                    { keywords: ['游戏', '玩耍', '娱乐'], name: '游戏' },
+                    { keywords: ['学习', '工作', '努力'], name: '学习' },
+                    { keywords: ['散步', '走路', '逛'], name: '散步' },
+                    { keywords: ['吃饭', '用餐', '食物'], name: '用餐' },
+                    { keywords: ['睡觉', '休息', '午睡'], name: '休息' },
+                    { keywords: ['看书', '阅读', '学习'], name: '阅读' },
+                ];
+                
+                for (const scene of sceneKeywords) {
+                    if (scene.keywords.some(keyword => content.includes(keyword))) {
+                        return scene.name;
+                    }
+                }
+                
+                return '日常';
+            }
+            
+            /**
+             * 保存角色专属互动空间到世界书
+             */
+            async function QQ_SaveCharacterSpaces() {
+                try {
+                    if (!worldbook || !saveWorldInfo) {
+                        console.warn('世界书功能未初始化，无法保存角色互动空间');
+                        return;
+                    }
+                    
+                    const spaceData = {
+                        characterSpaces: QQ_CharacterSpaces,
+                        lastUpdated: new Date().toISOString(),
+                        version: "1.0"
+                    };
+                    
+                    // 创建或更新世界书条目
+                    let entry = worldbook.entries.find(e => e.comment === QQ_CHARACTER_SPACES_KEY);
+                    if (!entry) {
+                        entry = {
+                            comment: QQ_CHARACTER_SPACES_KEY,
+                            content: JSON.stringify(spaceData),
+                            key: ["此世界书永不触发_角色互动空间"],
+                            keysecondary: [],
+                            order: 1001,
+                            enabled: true,
+                            uid: Date.now() + 1
+                        };
+                        worldbook.entries.push(entry);
+                    } else {
+                        entry.content = JSON.stringify(spaceData);
+                    }
+                    
+                    await saveWorldInfo();
+                    const totalSpaces = Object.values(QQ_CharacterSpaces).reduce((sum, char) => sum + Object.keys(char).length, 0);
+                    console.log('角色互动空间数据已保存到世界书:', Object.keys(QQ_CharacterSpaces).length, '个角色,', totalSpaces, '个空间');
+                } catch (error) {
+                    console.error('保存角色互动空间到世界书失败:', error);
+                }
+            }
+            
+            /**
+             * 显示通用互动空间界面
+             * @param {string} spaceId - 空间ID
+             * @param {string} spaceTitle - 空间标题
+             * @param {string} characterName - 角色名（可选，用于角色专属空间）
+             */
+            function QQ_DisplayInteractiveSpace(spaceId, spaceTitle, characterName = null) {
+                const spaceData = characterName ? 
+                    QQ_CharacterSpaces[characterName][spaceId] : 
+                    QQ_InteractiveSpaces[spaceId];
+                
+                if (!spaceData) {
+                    console.error('未找到互动空间数据:', spaceId);
+                    return;
+                }
+                
+                // 移除现有的互动空间
+                $('.QQ_interactive_space').remove();
+                
+                const isCharacterSpace = spaceData.type === 'character';
+                const headerColor = isCharacterSpace ? 
+                    'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)' : 
+                    'linear-gradient(135deg, #4FC3F7 0%, #29B6F6 100%)';
+                
+                // 创建互动空间HTML - 现代化手机界面风格
+                const interactiveSpaceHtml = `
+                    <div class="QQ_interactive_space" data-space-id="${spaceId}" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.7);
+                        z-index: 10000;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: fadeIn 0.3s ease;
+                        backdrop-filter: blur(10px);
+                    ">
+                        <div class="QQ_interactive_content" style="
+                            background: #ffffff;
+                            border-radius: 20px;
+                            padding: 0;
+                            max-width: 90%;
+                            max-height: 80%;
+                            overflow: hidden;
+                            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+                            position: relative;
+                            color: #333;
+                            animation: slideIn 0.3s ease;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        ">
+                            <div class="QQ_interactive_header" style="
+                                background: ${headerColor};
+                                padding: 25px 20px;
+                                display: flex;
+                                align-items: center;
+                                color: white;
+                                position: relative;
+                            ">
+                                <img src="${spaceData.characterAvatar}" alt="${spaceData.characterName}" style="
+                                    width: 50px;
+                                    height: 50px;
+                                    border-radius: 50%;
+                                    margin-right: 15px;
+                                    border: 3px solid white;
+                                    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+                                ">
+                                <div style="flex: 1;">
+                                    <h3 style="margin: 0; font-size: 18px; font-weight: 600;">${spaceData.name}</h3>
+                                    <p style="margin: 5px 0 0 0; font-size: 13px; opacity: 0.9;">
+                                        ${isCharacterSpace ? `${spaceData.characterName}的专属互动` : '公共互动空间'}
+                                    </p>
+                                </div>
+                                <button class="QQ_close_interactive" style="
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 36px;
+                                    height: 36px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 20px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                                    ×
+                                </button>
+                            </div>
+                            <div class="QQ_interactive_body" style="
+                                padding: 30px 25px;
+                                font-size: 16px;
+                                line-height: 1.6;
+                                white-space: pre-wrap;
+                                color: #333;
+                                background: #fafafa;
+                                max-height: 350px;
+                                overflow-y: auto;
+                                word-wrap: break-word;
+                            ">${spaceData.content}</div>
+                            <div class="QQ_interactive_footer" style="
+                                padding: 25px;
+                                background: #ffffff;
+                                border-top: 1px solid #eee;
+                                display: flex;
+                                justify-content: center;
+                                gap: 15px;
+                            ">
+                                <button class="QQ_reply_interactive" style="
+                                    background: ${isCharacterSpace ? '#FF6B6B' : '#4FC3F7'};
+                                    border: none;
+                                    color: white;
+                                    padding: 14px 28px;
+                                    border-radius: 25px;
+                                    cursor: pointer;
+                                    font-size: 15px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                    box-shadow: 0 3px 10px ${isCharacterSpace ? 'rgba(255, 107, 107, 0.3)' : 'rgba(79, 195, 247, 0.3)'};
+                                " onmouseover="this.style.transform='translateY(-2px)'" 
+                                   onmouseout="this.style.transform='translateY(0)'">
+                                    💬 回应互动
+                                </button>
+                                <button class="QQ_close_interactive" style="
+                                    background: #f5f5f5;
+                                    border: none;
+                                    color: #666;
+                                    padding: 14px 28px;
+                                    border-radius: 25px;
+                                    cursor: pointer;
+                                    font-size: 15px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='#eeeeee'" 
+                                   onmouseout="this.style.background='#f5f5f5'">
+                                    关闭
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <style>
+                        @keyframes fadeIn {
+                            from { opacity: 0; }
+                            to { opacity: 1; }
+                        }
+                        @keyframes slideIn {
+                            from { transform: translateY(-30px); opacity: 0; }
+                            to { transform: translateY(0); opacity: 1; }
+                        }
+                        .QQ_interactive_space * {
+                            user-select: text;
+                        }
+                        .QQ_interactive_body::-webkit-scrollbar {
+                            width: 6px;
+                        }
+                        .QQ_interactive_body::-webkit-scrollbar-track {
+                            background: #f1f1f1;
+                            border-radius: 3px;
+                        }
+                        .QQ_interactive_body::-webkit-scrollbar-thumb {
+                            background: #c1c1c1;
+                            border-radius: 3px;
+                        }
+                        .QQ_interactive_body::-webkit-scrollbar-thumb:hover {
+                            background: #a8a8a8;
+                        }
+                    </style>
+                `;
+                
+                // 添加到页面
+                $('body').append(interactiveSpaceHtml);
+                
+                // 绑定事件
+                $('.QQ_close_interactive').on('click', function() {
+                    $('.QQ_interactive_space').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                });
+                
+                $('.QQ_reply_interactive').on('click', function() {
+                    QQ_OpenInteractiveReply(isCharacterSpace ? characterName : spaceData.characterName);
+                });
+                
+                // 点击背景关闭
+                $('.QQ_interactive_space').on('click', function(e) {
+                    if (e.target === this) {
+                        $(this).fadeOut(300, function() {
+                            $(this).remove();
+                        });
+                    }
+                });
+            }
+            
+            /**
+             * 显示角色专属空间（为点击私聊名称调用）
+             * @param {string} spaceId - 空间ID  
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_DisplayCharacterSpace(spaceId, characterName) {
+                QQ_DisplayInteractiveSpace(spaceId, `${characterName}的互动空间`, characterName);
+            }
+            
+            /**
+             * 显示角色专属互动空间菜单（点击私聊名称时调用）
+             * @param {string} characterName - 角色名称
+             * @param {HTMLElement} element - 点击的元素
+             */
+            function QQ_ShowCharacterInteractiveMenu(characterName, element) {
+                // 移除现有的菜单
+                $('.QQ_character_menu').remove();
+                
+                // 获取角色的互动空间列表
+                const characterSpaces = QQ_CharacterSpaces[characterName] || {};
+                const spaceList = Object.values(characterSpaces);
+                
+                // 创建菜单HTML
+                const menuHtml = `
+                    <div class="QQ_character_menu" style="
+                        position: absolute;
+                        top: 35px;
+                        left: 0;
+                        right: 0;
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+                        z-index: 9999;
+                        overflow: hidden;
+                        animation: slideDown 0.2s ease;
+                        max-width: 280px;
+                        margin: 0 auto;
+                    ">
+                        <div class="menu-header" style="
+                            background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+                            color: white;
+                            padding: 15px 20px;
+                            text-align: center;
+                            font-weight: 600;
+                        ">
+                            <span style="font-size: 16px;">💕 ${characterName}的互动空间</span>
+                        </div>
+                        
+                        ${spaceList.length > 0 ? `
+                            <div class="space-list" style="max-height: 200px; overflow-y: auto;">
+                                ${spaceList.map(space => `
+                                    <div class="space-item" data-space-id="${space.id}" style="
+                                        padding: 12px 20px;
+                                        border-bottom: 1px solid #f0f0f0;
+                                        cursor: pointer;
+                                        transition: background-color 0.2s ease;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                    " onmouseover="this.style.backgroundColor='#f8f9fa'" 
+                                       onmouseout="this.style.backgroundColor='transparent'">
+                                        <div style="
+                                            width: 8px;
+                                            height: 8px;
+                                            border-radius: 50%;
+                                            background: #FF6B6B;
+                                            flex-shrink: 0;
+                                        "></div>
+                                        <div style="flex: 1; min-width: 0;">
+                                            <div style="
+                                                font-size: 14px;
+                                                font-weight: 500;
+                                                color: #333;
+                                                margin-bottom: 2px;
+                                                overflow: hidden;
+                                                text-overflow: ellipsis;
+                                                white-space: nowrap;
+                                            ">${space.name}</div>
+                                            <div style="
+                                                font-size: 12px;
+                                                color: #999;
+                                            ">${QQ_FormatDate(space.createdAt)}</div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : `
+                            <div style="
+                                padding: 30px 20px;
+                                text-align: center;
+                                color: #999;
+                            ">
+                                <div style="font-size: 48px; margin-bottom: 10px;">🌟</div>
+                                <div style="font-size: 14px;">还没有互动记录</div>
+                                <div style="font-size: 12px; margin-top: 5px;">开始一段现实互动吧～</div>
+                            </div>
+                        `}
+                        
+                        <div class="menu-footer" style="
+                            padding: 15px 20px;
+                            background: #fafafa;
+                            text-align: center;
+                            border-top: 1px solid #f0f0f0;
+                        ">
+                            <button class="close-menu-btn" style="
+                                background: #f5f5f5;
+                                border: none;
+                                color: #666;
+                                padding: 8px 16px;
+                                border-radius: 20px;
+                                cursor: pointer;
+                                font-size: 12px;
+                                transition: all 0.2s ease;
+                            " onmouseover="this.style.background='#eeeeee'" 
+                               onmouseout="this.style.background='#f5f5f5'">
+                                关闭
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <style>
+                        @keyframes slideDown {
+                            from {
+                                opacity: 0;
+                                transform: translateY(-10px);
+                            }
+                            to {
+                                opacity: 1;
+                                transform: translateY(0);
+                            }
+                        }
+                        
+                        .space-list::-webkit-scrollbar {
+                            width: 4px;
+                        }
+                        .space-list::-webkit-scrollbar-track {
+                            background: #f1f1f1;
+                        }
+                        .space-list::-webkit-scrollbar-thumb {
+                            background: #c1c1c1;
+                            border-radius: 2px;
+                        }
+                        .space-list::-webkit-scrollbar-thumb:hover {
+                            background: #a8a8a8;
+                        }
+                    </style>
+                `;
+                
+                // 获取聊天页面容器并添加菜单
+                const chatPageContainer = element.closest('.QQ_chat_page');
+                if (chatPageContainer) {
+                    // 创建菜单容器
+                    const menuContainer = document.createElement('div');
+                    menuContainer.style.cssText = `
+                        position: relative;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        z-index: 9998;
+                    `;
+                    menuContainer.innerHTML = menuHtml;
+                    
+                    // 插入到聊天头部之后
+                    const chatHeader = chatPageContainer.querySelector('[style*="backdrop-filter"]');
+                    if (chatHeader) {
+                        chatHeader.parentNode.insertBefore(menuContainer, chatHeader.nextSibling);
+                    } else {
+                        chatPageContainer.insertBefore(menuContainer, chatPageContainer.firstChild);
+                    }
+                    
+                    // 绑定事件
+                    menuContainer.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        
+                        const spaceItem = e.target.closest('.space-item');
+                        if (spaceItem) {
+                            const spaceId = spaceItem.getAttribute('data-space-id');
+                            QQ_DisplayCharacterSpace(spaceId, characterName);
+                            $('.QQ_character_menu').remove();
+                        }
+                        
+                        if (e.target.classList.contains('close-menu-btn')) {
+                            $('.QQ_character_menu').remove();
+                        }
+                    });
+                    
+                    // 点击外部关闭菜单
+                    $(document).one('click', function() {
+                        $('.QQ_character_menu').remove();
+                    });
+                }
+            }
+            
+            /**
+             * 格式化日期显示
+             * @param {string} dateStr - ISO日期字符串
+             * @returns {string} 格式化后的日期
+             */
+            function QQ_FormatDate(dateStr) {
+                const date = new Date(dateStr);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+                
+                if (diffMins < 1) {
+                    return '刚刚';
+                } else if (diffMins < 60) {
+                    return `${diffMins}分钟前`;
+                } else if (diffHours < 24) {
+                    return `${diffHours}小时前`;
+                } else if (diffDays < 7) {
+                    return `${diffDays}天前`;
+                } else {
+                    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+                }
+            }
+            
+            /**
+             * 为互动内容请求修改AI指导
+             * @param {string} originalRequest - 原始请求内容
+             * @returns {string} - 修改后的请求内容
+             */
+            function QQ_ModifyRequestForInteractive(originalRequest) {
+                // 在Request标签中添加互动内容要求
+                const interactiveGuidance = `
+<InteractiveGuidance:用户的消息包含明显的互动意图(如身体接触、面对面交流、现实动作等)。
+请在回复中：
+1. 将互动部分用<content>标签包裹
+2. <content>标签内描述具体的现实互动场景
+3. 包含感官细节、情感表达、动作描述
+4. 确保互动内容能够引发后续的现实互动
+示例格式：
+角色名--回复内容
+<content>
+*角色做出回应动作* 现实互动描述，包含感官和情感细节
+</content>
+>`;
+                
+                // 在原始Request之前插入互动指导
+                return originalRequest.replace(
+                    /<Request:/,
+                    `${interactiveGuidance}\n<Request:`
+                );
+            }
+            
+            /**
+             * 生成互动空间的唯一ID
+             */
+            function QQ_GenerateSpaceId() {
+                return "space_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+            }
+            
+            /**
+             * 获取互动空间的智能命名
+             * @param {string} content - 互动内容
+             * @param {string} characterName - 角色名称
+             * @return {string} 智能命名
+             */
+            function QQ_GetSpaceName(content, characterName) {
+                const charName = characterName || charcardname || "角色";
+                
+                // 检测是否包含多个角色
+                const characterMentions = content.match(/(?:@|【|（|＜)\s*([^@【（＜】）＞\s]{2,8})\s*(?:】|）|＞)/g) || [];
+                const uniqueChars = [...new Set(characterMentions)];
+                
+                // 场景关键词提取
+                const sceneKeywords = [
+                    // 地点场景
+                    { keywords: ['咖啡', '咖啡厅', '咖啡店'], name: '咖啡厅' },
+                    { keywords: ['教室', '学校', '课堂', '上课'], name: '教室' },
+                    { keywords: ['公园', '散步', '樱花', '长椅'], name: '公园' },
+                    { keywords: ['家里', '房间', '卧室', '客厅'], name: '家中' },
+                    { keywords: ['海边', '沙滩', '海浪', '夕阳'], name: '海边' },
+                    { keywords: ['图书馆', '看书', '学习'], name: '图书馆' },
+                    { keywords: ['商场', '购物', '逛街'], name: '商场' },
+                    { keywords: ['餐厅', '吃饭', '用餐'], name: '餐厅' },
+                    
+                    // 活动场景
+                    { keywords: ['游戏', '玩游戏', '手机游戏'], name: '游戏' },
+                    { keywords: ['工作', '办公', '会议'], name: '工作' },
+                    { keywords: ['聚会', '派对', '庆祝'], name: '聚会' },
+                    { keywords: ['旅行', '旅游', '出行'], name: '旅行' },
+                    { keywords: ['运动', '锻炼', '健身'], name: '运动' },
+                    { keywords: ['做饭', '料理', '烹饪'], name: '烹饪' },
+                    { keywords: ['看电影', '电影', '观影'], name: '观影' },
+                    { keywords: ['聊天', '谈话', '交流'], name: '谈话' },
+                    
+                    // 情感场景
+                    { keywords: ['拥抱', '抱抱', '安慰'], name: '温暖时刻' },
+                    { keywords: ['生气', '吵架', '争论'], name: '争执' },
+                    { keywords: ['开心', '高兴', '快乐'], name: '欢乐时光' },
+                    { keywords: ['难过', '伤心', '哭泣'], name: '安慰时刻' },
+                    { keywords: ['紧张', '害怕', '担心'], name: '紧张时刻' },
+                ];
+                
+                let detectedScene = "日常";
+                for (const scene of sceneKeywords) {
+                    if (scene.keywords.some(keyword => content.includes(keyword))) {
+                        detectedScene = scene.name;
+                        break;
+                    }
+                }
+                
+                // 命名逻辑
+                if (uniqueChars.length > 1) {
+                    // 多角色：场景+关键字
+                    const actionKeywords = content.match(/[\u4e00-\u9fa5]{2,4}(?:着|了|呢|吧|呀)/g) || [];
+                    const action = actionKeywords.length > 0 ? actionKeywords[0].replace(/[着了呢吧呀]/g, '') : '互动';
+                    return `${detectedScene}·${action}`;
+                } else {
+                    // 单角色：角色名+场景
+                    return `${charName}·${detectedScene}`;
+                }
+            }
+            
+            /**
+             * 保存互动空间到世界书
+             */
+            async function QQ_SaveInteractiveSpaces() {
+                try {
+                    if (!worldbook || !saveWorldInfo) {
+                        console.warn('世界书功能未初始化，无法保存互动空间');
+                        return;
+                    }
+                    
+                    const spaceData = {
+                        spaces: QQ_InteractiveSpaces,
+                        lastUpdated: new Date().toISOString(),
+                        version: "1.0"
+                    };
+                    
+                    // 创建或更新世界书条目
+                    let entry = worldbook.entries.find(e => e.comment === QQ_INTERACTIVE_BACKUP_KEY);
+                    if (!entry) {
+                        entry = {
+                            comment: QQ_INTERACTIVE_BACKUP_KEY,
+                            content: JSON.stringify(spaceData),
+                            key: ["此世界书永不触发_互动空间"],
+                            keysecondary: [],
+                            order: 1000,
+                            enabled: true,
+                            uid: Date.now()
+                        };
+                        worldbook.entries.push(entry);
+                    } else {
+                        entry.content = JSON.stringify(spaceData);
+                    }
+                    
+                    // 保存到世界书
+                    await saveWorldInfo();
+                    console.log('互动空间数据已保存到世界书:', Object.keys(QQ_InteractiveSpaces).length, '个空间');
+                } catch (error) {
+                    console.error('保存互动空间到世界书失败:', error);
+                }
+            }
+            
+            /**
+             * 从世界书加载互动空间
+             */
+            async function QQ_LoadInteractiveSpaces() {
+                try {
+                    if (!worldbook) {
+                        console.warn('世界书功能未初始化，无法加载互动空间');
+                        return;
+                    }
+                    
+                    const entry = worldbook.entries.find(e => e.comment === QQ_INTERACTIVE_BACKUP_KEY);
+                    if (entry && entry.content) {
+                        const data = JSON.parse(entry.content);
+                        QQ_InteractiveSpaces = data.spaces || {};
+                        console.log('从世界书加载互动空间:', Object.keys(QQ_InteractiveSpaces).length, '个空间');
+                    } else {
+                        QQ_InteractiveSpaces = {};
+                        console.log('世界书中没有互动空间数据，初始化为空');
+                    }
+                } catch (error) {
+                    console.error('从世界书加载互动空间失败:', error);
+                    QQ_InteractiveSpaces = {};
+                }
+            }
+            
+            /**
+             * 从世界书加载角色专属互动空间
+             */
+            async function QQ_LoadCharacterSpaces() {
+                try {
+                    if (!worldbook) {
+                        console.warn('世界书功能未初始化，无法加载角色互动空间');
+                        return;
+                    }
+                    
+                    const entry = worldbook.entries.find(e => e.comment === QQ_CHARACTER_SPACES_KEY);
+                    if (entry && entry.content) {
+                        const data = JSON.parse(entry.content);
+                        QQ_CharacterSpaces = data.characterSpaces || {};
+                        const totalSpaces = Object.values(QQ_CharacterSpaces).reduce((sum, char) => sum + Object.keys(char).length, 0);
+                        console.log('从世界书加载角色互动空间:', Object.keys(QQ_CharacterSpaces).length, '个角色,', totalSpaces, '个空间');
+                    } else {
+                        QQ_CharacterSpaces = {};
+                        console.log('世界书中没有角色互动空间数据，初始化为空');
+                    }
+                } catch (error) {
+                    console.error('从世界书加载角色互动空间失败:', error);
+                    QQ_CharacterSpaces = {};
+                }
+            }
+            
             /**
              * 在手机界面显示互动空间
              * @param {string} content - 互动内容
@@ -6527,16 +7608,35 @@
                         .trim();
                 }
                 
-                // 移除现有的互动空间
-                $('.QQ_interactive_space').remove();
-                
-                // 获取角色信息
+                // 生成空间ID和名称
+                const spaceId = QQ_GenerateSpaceId();
+                const spaceName = QQ_GetSpaceName(cleanContent, characterName);
                 const charName = characterName || charcardname || "角色";
                 const charAvatar = charAvatarPath || "default_avatar.png";
                 
+                // 保存互动空间数据
+                QQ_InteractiveSpaces[spaceId] = {
+                    id: spaceId,
+                    name: spaceName,
+                    content: cleanContent,
+                    characterName: charName,
+                    characterAvatar: charAvatar,
+                    createdAt: new Date().toISOString(),
+                    lastAccess: new Date().toISOString()
+                };
+                
+                // 设置当前活动空间
+                QQ_ActiveSpaceId = spaceId;
+                
+                // 异步保存到世界书
+                QQ_SaveInteractiveSpaces();
+                
+                // 移除现有的互动空间
+                $('.QQ_interactive_space').remove();
+                
                 // 创建互动空间HTML - 更符合手机界面风格
                 const interactiveSpaceHtml = `
-                    <div class="QQ_interactive_space" style="
+                    <div class="QQ_interactive_space" data-space-id="${spaceId}" style="
                         position: fixed;
                         top: 0;
                         left: 0;
@@ -6580,9 +7680,28 @@
                                     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
                                 ">
                                 <div style="flex: 1;">
-                                    <h3 style="margin: 0; font-size: 17px; font-weight: 600;">${charName}</h3>
+                                    <h3 style="margin: 0; font-size: 17px; font-weight: 600;">${spaceName}</h3>
                                     <p style="margin: 3px 0 0 0; font-size: 13px; opacity: 0.9;">现实互动模式</p>
                                 </div>
+                                <button class="QQ_rename_space" style="
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                    margin-right: 8px;
+                                " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'"
+                                   title="重命名空间">
+                                    ✏️
+                                </button>
                                 <button class="QQ_close_interactive" style="
                                     background: rgba(255, 255, 255, 0.2);
                                     border: none;
@@ -6669,35 +7788,907 @@
                 // 添加到页面
                 $('body').append(interactiveSpaceHtml);
                 
+                // 绑定重命名事件
+                $('.QQ_rename_space').off('click').on('click', function() {
+                    QQ_RenameInteractiveSpace(spaceId);
+                });
+                
                 // 绑定关闭事件
                 $('.QQ_close_interactive').off('click').on('click', function() {
-                    $('.QQ_interactive_space').fadeOut(300, function() {
-                        $(this).remove();
-                    });
+                    QQ_CloseInteractiveSpace();
                 });
                 
                 // 绑定回应互动事件
                 $('.QQ_reply_interactive').off('click').on('click', function() {
                     // 关闭互动空间
-                    $('.QQ_interactive_space').fadeOut(300, function() {
-                        $(this).remove();
-                    });
+                    QQ_CloseInteractiveSpace();
                     
-                    // 可以在这里添加回应互动的逻辑
-                    // 例如：打开输入框让用户回应
+                    // 打开输入框让用户回应
                     QQ_OpenInteractiveReply(charName);
                 });
                 
                 // 点击背景关闭
                 $('.QQ_interactive_space').on('click', function(e) {
                     if (e.target === this) {
-                        $(this).fadeOut(300, function() {
-                            $(this).remove();
-                        });
+                        QQ_CloseInteractiveSpace();
                     }
                 });
                 
-                triggerSlash(`/echo 检测到互动内容，已在手机界面显示`);
+                triggerSlash(`/echo 检测到互动内容，已在手机界面显示：${spaceName}`);
+            }
+            
+            /**
+             * 关闭互动空间并显示精灵按钮
+             */
+            function QQ_CloseInteractiveSpace() {
+                $('.QQ_interactive_space').fadeOut(300, function() {
+                    $(this).remove();
+                    // 显示精灵按钮
+                    QQ_ShowSpiritButton();
+                });
+                QQ_ActiveSpaceId = null;
+            }
+            
+            /**
+             * 重命名互动空间
+             * @param {string} spaceId - 空间ID
+             */
+            function QQ_RenameInteractiveSpace(spaceId) {
+                const space = QQ_InteractiveSpaces[spaceId];
+                if (!space) return;
+                
+                const newName = prompt('请输入新的空间名称:', space.name);
+                if (newName && newName.trim() && newName.trim() !== space.name) {
+                    space.name = newName.trim();
+                    // 更新显示
+                    $('.QQ_interactive_header h3').text(space.name);
+                    // 保存到世界书
+                    QQ_SaveInteractiveSpaces();
+                    triggerSlash(`/echo 互动空间已重命名为：${space.name}`);
+                }
+            }
+            
+            // ===== 精灵按钮系统 =====
+            
+            /**
+             * 显示精灵按钮
+             */
+            function QQ_ShowSpiritButton() {
+                // 如果已经显示，则不重复创建
+                if ($('.QQ_spirit_button').length > 0) return;
+                
+                QQ_SpiritVisible = true;
+                
+                // 获取上次保存的位置
+                const savedPosition = localStorage.getItem('QQ_spirit_position');
+                let position = { right: '20px', bottom: '100px' };
+                if (savedPosition) {
+                    try {
+                        position = JSON.parse(savedPosition);
+                    } catch (e) {
+                        console.warn('解析精灵位置失败，使用默认位置');
+                    }
+                }
+                
+                const spiritHtml = `
+                    <div class="QQ_spirit_button" style="
+                        position: fixed;
+                        ${position.right ? `right: ${position.right}` : `left: ${position.left}`};
+                        ${position.bottom ? `bottom: ${position.bottom}` : `top: ${position.top}`};
+                        width: 60px;
+                        height: 60px;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        border-radius: 50%;
+                        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+                        cursor: move;
+                        z-index: 9999;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: white;
+                        font-size: 24px;
+                        user-select: none;
+                        transition: all 0.3s ease;
+                        animation: spiritPulse 2s infinite;
+                    " title="互动空间精灵">
+                        🧚‍✨
+                    </div>
+                                <style>
+                @keyframes spiritPulse {
+                    0%, 100% { transform: scale(1); box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4); }
+                    50% { transform: scale(1.05); box-shadow: 0 6px 25px rgba(102, 126, 234, 0.6); }
+                }
+                .QQ_spirit_button:hover {
+                    transform: scale(1.1) !important;
+                    box-shadow: 0 6px 25px rgba(102, 126, 234, 0.7) !important;
+                }
+                
+                /* 用户菜单动画 */
+                @keyframes menuSlideDown {
+                    from { 
+                        opacity: 0; 
+                        transform: translateY(-10px); 
+                    }
+                    to { 
+                        opacity: 1; 
+                        transform: translateY(0); 
+                    }
+                }
+                
+                #QQ_user_menu {
+                    border: 1px solid #e1e5e9;
+                }
+                
+                .user_menu_item:last-child {
+                    border-bottom: none !important;
+                }
+            </style>
+                `;
+                
+                $('body').append(spiritHtml);
+                
+                // 绑定点击事件（支持触摸设备）
+                $('.QQ_spirit_button').on('click touchend', function(e) {
+                    // *** 新增：检查是否正在拖拽，如果是则不响应点击 ***
+                    if ($(this).hasClass('dragging')) {
+                        return;
+                    }
+                    
+                    e.stopPropagation();
+                    e.preventDefault();
+                    console.log('精灵按钮点击事件触发');
+                    QQ_ShowSpiritPanel();
+                });
+                
+                // 绑定拖拽功能
+                QQ_MakeSpiritDraggable();
+                
+                console.log('精灵按钮已显示');
+            }
+            
+            /**
+             * 隐藏精灵按钮
+             */
+            function QQ_HideSpiritButton() {
+                $('.QQ_spirit_button').fadeOut(300, function() {
+                    $(this).remove();
+                });
+                QQ_SpiritVisible = false;
+                console.log('精灵按钮已隐藏');
+            }
+            
+            /**
+             * 使精灵按钮可拖拽
+             */
+            function QQ_MakeSpiritDraggable() {
+                let isDragging = false;
+                let dragStarted = false;
+                let startX, startY, initialX, initialY;
+                let dragTimer;
+                
+                $('.QQ_spirit_button').on('mousedown touchstart', function(e) {
+                    e.preventDefault();
+                    dragStarted = false;
+                    
+                    // 获取初始位置
+                    const rect = this.getBoundingClientRect();
+                    initialX = rect.left;
+                    initialY = rect.top;
+                    
+                    // 获取鼠标/触摸位置
+                    const clientX = e.type === 'touchstart' ? e.originalEvent.touches[0].clientX : e.clientX;
+                    const clientY = e.type === 'touchstart' ? e.originalEvent.touches[0].clientY : e.clientY;
+                    
+                    startX = clientX - initialX;
+                    startY = clientY - initialY;
+                    
+                    // *** 新增：延迟开始拖拽，允许点击事件 ***
+                    dragTimer = setTimeout(() => {
+                        isDragging = true;
+                        dragStarted = true;
+                        
+                        // 改变样式
+                        $('.QQ_spirit_button').addClass('dragging').css({
+                            'cursor': 'grabbing',
+                            'z-index': '10001',
+                            'animation': 'none'
+                        });
+                        
+                        console.log('开始拖拽精灵按钮');
+                    }, 150); // 150ms延迟，给点击事件留时间
+                });
+                
+                $(document).on('mousemove touchmove', function(e) {
+                    if (!isDragging) return;
+                    
+                    const clientX = e.type === 'touchmove' ? e.originalEvent.touches[0].clientX : e.clientX;
+                    const clientY = e.type === 'touchmove' ? e.originalEvent.touches[0].clientY : e.clientY;
+                    
+                    const x = clientX - startX;
+                    const y = clientY - startY;
+                    
+                    // 边界检查
+                    const maxX = window.innerWidth - 60;
+                    const maxY = window.innerHeight - 60;
+                    
+                    const constrainedX = Math.max(0, Math.min(x, maxX));
+                    const constrainedY = Math.max(0, Math.min(y, maxY));
+                    
+                    $('.QQ_spirit_button').css({
+                        'left': constrainedX + 'px',
+                        'top': constrainedY + 'px',
+                        'right': 'auto',
+                        'bottom': 'auto'
+                    });
+                    
+                    e.preventDefault();
+                });
+                
+                $(document).on('mouseup touchend', function(e) {
+                    // 清除拖拽定时器
+                    if (dragTimer) {
+                        clearTimeout(dragTimer);
+                        dragTimer = null;
+                    }
+                    
+                    if (!isDragging && !dragStarted) {
+                        // 这是一个点击事件，不是拖拽
+                        console.log('精灵按钮被点击（非拖拽）');
+                        return;
+                    }
+                    
+                    if (!isDragging) return;
+                    isDragging = false;
+                    dragStarted = false;
+                    
+                    // 恢复样式
+                    $('.QQ_spirit_button').removeClass('dragging').css({
+                        'cursor': 'move',
+                        'z-index': '9999',
+                        'animation': 'spiritPulse 2s infinite'
+                    });
+                    
+                    // 保存位置
+                    const spirit = $('.QQ_spirit_button');
+                    if (spirit.length > 0) {
+                        const position = {
+                            left: spirit.css('left'),
+                            top: spirit.css('top')
+                        };
+                        localStorage.setItem('QQ_spirit_position', JSON.stringify(position));
+                        console.log('精灵按钮位置已保存');
+                    }
+                });
+            }
+            
+            /**
+             * 显示精灵控制面板
+             */
+            function QQ_ShowSpiritPanel() {
+                // 移除现有面板
+                $('.QQ_spirit_panel').remove();
+                
+                const spaces = Object.values(QQ_InteractiveSpaces);
+                const hasSpaces = spaces.length > 0;
+                
+                let spaceListHtml = '';
+                if (hasSpaces) {
+                    spaceListHtml = spaces.map(space => `
+                        <div class="spirit_space_item" data-space-id="${space.id}" style="
+                            padding: 12px 15px;
+                            border-bottom: 1px solid #eee;
+                            cursor: pointer;
+                            display: flex;
+                            align-items: center;
+                            gap: 10px;
+                            transition: background-color 0.2s ease;
+                        " onmouseover="this.style.backgroundColor='#f5f5f5'" 
+                           onmouseout="this.style.backgroundColor='transparent'">
+                            <img src="${space.characterAvatar}" alt="${space.characterName}" style="
+                                width: 32px;
+                                height: 32px;
+                                border-radius: 50%;
+                                object-fit: cover;
+                            ">
+                            <div style="flex: 1;">
+                                <div style="font-size: 14px; font-weight: 500; color: #333;">${space.name}</div>
+                                <div style="font-size: 12px; color: #666; margin-top: 2px;">
+                                    ${new Date(space.lastAccess).toLocaleDateString()} ${new Date(space.lastAccess).toLocaleTimeString().slice(0, 5)}
+                                </div>
+                            </div>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="#999">
+                                <path d="M8.59 16.34l4.58-4.59-4.58-4.59L10 5.75l6 6-6 6z"/>
+                            </svg>
+                        </div>
+                    `).join('');
+                } else {
+                    spaceListHtml = `
+                        <div style="
+                            padding: 30px 20px;
+                            text-align: center;
+                            color: #999;
+                            font-size: 14px;
+                        ">
+                            <div style="font-size: 48px; margin-bottom: 10px;">🌟</div>
+                            暂无互动空间<br>
+                            <small>与AI的互动内容会自动保存到这里</small>
+                        </div>
+                    `;
+                }
+                
+                const panelHtml = `
+                    <div class="QQ_spirit_panel" style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 320px;
+                        max-height: 500px;
+                        background: white;
+                        border-radius: 15px;
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                        z-index: 10000;
+                        animation: spiritPanelShow 0.3s ease;
+                        overflow: hidden;
+                    ">
+                        <div class="spirit_panel_header" style="
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                            padding: 20px;
+                            text-align: center;
+                            position: relative;
+                        ">
+                            <h3 style="margin: 0; font-size: 18px; font-weight: 600;">🧚‍✨ 互动空间</h3>
+                            <p style="margin: 5px 0 0 0; font-size: 13px; opacity: 0.9;">管理你的所有现实互动</p>
+                            <button class="spirit_panel_close" style="
+                                position: absolute;
+                                top: 15px;
+                                right: 15px;
+                                background: rgba(255, 255, 255, 0.2);
+                                border: none;
+                                color: white;
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 50%;
+                                cursor: pointer;
+                                font-size: 16px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">×</button>
+                        </div>
+                        <div class="spirit_panel_body" style="
+                            max-height: 350px;
+                            overflow-y: auto;
+                        ">
+                            ${spaceListHtml}
+                        </div>
+                        <div class="spirit_panel_footer" style="
+                            padding: 15px 20px;
+                            background: #f8f9fa;
+                            border-top: 1px solid #eee;
+                            display: flex;
+                            gap: 10px;
+                        ">
+                            <button class="spirit_hide_btn" style="
+                                flex: 1;
+                                background: #6c757d;
+                                border: none;
+                                color: white;
+                                padding: 10px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                transition: background-color 0.2s ease;
+                            " onmouseover="this.style.backgroundColor='#5a6268'" 
+                               onmouseout="this.style.backgroundColor='#6c757d'">
+                                隐藏精灵
+                            </button>
+                            <button class="spirit_stats_btn" style="
+                                flex: 1;
+                                background: #28a745;
+                                border: none;
+                                color: white;
+                                padding: 10px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                font-size: 13px;
+                                transition: background-color 0.2s ease;
+                            " onmouseover="this.style.backgroundColor='#218838'" 
+                               onmouseout="this.style.backgroundColor='#28a745'">
+                                查看统计
+                            </button>
+                        </div>
+                    </div>
+                    <div class="QQ_spirit_panel_overlay" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.5);
+                        z-index: 9999;
+                        animation: fadeIn 0.3s ease;
+                    "></div>
+                    <style>
+                        @keyframes spiritPanelShow {
+                            from { transform: translate(-50%, -50%) scale(0.9); opacity: 0; }
+                            to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                        }
+                    </style>
+                `;
+                
+                $('body').append(panelHtml);
+                
+                // 绑定事件
+                $('.spirit_panel_close, .QQ_spirit_panel_overlay').on('click', function() {
+                    QQ_CloseSpiritPanel();
+                });
+                
+                $('.spirit_hide_btn').on('click', function() {
+                    QQ_CloseSpiritPanel();
+                    QQ_HideSpiritButton();
+                });
+                
+                $('.spirit_stats_btn').on('click', function() {
+                    QQ_ShowInteractiveStats();
+                });
+                
+                $('.spirit_space_item').on('click', function() {
+                    const spaceId = $(this).data('space-id');
+                    QQ_OpenInteractiveSpace(spaceId);
+                });
+                
+                // 阻止点击面板本身时关闭
+                $('.QQ_spirit_panel').on('click', function(e) {
+                    e.stopPropagation();
+                });
+            }
+            
+            /**
+             * 关闭精灵控制面板
+             */
+            function QQ_CloseSpiritPanel() {
+                $('.QQ_spirit_panel, .QQ_spirit_panel_overlay').fadeOut(300, function() {
+                    $(this).remove();
+                });
+            }
+            
+            /**
+             * 打开指定的互动空间
+             * @param {string} spaceId - 空间ID
+             */
+            function QQ_OpenInteractiveSpace(spaceId) {
+                const space = QQ_InteractiveSpaces[spaceId];
+                if (!space) {
+                    triggerSlash('/echo severity=error 互动空间不存在或已被删除');
+                    return;
+                }
+                
+                // 更新最后访问时间
+                space.lastAccess = new Date().toISOString();
+                QQ_SaveInteractiveSpaces();
+                
+                // 关闭精灵面板
+                QQ_CloseSpiritPanel();
+                
+                // 重新显示互动空间
+                QQ_ShowStoredInteractiveSpace(space);
+            }
+            
+            /**
+             * 显示已保存的互动空间
+             * @param {Object} space - 空间数据
+             */
+            function QQ_ShowStoredInteractiveSpace(space) {
+                // 设置当前活动空间
+                QQ_ActiveSpaceId = space.id;
+                
+                // 移除现有的互动空间
+                $('.QQ_interactive_space').remove();
+                
+                // 创建互动空间HTML
+                const interactiveSpaceHtml = `
+                    <div class="QQ_interactive_space" data-space-id="${space.id}" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.7);
+                        z-index: 10000;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: fadeIn 0.3s ease;
+                        backdrop-filter: blur(10px);
+                    ">
+                        <div class="QQ_interactive_content" style="
+                            background: #ffffff;
+                            border-radius: 15px;
+                            padding: 0;
+                            max-width: 85%;
+                            max-height: 75%;
+                            overflow: hidden;
+                            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                            position: relative;
+                            color: #333;
+                            animation: slideIn 0.3s ease;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        ">
+                            <div class="QQ_interactive_header" style="
+                                background: linear-gradient(135deg, #4FC3F7 0%, #29B6F6 100%);
+                                padding: 20px;
+                                display: flex;
+                                align-items: center;
+                                color: white;
+                                position: relative;
+                            ">
+                                <img src="${space.characterAvatar}" alt="${space.characterName}" style="
+                                    width: 45px;
+                                    height: 45px;
+                                    border-radius: 50%;
+                                    margin-right: 15px;
+                                    border: 3px solid white;
+                                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+                                ">
+                                <div style="flex: 1;">
+                                    <h3 style="margin: 0; font-size: 17px; font-weight: 600;">${space.name}</h3>
+                                    <p style="margin: 3px 0 0 0; font-size: 13px; opacity: 0.9;">现实互动模式</p>
+                                </div>
+                                <button class="QQ_rename_space" style="
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                    margin-right: 8px;
+                                " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'"
+                                   title="重命名空间">
+                                    ✏️
+                                </button>
+                                <button class="QQ_delete_space" style="
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 16px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                    margin-right: 8px;
+                                " onmouseover="this.style.background='rgba(255, 87, 87, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'"
+                                   title="删除空间">
+                                    🗑️
+                                </button>
+                                <button class="QQ_close_interactive" style="
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 18px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                                    ×
+                                </button>
+                            </div>
+                            <div class="QQ_interactive_body" style="
+                                padding: 25px 20px;
+                                font-size: 15px;
+                                line-height: 1.5;
+                                white-space: pre-wrap;
+                                color: #333;
+                                background: #fafafa;
+                                max-height: 300px;
+                                overflow-y: auto;
+                            ">${space.content}</div>
+                            <div class="QQ_interactive_footer" style="
+                                padding: 20px;
+                                background: #ffffff;
+                                border-top: 1px solid #eee;
+                                display: flex;
+                                justify-content: center;
+                                gap: 15px;
+                            ">
+                                <button class="QQ_reply_interactive" style="
+                                    background: #4FC3F7;
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 24px;
+                                    border-radius: 25px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                    box-shadow: 0 2px 8px rgba(79, 195, 247, 0.3);
+                                " onmouseover="this.style.background='#29B6F6'; this.style.transform='translateY(-1px)'" 
+                                   onmouseout="this.style.background='#4FC3F7'; this.style.transform='translateY(0)'">
+                                    💬 回应互动
+                                </button>
+                                <button class="QQ_close_interactive" style="
+                                    background: #f5f5f5;
+                                    border: none;
+                                    color: #666;
+                                    padding: 12px 24px;
+                                    border-radius: 25px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='#eeeeee'" 
+                                   onmouseout="this.style.background='#f5f5f5'">
+                                    关闭
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加到页面
+                $('body').append(interactiveSpaceHtml);
+                
+                // 绑定事件
+                $('.QQ_rename_space').off('click').on('click', function() {
+                    QQ_RenameInteractiveSpace(space.id);
+                });
+                
+                $('.QQ_delete_space').off('click').on('click', function() {
+                    QQ_DeleteInteractiveSpace(space.id);
+                });
+                
+                $('.QQ_close_interactive').off('click').on('click', function() {
+                    QQ_CloseInteractiveSpace();
+                });
+                
+                $('.QQ_reply_interactive').off('click').on('click', function() {
+                    QQ_CloseInteractiveSpace();
+                    QQ_OpenInteractiveReply(space.characterName);
+                });
+                
+                $('.QQ_interactive_space').on('click', function(e) {
+                    if (e.target === this) {
+                        QQ_CloseInteractiveSpace();
+                    }
+                });
+                
+                triggerSlash(`/echo 已打开互动空间：${space.name}`);
+            }
+            
+            /**
+             * 删除互动空间
+             * @param {string} spaceId - 空间ID
+             */
+            function QQ_DeleteInteractiveSpace(spaceId) {
+                const space = QQ_InteractiveSpaces[spaceId];
+                if (!space) return;
+                
+                if (confirm(`确定要删除互动空间"${space.name}"吗？此操作无法撤销。`)) {
+                    delete QQ_InteractiveSpaces[spaceId];
+                    QQ_SaveInteractiveSpaces();
+                    QQ_CloseInteractiveSpace();
+                    triggerSlash(`/echo 互动空间"${space.name}"已删除`);
+                }
+            }
+            
+            /**
+             * 显示互动空间统计信息
+             */
+            function QQ_ShowInteractiveStats() {
+                const spaces = Object.values(QQ_InteractiveSpaces);
+                const totalSpaces = spaces.length;
+                const characters = [...new Set(spaces.map(s => s.characterName))];
+                const totalCharacters = characters.length;
+                
+                // 按角色统计
+                const characterStats = {};
+                spaces.forEach(space => {
+                    const char = space.characterName;
+                    if (!characterStats[char]) {
+                        characterStats[char] = { count: 0, lastInteraction: space.lastAccess };
+                    }
+                    characterStats[char].count++;
+                    if (new Date(space.lastAccess) > new Date(characterStats[char].lastInteraction)) {
+                        characterStats[char].lastInteraction = space.lastAccess;
+                    }
+                });
+                
+                // 最近的互动
+                const recentSpaces = spaces
+                    .sort((a, b) => new Date(b.lastAccess) - new Date(a.lastAccess))
+                    .slice(0, 5);
+                
+                let statsHtml = `
+                    📊 互动空间统计信息
+                    
+                    总互动空间: ${totalSpaces}个
+                    涉及角色: ${totalCharacters}个
+                    
+                    📈 角色互动统计:
+                    ${Object.entries(characterStats)
+                        .sort((a, b) => b[1].count - a[1].count)
+                        .map(([char, stats]) => `• ${char}: ${stats.count}次`)
+                        .join('\n')
+                    }
+                    
+                    🕒 最近互动:
+                    ${recentSpaces.map(space => 
+                        `• ${space.name} (${new Date(space.lastAccess).toLocaleDateString()})`
+                    ).join('\n')}
+                    
+                    💾 数据保存位置: 世界书
+                    🔄 最后同步: ${new Date().toLocaleString()}
+                `;
+                
+                triggerSlash(`/echo ${statsHtml}`);
+                QQ_CloseSpiritPanel();
+            }
+            
+            // ===== 用户菜单系统 =====
+            
+            /**
+             * 切换用户菜单显示/隐藏
+             */
+            function QQ_ToggleUserMenu() {
+                const menu = $('#QQ_user_menu');
+                if (menu.is(':visible')) {
+                    QQ_HideUserMenu();
+                } else {
+                    QQ_ShowUserMenu();
+                }
+            }
+            
+            /**
+             * 显示用户菜单
+             */
+            function QQ_ShowUserMenu() {
+                // 隐藏其他菜单
+                $('.dropdown-menu, .context-menu').hide();
+                
+                $('#QQ_user_menu').fadeIn(200);
+                
+                // 点击其他地方关闭菜单
+                $(document).one('click', function(e) {
+                    if (!$(e.target).closest('#QQ_user_menu, #QQ_home_UserName').length) {
+                        QQ_HideUserMenu();
+                    }
+                });
+            }
+            
+            /**
+             * 隐藏用户菜单
+             */
+            function QQ_HideUserMenu() {
+                $('#QQ_user_menu').fadeOut(150);
+            }
+            
+            // ===== 全局调试工具 =====
+            
+            /**
+             * 显示互动空间详细统计（调试用）
+             */
+            window.QQ_Show_Interactive_Stats = function() {
+                const spaces = Object.values(QQ_InteractiveSpaces);
+                console.log('=== 互动空间详细统计 ===');
+                console.log('总空间数量:', spaces.length);
+                console.log('精灵按钮可见:', QQ_SpiritVisible);
+                console.log('当前活动空间:', QQ_ActiveSpaceId);
+                console.log('所有空间数据:', QQ_InteractiveSpaces);
+                
+                if (worldbook) {
+                    const entry = worldbook.entries.find(e => e.comment === QQ_INTERACTIVE_BACKUP_KEY);
+                    console.log('世界书备份条目:', entry ? '存在' : '不存在');
+                    if (entry) {
+                        console.log('备份内容长度:', entry.content.length);
+                        try {
+                            const data = JSON.parse(entry.content);
+                            console.log('备份版本:', data.version);
+                            console.log('最后更新:', data.lastUpdated);
+                            console.log('备份空间数量:', Object.keys(data.spaces || {}).length);
+                        } catch (e) {
+                            console.error('解析备份数据失败:', e);
+                        }
+                    }
+                } else {
+                    console.warn('世界书未初始化');
+                }
+                
+                // 检查精灵按钮状态
+                const spiritButton = $('.QQ_spirit_button');
+                console.log('精灵按钮DOM存在:', spiritButton.length > 0);
+                if (spiritButton.length > 0) {
+                    console.log('精灵按钮位置:', {
+                        left: spiritButton.css('left'),
+                        top: spiritButton.css('top'),
+                        right: spiritButton.css('right'),
+                        bottom: spiritButton.css('bottom')
+                    });
+                }
+                
+                const savedPosition = localStorage.getItem('QQ_spirit_position');
+                console.log('保存的精灵位置:', savedPosition);
+                
+                triggerSlash('/echo 📊 互动空间调试信息已输出到控制台');
+            };
+            
+            // ===== 页面初始化处理 =====
+            
+            /**
+             * 初始化互动空间系统
+             */
+            async function QQ_InitInteractiveSystem() {
+                try {
+                    // 加载互动空间数据
+                    await QQ_LoadInteractiveSpaces();
+                    await QQ_LoadCharacterSpaces();
+                    
+                    // 添加CSS样式
+                    if (!$('#QQ_interactive_styles').length) {
+                        $('head').append(`
+                            <style id="QQ_interactive_styles">
+                                @keyframes menuSlideDown {
+                                    from { 
+                                        opacity: 0; 
+                                        transform: translateY(-10px); 
+                                    }
+                                    to { 
+                                        opacity: 1; 
+                                        transform: translateY(0); 
+                                    }
+                                }
+                                
+                                .user_menu_item:last-child {
+                                    border-bottom: none !important;
+                                }
+                                
+                                /* 精灵按钮在移动设备上的优化 */
+                                @media (max-width: 768px) {
+                                    .QQ_spirit_button {
+                                        width: 50px !important;
+                                        height: 50px !important;
+                                        font-size: 20px !important;
+                                    }
+                                }
+                                
+                                /* 互动空间在移动设备上的优化 */
+                                @media (max-width: 768px) {
+                                    .QQ_interactive_content {
+                                        max-width: 95% !important;
+                                        max-height: 85% !important;
+                                    }
+                                    
+                                    .QQ_spirit_panel {
+                                        width: 300px !important;
+                                        max-height: 400px !important;
+                                    }
+                                }
+                            </style>
+                        `);
+                    }
+                    
+                    console.log('✅ 互动空间系统初始化完成');
+                } catch (error) {
+                    console.error('❌ 互动空间系统初始化失败:', error);
+                }
             }
 
             /**
@@ -6841,6 +8832,144 @@
             }
 
             
+            // ===== 用户菜单控制函数 =====
+            
+            /**
+             * 切换用户菜单显示状态
+             */
+            function QQ_ToggleUserMenu() {
+                const menu = $('#QQ_user_menu');
+                if (menu.is(':visible')) {
+                    QQ_HideUserMenu();
+                } else {
+                    QQ_ShowUserMenu();
+                }
+            }
+            
+            /**
+             * 显示用户菜单
+             */
+            function QQ_ShowUserMenu() {
+                const menu = $('#QQ_user_menu');
+                if (menu.length === 0) return;
+                
+                // 隐藏其他菜单
+                $('.dropdown-menu, .context-menu, .QQ_spirit_panel').hide();
+                
+                // 显示菜单
+                menu.show();
+                
+                // 绑定点击外部关闭事件
+                setTimeout(() => {
+                    $(document).on('click.user-menu', function(e) {
+                        if (!menu.is(e.target) && menu.has(e.target).length === 0 && !$('#QQ_home_UserName').is(e.target)) {
+                            QQ_HideUserMenu();
+                        }
+                    });
+                }, 100);
+            }
+            
+            /**
+             * 隐藏用户菜单
+             */
+            function QQ_HideUserMenu() {
+                $('#QQ_user_menu').hide();
+                $(document).off('click.user-menu');
+            }
+            
+            // ===== 互动空间调试工具 =====
+            
+            /**
+             * 显示互动空间调试统计信息（全局函数）
+             */
+            window.QQ_Show_Interactive_Stats = function() {
+                const spaces = Object.values(QQ_InteractiveSpaces);
+                const spiritVisible = QQ_SpiritVisible;
+                const activeSpace = QQ_ActiveSpaceId;
+                
+                let report = `
+🧚‍✨ 互动空间系统状态报告
+========================
+
+📊 基础统计:
+• 总空间数: ${spaces.length}
+• 精灵状态: ${spiritVisible ? '显示' : '隐藏'}
+• 活动空间: ${activeSpace || '无'}
+
+📝 空间详情:`;
+                
+                if (spaces.length > 0) {
+                    spaces.forEach((space, index) => {
+                        const lastAccess = new Date(space.lastAccess).toLocaleString();
+                        report += `
+${index + 1}. ${space.name}
+   ID: ${space.id}
+   角色: ${space.characterName}
+   创建: ${new Date(space.createdAt).toLocaleString()}
+   最后访问: ${lastAccess}
+   内容长度: ${space.content.length} 字符`;
+                    });
+                } else {
+                    report += `
+   暂无互动空间数据`;
+                }
+                
+                report += `
+
+💾 存储信息:
+• 备份键: ${QQ_INTERACTIVE_BACKUP_KEY}
+• 世界书状态: ${worldbook ? '已加载' : '未加载'}
+
+🔧 可用命令:
+• window.QQ_Show_Interactive_Stats() - 显示此统计
+• QQ_ShowSpiritButton() - 显示精灵按钮
+• QQ_HideSpiritButton() - 隐藏精灵按钮
+• QQ_LoadInteractiveSpaces() - 重新加载空间数据
+• QQ_SaveInteractiveSpaces() - 手动保存空间数据
+`;
+                
+                console.log(report);
+                triggerSlash(`/echo 📊 互动空间统计：${spaces.length}个空间，精灵${spiritVisible ? '显示' : '隐藏'}中`);
+                return {
+                    totalSpaces: spaces.length,
+                    spiritVisible,
+                    activeSpace,
+                    spaces: spaces.map(s => ({
+                        id: s.id,
+                        name: s.name,
+                        character: s.characterName,
+                        created: s.createdAt,
+                        lastAccess: s.lastAccess
+                    }))
+                };
+            };
+            
+            // *** 新增：互动检测测试工具 ***
+            window.QQ_Test_Interactive_Detection = function(text) {
+                const result = QQ_DetectInteractiveIntent(text);
+                const details = `
+=== 互动意图检测测试 ===
+📝 测试文本: "${text}"
+🎯 检测结果: ${result ? '✅ 检测到互动意图' : '❌ 未检测到互动意图'}
+
+💡 测试提示:
+• 身体接触词汇: 拥抱、亲吻、触摸、牵手等
+• 面对面交流: 面对面、当面、走近、坐下等  
+• 情感表达: 脸红、害羞、微笑、哭泣等
+• 动作描述: *动作*、【情感】等格式
+• 需要2个关键词或1个模式匹配才触发
+
+📚 示例测试文本:
+• "我想抱抱你" (✅ 身体接触)
+• "*走向你*" (✅ 动作模式)
+• "面对面聊天" (✅ 面对面+动作)
+• "你好吗？" (❌ 普通对话)
+            `;
+                console.log(details);
+                alert(details);
+                return result;
+            };
+
             function QQ_UpdateNewTips() {
                 // 刷新左上角未读信息数字
                 let ids = $(".QQ_chat_page")
@@ -7141,6 +9270,10 @@
                 // *** 新增：加载保存的动态内容 ***
                 console.log('开始加载动态内容...');
                 await QQ_Load_Moments();
+                
+                // *** 新增：初始化互动空间系统 ***
+                console.log('开始初始化互动空间系统...');
+                await QQ_InitInteractiveSystem();
                 
                 console.log('页面初始化完成');
                 
@@ -10625,13 +12758,36 @@
                     console.warn('未找到对应的动态数据，无法添加用户回复');
                 }
                 
-                // *** 修复：整合缓存消息和动态评论 ***
+                // *** 修复：整合缓存消息和动态评论，避免重复动态内容 ***
                 let sendvalue = '';
                 
-                // 如果有缓存的消息，先添加并处理消息保存
+                // 如果有缓存的消息，先添加并处理消息保存（但排除动态重复内容）
                 if (QQ_CacheSendMsg && QQ_CacheSendMsg.trim()) {
-                    sendvalue += `${QQ_CacheSendMsg}\n\n`;
-                    console.log('包含缓存消息:', QQ_CacheSendMsg);
+                    // *** 新增：检查缓存消息是否包含当前动态的重复内容 ***
+                    let cleanedCacheMsg = QQ_CacheSendMsg;
+                    
+                    // 移除可能的动态重复描述
+                    const dynamicRepeatPatterns = [
+                        new RegExp(`用户在${name}的动态下评论[：:]?${value}`, 'g'),
+                        new RegExp(`在${name}的动态.+?评论[：:]?${value}`, 'g'),
+                        new RegExp(`动态内容[：:]?.+?用户评论[：:]?${value}`, 'g')
+                    ];
+                    
+                    for (const pattern of dynamicRepeatPatterns) {
+                        cleanedCacheMsg = cleanedCacheMsg.replace(pattern, '');
+                    }
+                    
+                    // 只有清理后还有有效内容才添加
+                    cleanedCacheMsg = cleanedCacheMsg.trim();
+                    if (cleanedCacheMsg && cleanedCacheMsg !== QQ_CacheSendMsg.trim()) {
+                        sendvalue += `${cleanedCacheMsg}\n\n`;
+                        console.log('包含清理后的缓存消息:', cleanedCacheMsg);
+                    } else if (cleanedCacheMsg && !cleanedCacheMsg.includes(`用户在${name}的动态下评论`)) {
+                        sendvalue += `${cleanedCacheMsg}\n\n`;
+                        console.log('包含缓存消息:', cleanedCacheMsg);
+                    } else {
+                        console.log('缓存消息包含重复动态内容，已跳过');
+                    }
                     
                     // *** 新增：解析并保存缓存消息到对应聊天记录 ***
                     const namevalue = QQ_GetValueName(QQ_CacheSendMsg);
@@ -10682,7 +12838,15 @@
                     sendvalue += `用户在${name}的动态下评论：${value}\n\n`;
                 }
                 
-                sendvalue += `<Request:本次响应必须使用线上格式回复，可以选择动态评论回复或私聊回复。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end>`;
+                // *** 新增：检测动态评论的互动意图 ***
+                let finalRequest = `<Request:本次响应必须使用线上格式回复，可以选择动态评论回复或私聊回复。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end>`;
+                
+                if (QQ_DetectInteractiveIntent(value)) {
+                    console.log('检测到动态评论中的互动意图，将引导AI回复互动内容');
+                    finalRequest = QQ_ModifyRequestForInteractive(finalRequest);
+                }
+                
+                sendvalue += finalRequest;
                 
                 console.log('发送给AI的内容:', sendvalue);
                 const result = await QQ_Gen(sendvalue);
@@ -10775,7 +12939,9 @@
                      // *** 重新渲染整个评论区域，支持折叠 ***
                      if (targetMoment && newComments.length > 0) {
                          QQ_Render_Comments(targetMoment, commentsList);
-                         QQ_Save_Moments();
+                         // *** 确保立即保存动态数据 ***
+                         await QQ_Save_Moments();
+                         console.log('AI评论已保存到动态备份');
                      }
                      
                      // *** 处理私聊消息 ***
@@ -12935,18 +15101,55 @@
             }
             
             /**
-             * 从本地存储加载分组（按角色隔离）
+             * 从世界书加载分组（按角色隔离）
              */
             function loadGroupsFromStorage() {
                 try {
-                    const charGroupsKey = getCharacterGroupsKey();
-                    const stored = localStorage.getItem(charGroupsKey);
-                    if (stored) {
-                        contactGroups = JSON.parse(stored);
-                        console.log(`加载角色(${getCurrentCharacterId()})分组数据:`, contactGroups.length, '个分组');
+                    if (!worldbook || !entries) {
+                        console.warn('loadGroupsFromStorage: worldbook未初始化，尝试从localStorage加载');
+                        // 作为备用方案，尝试从localStorage加载
+                        const charGroupsKey = getCharacterGroupsKey();
+                        const stored = localStorage.getItem(charGroupsKey);
+                        if (stored) {
+                            contactGroups = JSON.parse(stored);
+                            console.log(`从localStorage加载角色(${getCurrentCharacterId()})分组数据:`, contactGroups.length, '个分组');
+                        } else {
+                            contactGroups = [];
+                        }
+                        return;
+                    }
+                    
+                    const charId = getCurrentCharacterId();
+                    const groupsKey = `QQ_分组备份_${charId}`;
+                    
+                    const groupsEntry = entries.find(entry => 
+                        entry.keys.includes(groupsKey)
+                    );
+                    
+                    if (groupsEntry && groupsEntry.content) {
+                        const groupsData = JSON.parse(groupsEntry.content);
+                        
+                        // 验证数据完整性
+                        if (groupsData.groups && Array.isArray(groupsData.groups)) {
+                            contactGroups = groupsData.groups;
+                            console.log(`从世界书加载角色(${charId})分组数据:`, contactGroups.length, '个分组');
+                        } else {
+                            contactGroups = [];
+                            console.log(`角色(${charId})的世界书分组数据格式错误，初始化为空数组`);
+                        }
                     } else {
-                        contactGroups = [];
-                        console.log(`角色(${getCurrentCharacterId()})没有找到存储的分组数据，初始化为空数组`);
+                        // 尝试从localStorage迁移数据
+                        const charGroupsKey = getCharacterGroupsKey();
+                        const localStored = localStorage.getItem(charGroupsKey);
+                        if (localStored) {
+                            contactGroups = JSON.parse(localStored);
+                            console.log(`从localStorage迁移角色(${charId})分组数据:`, contactGroups.length, '个分组');
+                            // 立即保存到世界书
+                            setTimeout(() => saveGroupsToStorage(), 1000);
+                        } else {
+                            contactGroups = [];
+                            console.log(`角色(${charId})没有找到分组数据，初始化为空数组`);
+                        }
                     }
                 } catch (error) {
                     console.error('加载分组数据失败:', error);
@@ -12958,13 +15161,55 @@
             loadGroupsFromStorage();
             
             /**
-             * 保存分组到本地存储（按角色隔离）
+             * 保存分组到世界书（按角色隔离）
              */
-            function saveGroupsToStorage() {
+            async function saveGroupsToStorage() {
                 try {
-                    const charGroupsKey = getCharacterGroupsKey();
-                    localStorage.setItem(charGroupsKey, JSON.stringify(contactGroups));
-                    console.log(`角色(${getCurrentCharacterId()})分组数据已保存`);
+                    if (!worldbook || !entries) {
+                        console.warn('saveGroupsToStorage: worldbook未初始化');
+                        return;
+                    }
+                    
+                    const charId = getCurrentCharacterId();
+                    const groupsKey = `QQ_分组备份_${charId}`;
+                    
+                    const groupsData = {
+                        characterId: charId,
+                        lastUpdate: Date.now(),
+                        groups: contactGroups
+                    };
+                    
+                    // 查找或创建分组存储条目
+                    let groupsEntry = entries.find(entry => 
+                        entry.keys.includes(groupsKey)
+                    );
+                    
+                    if (groupsEntry) {
+                        groupsEntry.content = JSON.stringify(groupsData, null, 2);
+                    } else {
+                        const newEntry = {
+                            keys: [groupsKey],
+                            content: JSON.stringify(groupsData, null, 2),
+                            enabled: true,
+                            constant: true,
+                            comment: `手机界面分组备份 - 角色${charId} - 自动生成`,
+                            depth: 0,
+                            selectiveLogic: 0,
+                            order: 9998
+                        };
+                        entries.push(newEntry);
+                    }
+                    
+                    // 保存到世界书
+                    if (typeof saveWorldInfo === 'function') {
+                        console.log('触发saveWorldInfo保存分组数据...');
+                        await saveWorldInfo();
+                    } else {
+                        console.log('saveWorldInfo函数不可用，依赖SillyTavern自动保存机制');
+                    }
+                    
+                    console.log(`角色(${charId})分组数据已保存到世界书，共${contactGroups.length}个分组`);
+                    
                 } catch (error) {
                     console.error('保存分组数据失败:', error);
                 }
@@ -13029,7 +15274,7 @@
             /**
              * 创建新的联系人分组
              */
-            function createNewContactGroup() {
+            async function createNewContactGroup() {
                 console.log('开始创建新分组...');
                 const input = document.getElementById('new_group_name_input');
                 if (!input) {
@@ -13060,7 +15305,7 @@
                 };
                 
                 contactGroups.push(newGroup);
-                saveGroupsToStorage();
+                await saveGroupsToStorage();
                 renderContactGroups();
                 closeNewGroupModal();
                 
@@ -13190,12 +15435,12 @@
             /**
              * 切换分组折叠状态
              */
-            function toggleGroup(groupId) {
+            async function toggleGroup(groupId) {
                 const group = contactGroups.find(g => g.id === groupId);
                 if (!group) return;
                 
                 group.collapsed = !group.collapsed;
-                saveGroupsToStorage();
+                await saveGroupsToStorage();
                 
                 const groupElement = document.querySelector(`[data-group-id="${groupId}"]`);
                 const toggle = groupElement.querySelector('.group-toggle');
@@ -13248,7 +15493,7 @@
                         const group = contactGroups.find(g => g.id === groupId);
                         if (group) {
                             group.name = newName;
-                            saveGroupsToStorage();
+                            setTimeout(() => saveGroupsToStorage(), 100);
                         }
                     }
                     
@@ -13280,7 +15525,7 @@
             /**
              * 删除联系人分组
              */
-            function deleteContactGroup(event, groupId) {
+            async function deleteContactGroup(event, groupId) {
                 event.stopPropagation();
                 
                 const group = contactGroups.find(g => g.id === groupId);
@@ -13289,7 +15534,7 @@
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
                     // 移除分组
                     contactGroups = contactGroups.filter(g => g.id !== groupId);
-                    saveGroupsToStorage();
+                    await saveGroupsToStorage();
                     renderContactGroups();
                 }
             }
@@ -13399,7 +15644,7 @@
                 }
                 
                 // 保存并重新渲染
-                saveGroupsToStorage();
+                setTimeout(() => saveGroupsToStorage(), 100);
                 renderContactGroups();
                 
                 // 重新初始化拖拽功能
@@ -13542,38 +15787,39 @@
                 
                 // 检查是否是群聊
                 const isGroupChat = checkIfGroupChat(chatName);
-                if (!isGroupChat) {
-                    console.log('这不是群聊，不显示成员列表');
-                    return;
+                if (isGroupChat) {
+                    // 群聊逻辑
+                    const cleanGroupName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
+                    
+                    // 从QQ_msgjson.群聊中获取群聊数据
+                    let groupData = null;
+                    if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[cleanGroupName]) {
+                        const msgGroupData = QQ_msgjson.群聊[cleanGroupName];
+                        groupData = {
+                            name: cleanGroupName,
+                            members: msgGroupData.members || [],
+                            avatar: 'https://files.catbox.moe/skngqq.jpg' // 默认头像
+                        };
+                    }
+                    
+                    // 如果没有找到群聊数据，创建一个基本的数据结构
+                    if (!groupData) {
+                        groupData = {
+                            name: cleanGroupName,
+                            members: ['成员1', '成员2', '成员3'], // 示例成员
+                            avatar: 'https://files.catbox.moe/skngqq.jpg'
+                        };
+                        console.warn(`群聊 ${cleanGroupName} 数据未找到，使用默认数据`);
+                    }
+                    
+                    // 调用群聊管理菜单
+                    console.log('显示群聊管理菜单:', groupData);
+                    showGroupManagementMenu(groupData, element);
+                } else {
+                    // 私聊逻辑 - 显示角色专属互动空间菜单
+                    console.log('这是私聊，显示角色互动空间菜单');
+                    QQ_ShowCharacterInteractiveMenu(chatName, element);
                 }
-                
-                // 获取群聊数据
-                const cleanGroupName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
-                
-                // 从QQ_msgjson.群聊中获取群聊数据
-                let groupData = null;
-                if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[cleanGroupName]) {
-                    const msgGroupData = QQ_msgjson.群聊[cleanGroupName];
-                    groupData = {
-                        name: cleanGroupName,
-                        members: msgGroupData.members || [],
-                        avatar: 'https://files.catbox.moe/skngqq.jpg' // 默认头像
-                    };
-                }
-                
-                // 如果没有找到群聊数据，创建一个基本的数据结构
-                if (!groupData) {
-                    groupData = {
-                        name: cleanGroupName,
-                        members: ['成员1', '成员2', '成员3'], // 示例成员
-                        avatar: 'https://files.catbox.moe/skngqq.jpg'
-                    };
-                    console.warn(`群聊 ${cleanGroupName} 数据未找到，使用默认数据`);
-                }
-                
-                // 调用群聊管理菜单
-                console.log('显示群聊管理菜单:', groupData);
-                showGroupManagementMenu(groupData, element);
             }
             
             /**
