@@ -7626,6 +7626,7 @@ MiPhone_end
             /**
              * ⏰ 工具调用执行器 - scheduleProactiveEvent处理器
              * 处理AI安排的主动事件，实现真人感的异步互动
+             * ✨ 支持页面刷新后恢复，创造"离线世界"
              * @param {object} args - 包含 sender, content, delay, type 等参数
              */
             async function QQ_HandleScheduleProactiveEvent(args) {
@@ -7636,8 +7637,9 @@ MiPhone_end
                 
                 // 📝 创建事件ID用于跟踪
                 const eventId = `proactive_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                const executeAt = Date.now() + delayMs;
                 
-                // 💾 持久化存储（防止页面刷新丢失）
+                // 💾 持久化事件数据（防止页面刷新丢失）
                 const eventData = {
                     id: eventId,
                     sender,
@@ -7645,18 +7647,26 @@ MiPhone_end
                     delay,
                     type,
                     scheduledAt: new Date().toISOString(),
-                    executeAt: new Date(Date.now() + delayMs).toISOString()
+                    executeAt: new Date(executeAt).toISOString(),
+                    executeAtMs: executeAt, // 添加毫秒时间戳便于计算
+                    status: 'pending'
                 };
                 
-                // 保存到世界书
-                await QQ_SaveScheduledEvent(eventData);
+                // 🌍 添加到全局待办事件队列
+                if (!window.pendingEvents) {
+                    window.pendingEvents = [];
+                }
+                window.pendingEvents.push(eventData);
+                
+                // 保存到世界书实现真正的持久化
+                await QQ_SaveAllPendingEvents();
                 
                 // ⏲️ 使用setTimeout来执行延迟
-                setTimeout(async () => {
+                const timeoutId = setTimeout(async () => {
                     try {
                         console.log(`🔔 [主动事件触发] 来自 ${sender}: "${content}"`);
                         
-                        // 🗑️ 从存储中移除已执行的事件
+                        // 🗑️ 从队列中移除已执行的事件
                         await QQ_RemoveScheduledEvent(eventId);
                         
                         // 📨 执行实际的消息发送
@@ -7676,7 +7686,10 @@ MiPhone_end
                     }
                 }, delayMs);
                 
-                console.log(`✅ [ScheduleEvent] 事件 ${eventId} 已安排`);
+                // 保存超时ID以便后续管理
+                eventData.timeoutId = timeoutId;
+                
+                console.log(`✅ [ScheduleEvent] 事件 ${eventId} 已安排，将在 ${new Date(executeAt).toLocaleString()} 执行`);
             }
 
             /**
@@ -7703,52 +7716,186 @@ MiPhone_end
                 }
             }
 
+            // ================== 升级版事件持久化系统 ==================
+            
             /**
-             * 💾 保存计划事件到世界书
+             * 💾 保存所有待办事件到世界书（新版本）
+             * 统一管理所有事件，支持页面刷新后恢复
              */
-            async function QQ_SaveScheduledEvent(eventData) {
+            async function QQ_SaveAllPendingEvents() {
                 try {
+                    if (!window.pendingEvents || window.pendingEvents.length === 0) {
+                        console.log('💾 没有待办事件需要保存');
+                        
+                        // 清空世界书中的事件数据
+                        if (typeof entries !== 'undefined' && typeof saveWorldInfo === 'function') {
+                            let eventStorage = entries.find(e => e.keys.includes('手机-待办事件'));
+                            if (eventStorage) {
+                                eventStorage.content = JSON.stringify({ events: [], lastSaved: new Date().toISOString(), totalEvents: 0 }, null, 2);
+                                await saveWorldInfo();
+                            }
+                        }
+                        return;
+                    }
+                    
+                    const eventData = {
+                        events: window.pendingEvents.map(event => ({
+                            ...event,
+                            timeoutId: undefined // 不保存timeout ID
+                        })),
+                        lastSaved: new Date().toISOString(),
+                        totalEvents: window.pendingEvents.length
+                    };
+                    
+                    // 保存到专门的世界书条目
                     if (typeof entries !== 'undefined' && typeof saveWorldInfo === 'function') {
-                        let eventStorage = entries.find(e => e.keys.includes('手机-计划事件'));
+                        let eventStorage = entries.find(e => e.keys.includes('手机-待办事件'));
                         if (!eventStorage) {
                             eventStorage = {
-                                keys: ['手机-计划事件'],
-                                content: '[]',
+                                keys: ['手机-待办事件'],
+                                content: '{}',
                                 enabled: true,
                                 constant: true
                             };
                             entries.push(eventStorage);
                         }
                         
-                        const events = JSON.parse(eventStorage.content || '[]');
-                        events.push(eventData);
-                        eventStorage.content = JSON.stringify(events, null, 2);
-                        
+                        eventStorage.content = JSON.stringify(eventData, null, 2);
                         await saveWorldInfo();
-                        console.log(`💾 [事件存储] 已保存事件 ${eventData.id}`);
+                        console.log(`💾 [新版持久化] 已保存 ${window.pendingEvents.length} 个待办事件到世界书`);
+                    } else {
+                        console.warn('💾 saveWorldInfo 函数不可用，事件未能持久化');
                     }
                 } catch (error) {
-                    console.error('❌ [事件存储错误]:', error);
+                    console.error('💾 保存待办事件失败:', error);
+                }
+            }
+            
+            /**
+             * 📖 从世界书加载待办事件（新版本）
+             * 页面初始化时恢复所有未执行的事件
+             */
+            async function QQ_LoadPendingEvents() {
+                try {
+                    console.log('📖 [新版] 正在从世界书加载待办事件...');
+                    
+                    if (typeof entries === 'undefined') {
+                        console.log('📖 世界书entries不可用，跳过事件恢复');
+                        window.pendingEvents = [];
+                        return;
+                    }
+                    
+                    const eventStorage = entries.find(e => e.keys.includes('手机-待办事件'));
+                    if (!eventStorage || !eventStorage.content) {
+                        console.log('📖 没有找到已保存的待办事件');
+                        window.pendingEvents = [];
+                        return;
+                    }
+                    
+                    const eventData = JSON.parse(eventStorage.content);
+                    const now = Date.now();
+                    let restoredCount = 0;
+                    let expiredCount = 0;
+                    
+                    console.log(`📖 找到 ${eventData.totalEvents || 0} 个已保存的事件，最后保存时间: ${eventData.lastSaved}`);
+                    
+                    window.pendingEvents = [];
+                    
+                    // 遍历所有事件，区分过期和未来事件
+                    for (const event of eventData.events || []) {
+                        const executeTime = event.executeAtMs || new Date(event.executeAt).getTime();
+                        
+                        if (executeTime <= now) {
+                            // 🚨 过期事件 - 立即执行
+                            console.log(`⚡ [过期事件] 立即执行: ${event.sender} - "${event.content}"`);
+                            expiredCount++;
+                            
+                            setTimeout(async () => {
+                                await QQ_HandleSendMessage({
+                                    type: event.type,
+                                    target: event.sender,
+                                    content: event.content,
+                                    sender: event.sender
+                                });
+                                QQ_PlayNotificationSound();
+                            }, 100 * expiredCount); // 略微延迟以避免同时执行太多
+                        } else {
+                            // ✅ 未来事件 - 重新安排
+                            const remainingDelay = executeTime - now;
+                            restoredCount++;
+                            
+                            console.log(`🔄 [恢复事件] ${event.id}: 剩余 ${Math.floor(remainingDelay / 1000)}s 后执行`);
+                            
+                            // 重新创建setTimeout
+                            const timeoutId = setTimeout(async () => {
+                                try {
+                                    console.log(`🔔 [恢复事件触发] 来自 ${event.sender}: "${event.content}"`);
+                                    
+                                    await QQ_RemoveScheduledEvent(event.id);
+                                    await QQ_HandleSendMessage({
+                                        type: event.type,
+                                        target: event.sender,
+                                        content: event.content,
+                                        sender: event.sender
+                                    });
+                                    
+                                    QQ_PlayNotificationSound();
+                                    console.log(`✅ [恢复事件] ${event.id} 执行完成`);
+                                } catch (error) {
+                                    console.error(`❌ [恢复事件错误] ${event.id}:`, error);
+                                }
+                            }, remainingDelay);
+                            
+                            event.timeoutId = timeoutId;
+                            event.status = 'restored';
+                            window.pendingEvents.push(event);
+                        }
+                    }
+                    
+                    // 更新保存状态
+                    if (window.pendingEvents.length > 0) {
+                        await QQ_SaveAllPendingEvents();
+                    }
+                    
+                    console.log(`📖 [事件恢复完成] 立即执行: ${expiredCount}个, 重新安排: ${restoredCount}个`);
+                    
+                    if (expiredCount > 0 || restoredCount > 0) {
+                        triggerSlash(`/echo severity=info 🔄 已恢复 ${restoredCount} 个待办事件，立即执行了 ${expiredCount} 个过期事件`);
+                    }
+                    
+                } catch (error) {
+                    console.error('📖 加载待办事件失败:', error);
+                    window.pendingEvents = [];
                 }
             }
 
             /**
-             * 🗑️ 移除已执行的计划事件
+             * 🗑️ 从队列中移除指定的事件（新版本）
+             * @param {string} eventId - 要移除的事件ID
              */
             async function QQ_RemoveScheduledEvent(eventId) {
                 try {
-                    if (typeof entries !== 'undefined' && typeof saveWorldInfo === 'function') {
-                        const eventStorage = entries.find(e => e.keys.includes('手机-计划事件'));
-                        if (eventStorage) {
-                            const events = JSON.parse(eventStorage.content || '[]');
-                            const filteredEvents = events.filter(e => e.id !== eventId);
-                            eventStorage.content = JSON.stringify(filteredEvents, null, 2);
-                            await saveWorldInfo();
-                            console.log(`🗑️ [事件清理] 已移除事件 ${eventId}`);
+                    if (!window.pendingEvents) {
+                        return;
+                    }
+                    
+                    // 找到并移除事件
+                    const eventIndex = window.pendingEvents.findIndex(event => event.id === eventId);
+                    if (eventIndex !== -1) {
+                        const removedEvent = window.pendingEvents.splice(eventIndex, 1)[0];
+                        
+                        // 清除对应的timeout
+                        if (removedEvent.timeoutId) {
+                            clearTimeout(removedEvent.timeoutId);
                         }
+                        
+                        console.log(`🗑️ [移除事件] ${eventId} 已从队列中删除`);
+                        
+                        // 更新世界书
+                        await QQ_SaveAllPendingEvents();
                     }
                 } catch (error) {
-                    console.error('❌ [事件清理错误]:', error);
+                    console.error('🗑️ 移除事件失败:', error);
                 }
             }
 
@@ -7778,6 +7925,70 @@ MiPhone_end
                     console.log('🔇 [音效] 播放失败，静默处理');
                 }
             }
+            
+            // ================== 事件管理和监控工具 ==================
+            
+            /**
+             * 📊 事件队列状态监控
+             * 调试和管理工具
+             */
+            window.QQ_ShowEventQueueStatus = function() {
+                console.log('📊 ========== 事件队列状态 ==========');
+                
+                if (!window.pendingEvents || window.pendingEvents.length === 0) {
+                    console.log('📊 当前没有待办事件');
+                    return;
+                }
+                
+                const now = Date.now();
+                console.log(`📊 当前队列中有 ${window.pendingEvents.length} 个事件:`);
+                
+                window.pendingEvents.forEach((event, index) => {
+                    const executeTime = event.executeAtMs || new Date(event.executeAt).getTime();
+                    const remainingTime = executeTime - now;
+                    const timeStatus = remainingTime > 0 ? `剩余 ${Math.floor(remainingTime / 1000)}s` : '已过期';
+                    
+                    console.log(`  ${index + 1}. [${event.id}] ${event.sender}: "${event.content}" (${timeStatus})`);
+                });
+                
+                console.log('📊 =====================================');
+            };
+            
+            /**
+             * 🧹 清理所有事件队列
+             * 紧急情况下的清理工具
+             */
+            window.QQ_ClearAllEvents = async function() {
+                if (!window.pendingEvents) {
+                    console.log('🧹 事件队列已经是空的');
+                    return;
+                }
+                
+                console.log(`🧹 正在清理 ${window.pendingEvents.length} 个事件...`);
+                
+                // 清除所有timeout
+                window.pendingEvents.forEach(event => {
+                    if (event.timeoutId) {
+                        clearTimeout(event.timeoutId);
+                    }
+                });
+                
+                // 清空队列
+                window.pendingEvents = [];
+                
+                // 更新世界书
+                await QQ_SaveAllPendingEvents();
+                
+                console.log('🧹 ✅ 所有事件已清理完成');
+            };
+            
+            /**
+             * 🔄 手动恢复事件（调试用）
+             */
+            window.QQ_RestoreEvents = async function() {
+                console.log('🔄 手动触发事件恢复...');
+                await QQ_LoadPendingEvents();
+            };
 
             /**
              * 🧠 智能JSON提取器 - 严格匹配 + 模糊匹配双重策略
@@ -27208,13 +27419,21 @@ MiPhone_end`;
                 };
             };
 
-            // 自动创建或更新JSON世界书条目
+            // 自动创建或更新JSON世界书条目 + 事件恢复
             setTimeout(() => {
                 if (typeof entries !== 'undefined' && entries) {
-                    console.log('===== JSON系统初始化 =====');
+                    console.log('===== JSON系统 + 事件系统初始化 =====');
                     console.log('开始创建/更新JSON格式世界书条目...');
                     QQ_CreateJSONWorldBookEntry();
                     console.log('JSON格式世界书条目处理完成');
+                    
+                    // ⭐ 新增：自动恢复持久化事件
+                    console.log('🔄 开始恢复持久化事件...');
+                    QQ_LoadPendingEvents().then(() => {
+                        console.log('✅ 事件系统初始化完成');
+                    }).catch(error => {
+                        console.error('❌ 事件系统初始化失败:', error);
+                    });
                     console.log('');
                     console.log('📌 可用的JSON系统命令:');
                     console.log('- QQ_CheckJSONMigrationStatus() - 检查迁移状态');
@@ -27231,6 +27450,11 @@ MiPhone_end`;
                     console.log('- QQ_Test_Tool_Call_Direct() - 直接工具调用测试');
                     console.log('- QQ_Monitor_ResultHandle() - 监控ResultHandle');
                     console.log('- QQ_Full_System_Diagnosis() - 完整系统诊断');
+                    console.log('');
+                    console.log('🌍 事件持久化系统:');
+                    console.log('- QQ_ShowEventQueueStatus() - 查看事件队列状态');
+                    console.log('- QQ_RestoreEvents() - 手动恢复事件');
+                    console.log('- QQ_ClearAllEvents() - 清理所有事件');
                     console.log('========================');
                 } else {
                     console.warn('世界书系统未初始化，3秒后重试...');
