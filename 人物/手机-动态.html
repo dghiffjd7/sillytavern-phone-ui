@@ -8799,7 +8799,14 @@
                                 QQ_InteractivePages[spaceId] = [interactiveContent];
                                 QQ_InteractiveCurrentPage[spaceId] = 0;
                                 
-                                // 保存到世界书（非阻塞）
+                                // *** 立即保存互动内容到世界书 ***
+                                QQ_SaveInteractiveContentToWorldBook(interactiveContent, characterName).then(interactiveId => {
+                                    console.log(`🎯 创建的互动空间已立即保存到世界书，ID: ${interactiveId}, 角色: ${characterName}`);
+                                }).catch(error => {
+                                    console.error('保存创建的互动空间失败:', error);
+                                });
+                                
+                                // 同时保存到旧的互动空间存储（兼容性）
                                 QQ_SaveInteractiveSpaceToWorldBook(spaceId, characterName).catch(error => {
                                     console.error('保存互动空间失败:', error);
                                 });
@@ -9789,7 +9796,14 @@ moment_end
                 // 设置当前活动空间
                 QQ_ActiveSpaceId = spaceId;
                 
-                // 异步保存到世界书
+                // *** 立即保存单个互动内容到世界书 ***
+                QQ_SaveInteractiveContentToWorldBook(cleanContent, charName).then(interactiveId => {
+                    console.log(`🎯 互动内容已立即保存到世界书，ID: ${interactiveId}, 角色: ${charName}`);
+                }).catch(error => {
+                    console.error('保存互动内容失败:', error);
+                });
+                
+                // 同时保存到旧的互动空间存储（兼容性）
                 QQ_SaveInteractiveSpaces();
                 
                 // 移除现有的互动空间
@@ -16506,8 +16520,79 @@ msg_end
                  console.log('=== 检查完成 ===');
              }
 
-             // *** 添加到全局作用域便于调试 ***
-             window.QQ_Check_Comment_Backup_Status = QQ_Check_Comment_Backup_Status;
+                         // *** 添加到全局作用域便于调试 ***
+            window.QQ_Check_Comment_Backup_Status = QQ_Check_Comment_Backup_Status;
+
+            /**
+             * *** 新增：检查互动内容保存状态的调试函数 ***
+             */
+            function QQ_Check_Interactive_Backup_Status() {
+                console.log('=== 互动内容备份状态检查 ===');
+                
+                // 检查内存中的互动空间数据
+                const memorySpaces = Object.keys(QQ_InteractiveSpaces || {}).length;
+                const memoryCharSpaces = Object.keys(QQ_CharacterSpaces || {}).length;
+                console.log(`内存中公共互动空间: ${memorySpaces}个`);
+                console.log(`内存中角色互动空间: ${memoryCharSpaces}个`);
+                
+                if (worldbook && entries) {
+                    // 检查世界书中的公共互动备份
+                    const publicEntry = entries.find(entry => entry.comment === "角色-互动空间备份");
+                    if (publicEntry) {
+                        try {
+                            const publicData = JSON.parse(publicEntry.content);
+                            console.log(`✅ 世界书公共互动备份: ${publicData.length}个互动内容`);
+                            
+                            // 显示最近几个公共互动的详情
+                            if (publicData.length > 0) {
+                                console.log('最近的公共互动:');
+                                publicData.slice(0, 3).forEach((item, index) => {
+                                    console.log(`  ${index + 1}. ID: ${item.id}, 时间: ${item.timestamp}`);
+                                    console.log(`     内容: ${item.content.substring(0, 50)}...`);
+                                });
+                            }
+                        } catch (error) {
+                            console.error('❌ 解析公共互动备份失败:', error);
+                        }
+                    } else {
+                        console.warn('⚠ 未找到公共互动备份条目');
+                    }
+                    
+                    // 检查角色专属互动备份
+                    const characterEntries = entries.filter(entry => 
+                        entry.comment && entry.comment.startsWith("角色-互动空间备份-")
+                    );
+                    
+                    console.log(`📋 找到${characterEntries.length}个角色互动备份条目:`);
+                    characterEntries.forEach(entry => {
+                        const characterName = entry.comment.replace("角色-互动空间备份-", "");
+                        try {
+                            const charData = JSON.parse(entry.content);
+                            console.log(`  • ${characterName}: ${charData.length}个互动内容`);
+                            
+                            // 显示该角色最近的互动
+                            if (charData.length > 0) {
+                                const latest = charData[0];
+                                console.log(`    最新: ${latest.timestamp} - ${latest.content.substring(0, 30)}...`);
+                            }
+                        } catch (error) {
+                            console.error(`❌ 解析角色${characterName}互动备份失败:`, error);
+                        }
+                    });
+                    
+                    if (characterEntries.length === 0) {
+                        console.warn('⚠ 未找到任何角色互动备份条目');
+                    }
+                    
+                } else {
+                    console.warn('❌ 无法访问世界书或entries');
+                }
+                
+                console.log('=== 互动内容检查完成 ===');
+            }
+
+            // *** 添加到全局作用域便于调试 ***
+            window.QQ_Check_Interactive_Backup_Status = QQ_Check_Interactive_Backup_Status;
 
              /**
               * *** 新增：测试增强AI回复功能 ***
@@ -25428,10 +25513,15 @@ msg_end
              */
             
             /**
-             * 保存单个互动内容到世界书
+             * 保存单个互动内容到世界书 - 使用类似动态保存的可靠方式
              */
-            function QQ_SaveInteractiveContentToWorldBook(content, characterName = null) {
+            async function QQ_SaveInteractiveContentToWorldBook(content, characterName = null) {
                 try {
+                    if (!worldbook || !entries) {
+                        console.warn('世界书功能不可用，无法保存互动内容');
+                        return null;
+                    }
+                    
                     const interactiveData = {
                         content: content,
                         characterName: characterName,
@@ -25440,39 +25530,69 @@ msg_end
                         type: characterName ? 'character_specific' : 'public'
                     };
                     
+                    // *** 使用动态保存的相同机制 ***
                     const key = characterName ? 
-                        `QQ_角色互动空间_${characterName}` : 
-                        'QQ_公共互动空间';
+                        `角色-互动空间备份-${characterName}` : 
+                        '角色-互动空间备份';
                     
-                    // 获取现有数据
-                    let existingData = QQ_GetFromWorldBook(key) || [];
+                    // 查找现有条目
+                    let interactiveEntry = entries.find(entry => entry.comment === key);
+                    
+                    let existingData = [];
+                    if (interactiveEntry && interactiveEntry.content) {
+                        try {
+                            existingData = JSON.parse(interactiveEntry.content);
+                        } catch (parseError) {
+                            console.error('解析现有互动数据失败:', parseError);
+                            existingData = [];
+                        }
+                    }
                     
                     // 确保是数组格式
                     if (!Array.isArray(existingData)) {
                         existingData = [];
                     }
                     
-                    // 添加新数据
-                    existingData.push(interactiveData);
+                    // 添加新数据到数组开头（最新的在前面）
+                    existingData.unshift(interactiveData);
                     
                     // 限制数量（最多30个）
                     if (existingData.length > 30) {
-                        existingData = existingData.slice(-30);
+                        existingData = existingData.slice(0, 30);
                     }
                     
-                    // 保存到世界书
-                    const success = QQ_SafeSaveToWorldBook(
-                        characterName ? `角色${characterName}的互动内容` : '公共互动内容',
-                        existingData,
-                        key
-                    );
+                    const interactiveJson = JSON.stringify(existingData, null, 2);
+                    console.log(`准备保存互动内容: ${characterName || '公共'}, 总计${existingData.length}个互动`);
                     
-                    if (success) {
-                        console.log(`互动内容已保存到世界书: ${characterName || '公共'}, ID: ${interactiveData.id}`);
-                        return interactiveData.id;
+                    if (interactiveEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: interactiveEntry.uid,
+                            content: interactiveJson,
+                        }]);
+                        console.log(`✅ 互动内容已更新到现有世界书条目: ${key}`);
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: key,
+                            key: [`此世界书永不触发_互动${characterName || '公共'}`],
+                            content: interactiveJson,
+                            position: "at_depth_as_system",
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9998,
+                            enabled: true,
+                        });
+                        console.log(`✅ 互动内容已保存到新世界书条目: ${key}`);
+                        
+                        // 重新获取entries以包含新创建的条目
+                        entries = await getLorebookEntries(worldbook);
                     }
                     
-                    return null;
+                    console.log(`🎯 互动内容保存成功: ${characterName || '公共'}, ID: ${interactiveData.id}`);
+                    return interactiveData.id;
+                    
                 } catch (error) {
                     console.error('保存互动内容到世界书失败:', error);
                     return null;
@@ -26889,7 +27009,14 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         replies: []
                     };
                     
-                    // 保存到世界书
+                    // *** 立即保存互动内容到世界书 ***
+                    QQ_SaveInteractiveContentToWorldBook(content, null).then(interactiveId => {
+                        console.log(`🎯 公共互动空间已立即保存到世界书，ID: ${interactiveId}`);
+                    }).catch(error => {
+                        console.error('保存公共互动空间失败:', error);
+                    });
+                    
+                    // 同时保存到旧的互动空间存储（兼容性）
                     if (typeof QQ_Save_Interactive_Spaces === 'function') {
                         QQ_Save_Interactive_Spaces();
                     }
