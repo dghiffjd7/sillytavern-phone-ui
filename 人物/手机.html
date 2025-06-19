@@ -7725,6 +7725,476 @@
             let QQ_CharacterSpirits = {}; // 存储每个角色的精灵按钮状态
             
             /**
+             * 获取角色头像
+             * @param {string} characterName - 角色名称
+             * @returns {string} 头像URL
+             */
+            function QQ_GetCharacterAvatar(characterName) {
+                try {
+                    // 尝试多种方式获取头像
+                    let avatarUrl = null;
+                    
+                    // 方法1: 从当前聊天界面获取
+                    const chatAvatar = $(`.QQ_chat_item[data-name="${characterName}"] img`).attr('src');
+                    if (chatAvatar && chatAvatar !== 'undefined') {
+                        avatarUrl = chatAvatar;
+                    }
+                    
+                    // 方法2: 从SillyTavern的角色数据获取
+                    if (!avatarUrl && typeof getCharacterAvatar === 'function') {
+                        avatarUrl = getCharacterAvatar(characterName);
+                    }
+                    
+                    // 方法3: 使用SillyTavern的内置函数
+                    if (!avatarUrl && typeof characters !== 'undefined' && Array.isArray(characters)) {
+                        const character = characters.find(char => char.name === characterName || char.avatar === characterName);
+                        if (character && character.avatar) {
+                            avatarUrl = character.avatar;
+                        }
+                    }
+                    
+                    // 方法4: 构建默认路径
+                    if (!avatarUrl) {
+                        avatarUrl = `characters/${characterName}.png`;
+                    }
+                    
+                    console.log(`获取角色 ${characterName} 头像: ${avatarUrl}`);
+                    return avatarUrl;
+                } catch (error) {
+                    console.error('获取角色头像失败:', error);
+                    return 'default_avatar.png';
+                }
+            }
+            
+            /**
+             * 显示角色精灵面板
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_ShowCharacterSpiritPanel(characterName) {
+                console.log(`显示角色 ${characterName} 的精灵面板`);
+                
+                // 移除现有面板
+                $('.QQ_character_spirit_panel').remove();
+                
+                const characterAvatar = QQ_GetCharacterAvatar(characterName);
+                
+                // 创建精灵面板HTML
+                const panelHtml = `
+                    <div class="QQ_character_spirit_panel" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.8);
+                        z-index: 999999999;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: fadeIn 0.3s ease;
+                        backdrop-filter: blur(15px);
+                    ">
+                        <div class="QQ_spirit_panel_content" style="
+                            background: #ffffff;
+                            border-radius: 20px;
+                            padding: 0;
+                            max-width: 90%;
+                            overflow: hidden;
+                            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+                            color: #333;
+                            animation: slideIn 0.3s ease;
+                            width: 350px;
+                        ">
+                            <div class="spirit-panel-header" style="
+                                background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+                                color: white;
+                                padding: 20px;
+                                text-align: center;
+                                position: relative;
+                            ">
+                                <img src="${characterAvatar}" alt="${characterName}" style="
+                                    width: 60px;
+                                    height: 60px;
+                                    border-radius: 50%;
+                                    border: 3px solid white;
+                                    margin-bottom: 10px;
+                                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+                                ">
+                                <h3 style="margin: 0; font-size: 18px; font-weight: 600;">${characterName}</h3>
+                                <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">专属互动精灵</p>
+                                <button class="QQ_close_spirit_panel" style="
+                                    position: absolute;
+                                    top: 15px;
+                                    right: 15px;
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 30px;
+                                    height: 30px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 16px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.3s ease;
+                                " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+                                   onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                                    ×
+                                </button>
+                            </div>
+                            
+                            <div class="spirit-panel-body" style="
+                                padding: 25px 20px;
+                            ">
+                                <p style="
+                                    text-align: center;
+                                    color: #666;
+                                    margin-bottom: 20px;
+                                    font-size: 14px;
+                                    line-height: 1.5;
+                                ">
+                                    选择你想要与 ${characterName} 进行的互动类型
+                                </p>
+                                
+                                <div class="spirit-options" style="
+                                    display: flex;
+                                    flex-direction: column;
+                                    gap: 12px;
+                                ">
+                                    <button class="QQ_spirit_option" data-action="interactive_space" style="
+                                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                        border: none;
+                                        color: white;
+                                        padding: 15px 20px;
+                                        border-radius: 12px;
+                                        cursor: pointer;
+                                        font-size: 14px;
+                                        font-weight: 500;
+                                        transition: all 0.3s ease;
+                                        box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                    " onmouseover="this.style.transform='translateY(-2px)'" 
+                                       onmouseout="this.style.transform='translateY(0)'">
+                                        <span style="font-size: 18px;">🌟</span>
+                                        <span>开启互动空间</span>
+                                    </button>
+                                    
+                                    <button class="QQ_spirit_option" data-action="create_space" style="
+                                        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+                                        border: none;
+                                        color: white;
+                                        padding: 15px 20px;
+                                        border-radius: 12px;
+                                        cursor: pointer;
+                                        font-size: 14px;
+                                        font-weight: 500;
+                                        transition: all 0.3s ease;
+                                        box-shadow: 0 3px 10px rgba(67, 233, 123, 0.3);
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                    " onmouseover="this.style.transform='translateY(-2px)'" 
+                                       onmouseout="this.style.transform='translateY(0)'">
+                                        <span style="font-size: 18px;">✨</span>
+                                        <span>创建新互动</span>
+                                    </button>
+                                    
+                                    <button class="QQ_spirit_option" data-action="hide_spirit" style="
+                                        background: #f8f9fa;
+                                        border: 1px solid #e9ecef;
+                                        color: #6c757d;
+                                        padding: 12px 20px;
+                                        border-radius: 12px;
+                                        cursor: pointer;
+                                        font-size: 14px;
+                                        font-weight: 500;
+                                        transition: all 0.3s ease;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                    " onmouseover="this.style.background='#e9ecef'" 
+                                       onmouseout="this.style.background='#f8f9fa'">
+                                        <span style="font-size: 18px;">👻</span>
+                                        <span>隐藏精灵</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加到页面
+                $('body').append(panelHtml);
+                
+                // 绑定关闭事件
+                $('.QQ_close_spirit_panel').on('click', function() {
+                    $('.QQ_character_spirit_panel').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                });
+                
+                // 绑定选项事件
+                $('.QQ_spirit_option[data-action="interactive_space"]').on('click', function() {
+                    $('.QQ_character_spirit_panel').remove();
+                    QQ_ShowCharacterInteractiveSpaces(characterName);
+                });
+                
+                $('.QQ_spirit_option[data-action="create_space"]').on('click', function() {
+                    $('.QQ_character_spirit_panel').remove();
+                    QQ_CreateCharacterInteractiveSpace(characterName);
+                });
+                
+                $('.QQ_spirit_option[data-action="hide_spirit"]').on('click', function() {
+                    $('.QQ_character_spirit_panel').remove();
+                    QQ_HideCharacterSpirit(characterName);
+                    toastr.info(`已隐藏 ${characterName} 的精灵按钮`, '精灵按钮');
+                });
+                
+                // 点击背景关闭
+                $('.QQ_character_spirit_panel').on('click', function(e) {
+                    if (e.target === this) {
+                        $(this).fadeOut(300, function() {
+                            $(this).remove();
+                        });
+                    }
+                });
+            }
+            
+            /**
+             * 显示角色的互动空间列表
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_ShowCharacterInteractiveSpaces(characterName) {
+                console.log(`显示角色 ${characterName} 的互动空间列表`);
+                
+                // 确保角色有互动空间数据
+                if (!QQ_CharacterSpaces[characterName]) {
+                    QQ_CharacterSpaces[characterName] = {};
+                }
+                
+                const characterSpaces = QQ_CharacterSpaces[characterName];
+                const spaceKeys = Object.keys(characterSpaces);
+                
+                if (spaceKeys.length === 0) {
+                    toastr.info(`${characterName} 还没有互动空间，点击创建新互动开始吧！`, '互动空间');
+                    QQ_CreateCharacterInteractiveSpace(characterName);
+                    return;
+                }
+                
+                // 移除现有面板
+                $('.QQ_character_spaces_list').remove();
+                
+                let spacesListHtml = `
+                    <div class="QQ_character_spaces_list" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.8);
+                        z-index: 999999999;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: fadeIn 0.3s ease;
+                        backdrop-filter: blur(15px);
+                    ">
+                        <div style="
+                            background: #ffffff;
+                            border-radius: 20px;
+                            padding: 0;
+                            max-width: 90%;
+                            max-height: 80%;
+                            overflow: hidden;
+                            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+                            color: #333;
+                            animation: slideIn 0.3s ease;
+                            width: 400px;
+                        ">
+                            <div style="
+                                background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+                                color: white;
+                                padding: 20px;
+                                text-align: center;
+                                position: relative;
+                            ">
+                                <h3 style="margin: 0; font-size: 18px; font-weight: 600;">${characterName} 的互动空间</h3>
+                                <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.9;">选择一个互动空间</p>
+                                <button class="QQ_close_spaces_list" style="
+                                    position: absolute;
+                                    top: 15px;
+                                    right: 15px;
+                                    background: rgba(255, 255, 255, 0.2);
+                                    border: none;
+                                    color: white;
+                                    width: 30px;
+                                    height: 30px;
+                                    border-radius: 50%;
+                                    cursor: pointer;
+                                    font-size: 16px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                ">×</button>
+                            </div>
+                            
+                            <div style="
+                                padding: 20px;
+                                max-height: 300px;
+                                overflow-y: auto;
+                            ">
+                `;
+                
+                // 添加互动空间选项
+                spaceKeys.forEach(spaceId => {
+                    const space = characterSpaces[spaceId];
+                    spacesListHtml += `
+                        <div class="QQ_space_item" data-space-id="${spaceId}" style="
+                            background: #f8f9fa;
+                            border: 1px solid #e9ecef;
+                            border-radius: 12px;
+                            padding: 15px;
+                            margin-bottom: 10px;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                        " onmouseover="this.style.background='#e9ecef'" 
+                           onmouseout="this.style.background='#f8f9fa'">
+                            <h4 style="margin: 0 0 5px 0; font-size: 14px; color: #333;">${space.name}</h4>
+                            <p style="margin: 0; font-size: 12px; color: #666; line-height: 1.4;">
+                                ${space.content.substring(0, 100)}${space.content.length > 100 ? '...' : ''}
+                            </p>
+                        </div>
+                    `;
+                });
+                
+                spacesListHtml += `
+                            </div>
+                            
+                            <div style="
+                                padding: 20px;
+                                border-top: 1px solid #eee;
+                                text-align: center;
+                            ">
+                                <button class="QQ_create_new_space" style="
+                                    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+                                    border: none;
+                                    color: white;
+                                    padding: 12px 20px;
+                                    border-radius: 10px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.3s ease;
+                                ">
+                                    ✨ 创建新互动空间
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加到页面
+                $('body').append(spacesListHtml);
+                
+                // 绑定事件
+                $('.QQ_close_spaces_list').on('click', function() {
+                    $('.QQ_character_spaces_list').remove();
+                });
+                
+                $('.QQ_space_item').on('click', function() {
+                    const spaceId = $(this).data('space-id');
+                    $('.QQ_character_spaces_list').remove();
+                    QQ_DisplayEnhancedInteractiveSpace(spaceId, characterSpaces[spaceId].name, characterName);
+                });
+                
+                $('.QQ_create_new_space').on('click', function() {
+                    $('.QQ_character_spaces_list').remove();
+                    QQ_CreateCharacterInteractiveSpace(characterName);
+                });
+                
+                // 点击背景关闭
+                $('.QQ_character_spaces_list').on('click', function(e) {
+                    if (e.target === this) {
+                        $(this).remove();
+                    }
+                });
+            }
+            
+            /**
+             * 创建角色互动空间
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_CreateCharacterInteractiveSpace(characterName) {
+                console.log(`为角色 ${characterName} 创建新的互动空间`);
+                
+                // 生成互动空间请求
+                const interactiveRequest = `请为角色 ${characterName} 创建一个新的互动空间。
+
+请以MiPhone格式回复，在content标签中描述一个有趣的互动场景，比如：
+- 角色邀请用户参与某个活动
+- 创造一个特殊的环境或情境
+- 设计一个有趣的对话场景
+
+内容应该生动有趣，能够吸引用户参与互动。`;
+                
+                // 显示创建状态
+                toastr.info(`正在为 ${characterName} 创建互动空间...`, '互动空间');
+                
+                // 发送请求到AI
+                QQ_Gen(interactiveRequest, async function(aiResponse) {
+                    try {
+                        if (aiResponse && aiResponse.trim()) {
+                            // 解析AI回复，提取content内容
+                            const contentMatch = aiResponse.match(/<content>([\s\S]*?)<\/content>/i);
+                            const interactiveContent = contentMatch ? contentMatch[1].trim() : aiResponse.trim();
+                            
+                            if (interactiveContent) {
+                                // 创建新的互动空间
+                                const spaceId = 'space_' + Date.now();
+                                const characterAvatar = QQ_GetCharacterAvatar(characterName);
+                                
+                                if (!QQ_CharacterSpaces[characterName]) {
+                                    QQ_CharacterSpaces[characterName] = {};
+                                }
+                                
+                                QQ_CharacterSpaces[characterName][spaceId] = {
+                                    id: spaceId,
+                                    name: `与${characterName}的互动`,
+                                    content: interactiveContent,
+                                    characterName: characterName,
+                                    characterAvatar: characterAvatar,
+                                    type: 'character',
+                                    createTime: new Date().toISOString()
+                                };
+                                
+                                // 初始化页面数据
+                                QQ_InteractivePages[spaceId] = [interactiveContent];
+                                QQ_InteractiveCurrentPage[spaceId] = 0;
+                                
+                                // 保存到世界书
+                                await QQ_SaveInteractiveSpaceToWorldBook(spaceId, characterName);
+                                
+                                // 显示新创建的互动空间
+                                QQ_DisplayEnhancedInteractiveSpace(spaceId, `与${characterName}的互动`, characterName);
+                                
+                                toastr.success(`已为 ${characterName} 创建新的互动空间！`, '互动空间');
+                            } else {
+                                toastr.error('AI回复格式错误', '互动空间');
+                            }
+                        } else {
+                            toastr.error('AI回复为空', '互动空间');
+                        }
+                    } catch (error) {
+                        console.error('创建互动空间时出错:', error);
+                        toastr.error('创建互动空间失败');
+                    }
+                });
+            }
+            
+            /**
              * 显示角色专属精灵按钮
              * @param {string} characterName - 角色名称
              */
@@ -7814,115 +8284,8 @@
                 
                 $('body').append(spiritHtml);
                 
-                // 绑定点击事件
-                \$(`.QQ_character_spirit[data-character="\${characterName}"]`).on('click touchend', function(e) {
-                    if (\$(this).hasClass('dragging')) {
-                        return;
-                    }
-                    
-                    e.stopPropagation();
-                    e.preventDefault();
-                    console.log(\`角色 \${characterName} 的精灵按钮被点击\`);
-                    QQ_ShowCharacterSpiritPanel(characterName);
-                });
-                
-                // 绑定拖拽功能
-                QQ_MakeCharacterSpiritDraggable(characterName);
-                
                 QQ_CharacterSpirits[characterName] = true;
-                console.log(\`角色 \${characterName} 的精灵按钮已显示\`);
-                console.log(`显示角色 ${characterName} 的专属精灵`);
-                
-                // 确保角色名称有效
-                if (!characterName || typeof characterName !== 'string') {
-                    console.error('无效的角色名称:', characterName);
-                    return;
-                }
-                
-                // 隐藏其他角色的精灵按钮
-                QQ_HideAllCharacterSpirits();
-                
-                // 获取角色头像
-                const characterAvatar = charAvatarPath || getAvatarUrl(characterName) || "default_avatar.png";
-                
-                // 获取上次保存的位置
-                const positionKey = `QQ_character_spirit_position_${characterName}`;
-                const savedPosition = localStorage.getItem(positionKey);
-                let position = { right: '20px', bottom: '150px' };
-                if (savedPosition) {
-                    try {
-                        position = JSON.parse(savedPosition);
-                    } catch (e) {
-                        console.warn('解析角色精灵位置失败，使用默认位置');
-                    }
-                }
-                
-                // 创建精灵按钮HTML
-                const spiritHtml = `
-                    <div class="QQ_character_spirit" data-character="${characterName}" style="
-                        position: fixed;
-                        ${position.right ? `right: ${position.right}` : `left: ${position.left}`};
-                        ${position.bottom ? `bottom: ${position.bottom}` : `top: ${position.top}`};
-                        width: 65px;
-                        height: 65px;
-                        border-radius: 50%;
-                        box-shadow: 0 4px 20px rgba(255, 107, 107, 0.4);
-                        cursor: move;
-                        z-index: 9999999;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        user-select: none;
-                        transition: all 0.3s ease;
-                        animation: characterSpiritPulse 2s infinite;
-                        border: 3px solid #fff;
-                        overflow: hidden;
-                    " title="${characterName}的互动精灵">
-                        <img src="${characterAvatar}" alt="${characterName}" style="
-                            width: 100%;
-                            height: 100%;
-                            object-fit: cover;
-                            border-radius: 50%;
-                        ">
-                        <div style="
-                            position: absolute;
-                            bottom: -2px;
-                            right: -2px;
-                            width: 20px;
-                            height: 20px;
-                            background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
-                            border-radius: 50%;
-                            border: 2px solid white;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            font-size: 10px;
-                        ">💕</div>
-                    </div>
-                    
-                    <style>
-                        @keyframes characterSpiritPulse {
-                            0%, 100% { 
-                                transform: scale(1); 
-                                box-shadow: 0 4px 20px rgba(255, 107, 107, 0.4); 
-                            }
-                            50% { 
-                                transform: scale(1.05); 
-                                box-shadow: 0 6px 25px rgba(255, 107, 107, 0.6); 
-                            }
-                        }
-                        .QQ_character_spirit:hover {
-                            transform: scale(1.1) !important;
-                            box-shadow: 0 6px 25px rgba(255, 107, 107, 0.7) !important;
-                        }
-                    </style>
-                `;
-                
-                // 添加到页面
-                $('body').append(spiritHtml);
-                
-                // 记录精灵状态
-                QQ_CharacterSpirits[characterName] = true;
+                console.log(`角色 ${characterName} 的精灵按钮已显示`);
                 
                 // 绑定点击事件
                 $(`.QQ_character_spirit[data-character="${characterName}"]`).on('click touchend', function(e) {
