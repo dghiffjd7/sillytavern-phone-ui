@@ -7267,21 +7267,273 @@
                         .trim();
                 }
                 
-                // 检测是否包含多个角色或群聊场景
                 const targetCharacter = characterName || QQ_LastRequestName || charcardname || "角色";
-                const isMultiCharacter = QQ_DetectMultiCharacterInteraction(cleanContent, targetCharacter);
+                
+                // *** 新增：检查是否有"先回复后互动"的要求 ***
+                const hasPriorReplyRequest = QQ_CheckPriorReplyRequest(cleanContent);
+                
+                if (hasPriorReplyRequest.shouldReplyFirst) {
+                    console.log("检测到需要先进行私聊/群聊回复的要求");
+                    
+                    // 先执行私聊/群聊回复
+                    QQ_ExecutePriorReply(hasPriorReplyRequest.replyType, hasPriorReplyRequest.replyContent, targetCharacter);
+                    
+                    // 延迟执行互动内容（给用户时间查看回复）
+                    setTimeout(() => {
+                        QQ_ProceedToInteractiveMode(cleanContent, targetCharacter);
+                    }, 2000); // 2秒延迟
+                    
+                    return;
+                }
+                
+                // 直接进入互动模式
+                QQ_ProceedToInteractiveMode(cleanContent, targetCharacter);
+            }
+            
+            /**
+             * *** 新增：检查是否有先回复的要求 ***
+             * @param {string} content - 互动内容
+             * @returns {Object} 回复要求信息
+             */
+            function QQ_CheckPriorReplyRequest(content) {
+                // 检查先回复的关键词模式
+                const priorReplyPatterns = [
+                    // 私聊先回复
+                    {
+                        pattern: /(?:先|首先|先在私聊)(?:回复|回应|回答|说)(?:.*?)(?:然后|接着|再)(?:.*?)(?:互动|见面|过来)/,
+                        type: 'private',
+                        extract: (match) => QQ_ExtractReplyContent(match, 'private')
+                    },
+                    // 群聊先回复
+                    {
+                        pattern: /(?:先|首先|先在群聊)(?:回复|回应|回答|说)(?:.*?)(?:然后|接着|再)(?:.*?)(?:互动|见面|过来)/,
+                        type: 'group',
+                        extract: (match) => QQ_ExtractReplyContent(match, 'group')
+                    },
+                    // 通用先回复模式
+                    {
+                        pattern: /(?:先|首先)(?:发|发送|回)(?:.*?)(?:消息|信息)(?:.*?)(?:然后|接着|再)(?:.*?)(?:互动|见面|过来)/,
+                        type: 'auto', // 自动判断类型
+                        extract: (match) => QQ_ExtractReplyContent(match, 'auto')
+                    }
+                ];
+                
+                for (const item of priorReplyPatterns) {
+                    const match = content.match(item.pattern);
+                    if (match) {
+                        const replyContent = item.extract(match[0]);
+                        console.log(`检测到先回复模式: ${item.type}, 内容: ${replyContent}`);
+                        
+                        return {
+                            shouldReplyFirst: true,
+                            replyType: item.type,
+                            replyContent: replyContent,
+                            fullMatch: match[0]
+                        };
+                    }
+                }
+                
+                return { shouldReplyFirst: false };
+            }
+            
+            /**
+             * *** 新增：提取回复内容 ***
+             * @param {string} matchText - 匹配的文本
+             * @param {string} type - 回复类型
+             * @returns {string} 提取的回复内容
+             */
+            function QQ_ExtractReplyContent(matchText, type) {
+                // 提取"先回复"和"然后互动"之间的内容
+                const replyExtractPatterns = [
+                    /(?:回复|回应|回答|说)["'"]([^"'"]*)["'"]/,  // 引号内容
+                    /(?:回复|回应|回答|说)[:：]\s*([^，。！？]*)/,   // 冒号后内容
+                    /(?:回复|回应|回答|说)\s*([^然后接着再]*?)(?:然后|接着|再)/  // 到下一个动作之前的内容
+                ];
+                
+                for (const pattern of replyExtractPatterns) {
+                    const match = matchText.match(pattern);
+                    if (match && match[1].trim()) {
+                        return match[1].trim();
+                    }
+                }
+                
+                // 如果没有明确内容，生成默认回复
+                return type === 'private' ? '好的，我马上过来' : 
+                       type === 'group' ? '大家等我一下，马上过来' :
+                       '好的，马上过来';
+            }
+            
+            /**
+             * *** 新增：执行先期回复 ***
+             * @param {string} replyType - 回复类型 (private/group/auto)
+             * @param {string} replyContent - 回复内容
+             * @param {string} targetCharacter - 目标角色
+             */
+            function QQ_ExecutePriorReply(replyType, replyContent, targetCharacter) {
+                console.log(`执行先期回复: ${replyType} -> ${replyContent}`);
+                
+                if (replyType === 'private' || (replyType === 'auto' && QQ_IsInPrivateChat())) {
+                    // 私聊回复
+                    QQ_SendPrivateMessage(targetCharacter, replyContent);
+                } else if (replyType === 'group' || (replyType === 'auto' && QQ_IsInGroupChat())) {
+                    // 群聊回复
+                    QQ_SendGroupMessage(replyContent);
+                } else {
+                    // 默认私聊
+                    QQ_SendPrivateMessage(targetCharacter, replyContent);
+                }
+                
+                // 显示系统提示
+                triggerSlash(`/echo 已发送回复消息，即将进入互动模式...`);
+            }
+            
+            /**
+             * *** 新增：继续进入互动模式 ***
+             * @param {string} content - 清理后的互动内容
+             * @param {string} targetCharacter - 目标角色
+             */
+            function QQ_ProceedToInteractiveMode(content, targetCharacter) {
+                // 检测是否包含多个角色或群聊场景
+                const isMultiCharacter = QQ_DetectMultiCharacterInteraction(content, targetCharacter);
                 
                 if (isMultiCharacter) {
                     // 多角色互动，显示在公共互动空间
                     console.log("检测到多角色互动，显示在公共互动空间");
-                    QQ_ShowPublicInteractiveSpace(cleanContent, targetCharacter);
+                    QQ_ShowPublicInteractiveSpace(content, targetCharacter);
                 } else {
                     // 单角色互动，显示在角色专属空间
                     console.log(`检测到单角色互动，显示在${targetCharacter}的专属空间`);
-                    QQ_ShowCharacterInteractiveSpace(cleanContent, targetCharacter);
+                    QQ_ShowCharacterInteractiveSpace(content, targetCharacter);
                 }
             }
             
+            /**
+             * *** 新增：检查是否在私聊模式 ***
+             * @returns {boolean} 是否在私聊
+             */
+            function QQ_IsInPrivateChat() {
+                const chatPage = document.querySelector('.QQ_chat_page:visible');
+                if (!chatPage) return false;
+                
+                const chatTitle = document.getElementById('QQ_chat_username');
+                return chatTitle && !chatTitle.textContent.includes('群聊');
+            }
+            
+            /**
+             * *** 新增：检查是否在群聊模式 ***
+             * @returns {boolean} 是否在群聊
+             */
+            function QQ_IsInGroupChat() {
+                const chatPage = document.querySelector('.QQ_chat_page:visible');
+                if (!chatPage) return false;
+                
+                const chatTitle = document.getElementById('QQ_chat_username');
+                return chatTitle && chatTitle.textContent.includes('群聊');
+            }
+            
+            /**
+             * *** 新增：发送私聊消息 ***
+             * @param {string} characterName - 角色名
+             * @param {string} content - 消息内容
+             */
+            function QQ_SendPrivateMessage(characterName, content) {
+                const messageData = {
+                    time: QQ_GetTime(),
+                    content: content,
+                    sender: characterName
+                };
+                
+                // 构建私聊格式
+                const chatContent = `<${QQ_GetUserName()}和${characterName}的私聊>\n${characterName}--${content}--${messageData.time}\n</${QQ_GetUserName()}和${characterName}的私聊>`;
+                
+                // 直接更新到当前聊天界面（如果是对应的私聊）
+                const currentChat = document.querySelector('.QQ_chat_page:visible');
+                if (currentChat && QQ_IsTargetChat(characterName)) {
+                    QQ_AddMessageToCurrentChat(characterName, content, messageData.time);
+                }
+                
+                // 保存到数据
+                QQ_SavePrivateMessage(characterName, messageData);
+                
+                console.log(`已发送私聊消息给 ${characterName}: ${content}`);
+            }
+            
+            /**
+             * *** 新增：发送群聊消息 ***
+             * @param {string} content - 消息内容
+             */
+            function QQ_SendGroupMessage(content) {
+                const currentGroup = QQ_GetCurrentGroupName();
+                if (!currentGroup) {
+                    console.warn('当前不在群聊界面，无法发送群聊消息');
+                    return;
+                }
+                
+                const messageData = {
+                    time: QQ_GetTime(),
+                    content: content,
+                    sender: charcardname || "角色"
+                };
+                
+                // 直接更新到当前群聊界面
+                QQ_AddMessageToCurrentChat(messageData.sender, content, messageData.time);
+                
+                // 保存到数据
+                QQ_SaveGroupMessage(currentGroup, messageData);
+                
+                console.log(`已发送群聊消息到 ${currentGroup}: ${content}`);
+            }
+            
+            /**
+             * *** 新增：获取当前群聊名称 ***
+             * @returns {string} 群聊名称
+             */
+            function QQ_GetCurrentGroupName() {
+                const chatTitle = document.getElementById('QQ_chat_username');
+                if (!chatTitle) return null;
+                
+                const titleText = chatTitle.textContent;
+                if (titleText.includes('群聊:')) {
+                    return titleText.replace('群聊:', '').trim();
+                }
+                
+                return null;
+            }
+            
+            /**
+             * *** 新增：检查是否是目标聊天 ***
+             * @param {string} characterName - 角色名
+             * @returns {boolean} 是否是目标聊天
+             */
+            function QQ_IsTargetChat(characterName) {
+                const chatTitle = document.getElementById('QQ_chat_username');
+                if (!chatTitle) return false;
+                
+                return chatTitle.textContent.includes(characterName);
+            }
+            
+            /**
+             * *** 新增：添加消息到当前聊天界面 ***
+             * @param {string} sender - 发送者
+             * @param {string} content - 消息内容
+             * @param {string} time - 时间
+             */
+            function QQ_AddMessageToCurrentChat(sender, content, time) {
+                const chatMessages = document.getElementById('QQ_chat_messages');
+                if (!chatMessages) return;
+                
+                const messageElement = document.createElement('div');
+                messageElement.className = 'QQ_message';
+                messageElement.innerHTML = `
+                    <div class="QQ_message_sender">${sender}</div>
+                    <div class="QQ_message_content">${content}</div>
+                    <div class="QQ_message_time">${time}</div>
+                `;
+                
+                chatMessages.appendChild(messageElement);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
             /**
              * 检测是否为多角色互动
              * @param {string} content - 互动内容
@@ -7289,16 +7541,40 @@
              * @returns {boolean} 是否为多角色互动
              */
             function QQ_DetectMultiCharacterInteraction(content, primaryCharacter = null) {
-                // *** 优化：强制多人互动关键词（明显的多人场景） ***
+                // *** 优化：精确的多人互动关键词检测 ***
                 const strongMultiKeywords = [
-                    '群聊', '大家', '所有人', '众人', '全体', '集体', 
-                    '我们一起', '他们一起', '共同参与', '同时参与',
-                    '围成圈', '排成队', '分成组', '聚在一起'
+                    // 直接多人称呼
+                    { keyword: '所有人', context: ['对所有人', '告诉所有人', '和所有人'] },
+                    { keyword: '众人', context: ['众人面前', '对众人', '众人一起'] },
+                    { keyword: '全体', context: ['全体成员', '对全体', '全体一起'] },
+                    
+                    // 明确的多人动作
+                    { keyword: '我们一起', context: ['我们一起去', '我们一起做', '我们一起来'] },
+                    { keyword: '他们一起', context: ['他们一起去', '他们一起做', '他们一起来'] },
+                    { keyword: '共同参与', context: ['共同参与活动', '共同参与讨论'] },
+                    { keyword: '同时参与', context: ['同时参与互动', '同时参与活动'] },
+                    
+                    // 空间位置的多人场景
+                    { keyword: '围成圈', context: ['围成圈坐', '围成圈站', '围成圈讨论'] },
+                    { keyword: '排成队', context: ['排成队走', '排成队等', '排成队站'] },
+                    { keyword: '分成组', context: ['分成组讨论', '分成组活动', '分成组进行'] },
+                    { keyword: '聚在一起', context: ['聚在一起聊', '聚在一起玩', '聚在一起讨论'] }
                 ];
                 
-                if (strongMultiKeywords.some(keyword => content.includes(keyword))) {
-                    console.log('检测到强制多人互动关键词:', strongMultiKeywords.find(k => content.includes(k)));
-                    return true;
+                // 检查是否有真实的多人互动意图
+                for (const item of strongMultiKeywords) {
+                    if (content.includes(item.keyword)) {
+                        // 检查上下文是否符合多人互动意图
+                        const hasValidContext = item.context.some(ctx => content.includes(ctx)) ||
+                                              QQ_IsValidMultiPersonContext(content, item.keyword);
+                        
+                        if (hasValidContext) {
+                            console.log('检测到有效多人互动关键词:', item.keyword);
+                            return true;
+                        } else {
+                            console.log('关键词存在但上下文不符合多人互动:', item.keyword);
+                        }
+                    }
                 }
                 
                 // *** 优化：检测多个角色名提及，但考虑主要互动者 ***
@@ -7338,6 +7614,78 @@
                 return false;
             }
             
+            /**
+             * *** 新增：验证多人互动上下文的有效性 ***
+             * @param {string} content - 互动内容
+             * @param {string} keyword - 检测到的关键词
+             * @returns {boolean} 上下文是否有效
+             */
+            function QQ_IsValidMultiPersonContext(content, keyword) {
+                // 排除不符合多人互动的上下文
+                const invalidContexts = [
+                    // 描述性语言，不是实际互动请求
+                    /集体行动/,
+                    /集体活动/,
+                    /集体决策/,
+                    /集体利益/,
+                    /集体意识/,
+                    /集体记忆/,
+                    
+                    // 抽象概念，不是具体互动
+                    /概念上/,
+                    /理论上/,
+                    /原则上/,
+                    /思想上/,
+                    /精神上/,
+                    
+                    // 过去时态，不是当前互动请求
+                    /曾经.*一起/,
+                    /以前.*一起/,
+                    /之前.*一起/,
+                    /过去.*一起/,
+                    
+                    // 条件句，不是确定的互动
+                    /如果.*一起/,
+                    /假如.*一起/,
+                    /要是.*一起/,
+                    /倘若.*一起/
+                ];
+                
+                // 如果内容包含无效上下文，返回false
+                if (invalidContexts.some(pattern => pattern.test(content))) {
+                    console.log(`关键词"${keyword}"的上下文无效，不符合互动意图`);
+                    return false;
+                }
+                
+                // 检查是否有明确的互动动词
+                const interactiveVerbs = [
+                    /一起(去|来|做|玩|聊|讨论|参与|进行)/,
+                    /(对|和|跟).*(说|讲|聊|交流)/,
+                    /(抱|拥抱|亲吻|握手|拍|碰|摸)/,
+                    /(看|望|注视|凝视).*(着|向)/,
+                    /(走向|走近|靠近|接近)/
+                ];
+                
+                const hasInteractiveVerb = interactiveVerbs.some(pattern => pattern.test(content));
+                
+                // 检查是否有当前时态的互动请求
+                const currentTimeIndicators = [
+                    /现在/,
+                    /此刻/,
+                    /当前/,
+                    /马上/,
+                    /立即/,
+                    /正在/,
+                    /要.*一起/,
+                    /想.*一起/,
+                    /准备.*一起/
+                ];
+                
+                const hasCurrentTime = currentTimeIndicators.some(pattern => pattern.test(content));
+                
+                return hasInteractiveVerb || hasCurrentTime;
+            }
+
             /**
              * *** 新增：判断主要角色是否主导互动 ***
              * @param {string} content - 互动内容
@@ -11118,10 +11466,12 @@ ${index + 1}. ${space.name}
                 };
             };
             
-            // *** 新增：互动检测测试工具 ***
+            // *** 新增：互动检测测试工具 - 优化版 ***
             window.QQ_Test_Interactive_Detection = function(text) {
-                const result = QQ_DetectInteractiveIntent(text);
-                const details = `
+                if (text) {
+                    // 测试单个文本
+                    const result = QQ_DetectInteractiveIntent(text);
+                    const details = `
 === 互动意图检测测试 ===
 📝 测试文本: "${text}"
 🎯 检测结果: ${result ? '✅ 检测到互动意图' : '❌ 未检测到互动意图'}
@@ -11138,10 +11488,108 @@ ${index + 1}. ${space.name}
 • "*走向你*" (✅ 动作模式)
 • "面对面聊天" (✅ 面对面+动作)
 • "你好吗？" (❌ 普通对话)
-            `;
-                console.log(details);
-                alert(details);
-                return result;
+                `;
+                    console.log(details);
+                    alert(details);
+                    return result;
+                } else {
+                    // 运行完整的优化测试套件
+                    console.log("🔍 ========== 互动检测优化测试套件 ==========");
+                    
+                    const testCases = [
+                        // 🔬 先回复后互动的测试用例
+                        {
+                            name: "先私聊回复后互动",
+                            content: "先在私聊回复'好的马上来'然后过来拥抱我",
+                            expected: "应检测到先回复要求",
+                            test: (content) => QQ_CheckPriorReplyRequest(content).shouldReplyFirst
+                        },
+                        {
+                            name: "先群聊回复后互动", 
+                            content: "先在群聊说'大家等我一下'然后再过来一起玩游戏",
+                            expected: "应检测到先回复要求",
+                            test: (content) => QQ_CheckPriorReplyRequest(content).shouldReplyFirst
+                        },
+                        
+                        // 🔬 精确关键词检测的测试用例
+                        {
+                            name: "无效集体关键词",
+                            content: "用户发送了'集体行动'但这只是在讨论概念",
+                            expected: "不应触发多人互动",
+                            test: (content) => !QQ_DetectMultiCharacterInteraction(content, null)
+                        },
+                        {
+                            name: "有效集体互动",
+                            content: "我们一起去公园玩吧，所有人都来",
+                            expected: "应触发多人互动",
+                            test: (content) => QQ_DetectMultiCharacterInteraction(content, null)
+                        },
+                        {
+                            name: "过去时态无效",
+                            content: "我们以前一起玩过游戏",
+                            expected: "不应触发多人互动",
+                            test: (content) => !QQ_DetectMultiCharacterInteraction(content, null)
+                        },
+                        {
+                            name: "条件句无效",
+                            content: "如果我们一起去的话会很有趣",
+                            expected: "不应触发多人互动", 
+                            test: (content) => !QQ_DetectMultiCharacterInteraction(content, null)
+                        },
+                        
+                        // 🔬 互动内容检测的测试用例
+                        {
+                            name: "有效互动内容",
+                            content: "*走向你* 想要拥抱你",
+                            expected: "应检测到互动内容",
+                            test: (content) => QQ_IsInteractiveContent(content)
+                        },
+                        {
+                            name: "普通对话",
+                            content: "你今天怎么样？工作顺利吗？",
+                            expected: "不应检测到互动内容",
+                            test: (content) => !QQ_IsInteractiveContent(content)
+                        }
+                    ];
+                    
+                    console.log("开始执行测试用例...");
+                    
+                    let passCount = 0;
+                    let failCount = 0;
+                    
+                    testCases.forEach((testCase, index) => {
+                        console.log(`\n--- 测试 ${index + 1}: ${testCase.name} ---`);
+                        console.log(`内容: "${testCase.content}"`);
+                        console.log(`期望: ${testCase.expected}`);
+                        
+                        try {
+                            const result = testCase.test(testCase.content);
+                            if (result) {
+                                console.log(`✅ 测试通过`);
+                                passCount++;
+                            } else {
+                                console.log(`❌ 测试失败`);
+                                failCount++;
+                            }
+                        } catch (error) {
+                            console.error(`💥 测试执行错误:`, error);
+                            failCount++;
+                        }
+                    });
+                    
+                    console.log(`\n🏁 ========== 测试结果汇总 ==========`);
+                    console.log(`✅ 通过: ${passCount}/${testCases.length}`);
+                    console.log(`❌ 失败: ${failCount}/${testCases.length}`);
+                    console.log(`📊 成功率: ${Math.round((passCount / testCases.length) * 100)}%`);
+                    
+                    if (failCount === 0) {
+                        console.log(`🎉 所有测试用例都通过了！互动检测系统优化成功！`);
+                    } else {
+                        console.log(`⚠️ 有 ${failCount} 个测试用例失败，需要进一步优化`);
+                    }
+                    
+                    return { passCount, failCount, total: testCases.length };
+                }
             };
             
             function QQ_UpdateNewTips() {
