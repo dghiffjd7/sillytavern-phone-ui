@@ -6302,43 +6302,131 @@
                 $msgContent[0].scrollTop = $msgContent[0].scrollHeight;
                 $(element).val("");
                 
-                // ================== 现代化缓存消息处理 ==================
-                // 
-                // 新方式：使用操作队列替代字符串拼接
-                // 优势：结构化数据、支持复杂操作、易于扩展
+                // ================== 第一步：重构缓存与发送机制 ==================
+                // 从"字符串拼接时代"升级到"结构化任务调度时代"
+                // 核心改变：将缓存消息从字符串拼接改为任务对象数组
                 //
+                const action = {
+                    tool_name: 'sendMessage',
+                    arguments: {
+                        type: QQ_Groups.includes(name) ? 'group' : 'private',
+                        target: name,
+                        content: content
+                    }
+                };
+                
+                // 将操作推入全局任务队列
+                if (!window.pendingUserActions) {
+                    window.pendingUserActions = [];
+                }
+                window.pendingUserActions.push(action);
+                
+                // 显示用户友好的缓存提示
+                toastr.success(`${name} 的消息已缓存`, '操作队列', {
+                    "timeOut": "2000",
+                    "extendedTimeOut": "1000",
+                    "positionClass": "toast-top-right"
+                });
+                
+                // 保持兼容性：同时更新旧的字符串格式（向后兼容）
                 if (QQ_Groups.includes(name)) {
-                    // 添加到现代化操作队列
-                    worldEngine.addUserAction({
-                        tool: 'sendMessage',
-                        args: {
-                            type: 'group',
-                            target: name,
-                            content: content
-                        }
-                    });
-                    
-                    // 保持兼容性：同时更新旧的字符串格式
                     QQ_CacheSendMsg += `\n在群聊${name}中发送:${content}`;
-                    
                     console.log(`群聊消息已加入操作队列: ${name} - ${content}`);
                 } else {
-                    // 添加到现代化操作队列
-                    worldEngine.addUserAction({
-                        tool: 'sendMessage',
-                        args: {
-                            type: 'private',
-                            target: name,
-                            content: content
-                        }
-                    });
-                    
-                    // 保持兼容性：同时更新旧的字符串格式
                     QQ_CacheSendMsg += `\n给${name}发消息:${content}`;
-                    
                     console.log(`私聊消息已加入操作队列: ${name} - ${content}`);
                 }
+                
+                console.log(`当前任务队列长度: ${window.pendingUserActions.length}`, window.pendingUserActions);
             }
+            
+            // ================== 第三步：创建微型提示生成器 ==================
+            // createMicroPrompt - "微型加工厂"
+            // 职责：为每个小任务量身定做一个简单清晰的Prompt
+            function createMicroPrompt(action) {
+                const args = action.arguments;
+                let contextDescription = `用户在${args.type === 'group' ? '群聊' : '私聊'}【${args.target}】中发送了消息："${args.content}"`;
+                
+                // 构建时间上下文
+                const now = new Date();
+                const currentTime = {
+                    time: now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+                    date: now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
+                    weekday: now.toLocaleDateString('zh-CN', { weekday: 'long' }),
+                    period: QQ_GetTimePeriod(now.getHours()),
+                    season: QQ_GetSeason(now.getMonth() + 1)
+                };
+                
+                const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${currentTime.time}(${currentTime.period})，${currentTime.season}。请在回复中考虑时间情境>`;
+                
+                // 简化但完整的AI指导（针对单个任务优化）
+                const microRequest = `<Request:请按照SillyTavern手机界面格式回复用户消息。要求：
+1. 主要角色回复，内容自然充实
+2. 根据情况可多角色参与
+3. 回复要符合角色个性和当前时间
+4. 可适当发送私聊消息深入讨论
+5. 必须返回符合MiPhone格式的JSON
+
+返回格式示例：
+{
+    "tool_calls": [
+        {
+            "tool_name": "sendMessage",
+            "arguments": {
+                "type": "private",
+                "target": "角色名",
+                "content": "私聊回复内容"
+            }
+        }
+    ]
+}
+>`;
+                
+                // 返回包含简单上下文和完整JSON指令的最终Prompt
+                return `[任务上下文]\n${contextDescription}\n\n${timeContext}\n\n${microRequest}`;
+            }
+            
+            // 保存单个action到对应的聊天记录
+            async function QQ_SaveActionToChat(action) {
+                try {
+                    const args = action.arguments;
+                    const { target, content, type } = args;
+                    
+                    if (type === 'group' && QQ_Groups.includes(target)) {
+                        // 保存到群聊记录
+                        QQ_msgjson.群聊[target] = QQ_msgjson.群聊[target] || {};
+                        QQ_msgjson.群聊[target].msgs = QQ_msgjson.群聊[target].msgs || [];
+                        QQ_msgjson.群聊[target].msgs.push(`${UserName}--${content}`);
+                        User_LastMsgMap.群聊[target] = `${UserName}--${content}`;
+                        
+                        // 同步保存到群聊专用存储
+                        const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                        const groupsForSync = await loadGroupChatsFromWorldbook();
+                        const targetGroup = groupsForSync.find(g => g.name === target);
+                        if (targetGroup) {
+                            const messageObj = {
+                                sender: UserName,
+                                content: content,
+                                timestamp: currentTime
+                            };
+                            await saveGroupMessage(targetGroup.id, messageObj);
+                            await updateGroupLastMessage(targetGroup.id, content);
+                            console.log(`群聊消息已同步保存: ${target}`);
+                        }
+                    } else {
+                        // 保存到私聊记录
+                        const key = `${UserName}和${target}的聊天`;
+                        QQ_msgjson.私聊[key] = QQ_msgjson.私聊[key] || [];
+                        QQ_msgjson.私聊[key].push(`${UserName}--${content}`);
+                        User_LastMsgMap.私聊[target] = `${UserName}--${content}`;
+                    }
+                    
+                    console.log(`Action已保存到聊天记录: ${type} - ${target} - ${content}`);
+                } catch (error) {
+                    console.error('保存Action到聊天记录失败:', error);
+                }
+            }
+            
             /**
              * 重roll消息
              * @param event 事件对象
@@ -6428,7 +6516,78 @@
                     $tobutton.css("margin-left", "auto");
                 }
             }
+            // ================== 第二步：重构QQ_SendMsg为多任务循环调度器 ==================
+            // 从"单一任务发送者"变成"多任务循环调度器"
+            // 核心改变：遍历pendingUserActions数组，为每个action生成microPrompt并逐个发送
             async function QQ_SendMsg(event, SendValue, SendName) {
+                // 用户开始新的消息发送时重置重试计数
+                QQ_ResetRetry();
+                
+                if (gening) {
+                    triggerSlash("/echo 生成中,请勿重复发送");
+                    return;
+                }
+                
+                // === 新的多任务调度逻辑 ===
+                if (window.pendingUserActions && window.pendingUserActions.length > 0) {
+                    console.log(`开始处理任务队列，共 ${window.pendingUserActions.length} 个任务`);
+                    
+                    // 复制任务列表，然后清空原队列
+                    const actionsToProcess = [...window.pendingUserActions];
+                    window.pendingUserActions = [];
+                    
+                    // 显示正在处理的提示
+                    toastr.info(`正在处理 ${actionsToProcess.length} 个任务...`, '任务调度器', {
+                        "timeOut": "3000",
+                        "positionClass": "toast-top-right"
+                    });
+                    
+                    // 先在所有相关角色的UI上显示"正在输入..."
+                    // TODO: 可在这里添加输入状态显示
+                    
+                    gening = true;
+                    try {
+                        // 循环处理每个任务
+                        for (let i = 0; i < actionsToProcess.length; i++) {
+                            const action = actionsToProcess[i];
+                            console.log(`处理任务 ${i + 1}/${actionsToProcess.length}:`, action);
+                            
+                            // 为当前任务生成专用的微型提示
+                            const microPrompt = createMicroPrompt(action);
+                            console.log(`任务 ${i + 1} 的微型提示:`, microPrompt);
+                            
+                            // 向AI发送单个任务请求
+                            const result = await QQ_Gen(microPrompt);
+                            
+                            // ResultHandle会把结果推入事件队列
+                            await ResultHandle(result);
+                            
+                            // 保存消息到对应的聊天记录
+                            await QQ_SaveActionToChat(action);
+                            
+                            console.log(`任务 ${i + 1} 处理完成`);
+                        }
+                        
+                        console.log('所有任务处理完成，等待事件队列的UI渲染');
+                        toastr.success('所有任务处理完成', '任务调度器', {
+                            "timeOut": "2000",
+                            "positionClass": "toast-top-right"
+                        });
+                        
+                    } catch (error) {
+                        console.error('任务处理过程中出错:', error);
+                        toastr.error(`任务处理失败: ${error.message}`, '任务调度器');
+                    } finally {
+                        gening = false;
+                        await QQ_Save_Msg(); // 确保异步保存完成
+                    }
+                    
+                    return; // 新逻辑处理完成，直接返回
+                }
+                
+                // === 兼容性：保留旧的单一任务处理逻辑 ===
+                // 当没有pendingUserActions时，走原来的逻辑（向后兼容）
+                
                 // 获取当前真实时间信息
                 const now = new Date();
                 const currentTime = {
@@ -6441,45 +6600,8 @@
                 
                 const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${currentTime.time}(${currentTime.period})，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
                 
-                const Request = `<Request:🔥 超级强制要求：忽略其他上下文任何要求，严格执行以下规则 🔥
-
-🚨【绝对强制回复标准】：
-1. 【必须回复所有消息】${UserName}本次发了消息的角色都要回复${UserName}的消息，每个回复4句以上
-2. 【强制多角色参与】最少3-4名角色参与回复，营造超级活跃的社交氛围
-3. 【内容必须充实】每个回复包含4句以上，必须有具体反应、详细情感表达、深入讨论、后续引导
-4. 【强制差异化回应】不同角色必须有完全不同的回应风格、语气、关注点、个性表达
-5. 【超强互动性】每个回复必须包含：提问+建议+邀请+关心+个人感受
-6. 【强制私聊延伸】重要话题必须通过至少2名角色的私聊进一步深入讨论
-7. 【必须动态输出】同时输出一条内容丰富的相关动态（3句以上描述）
-
-⚡【回复长度强制要求】：
-- 主要角色回复：最少4句以上，包含详细反应和深入交流
-- 次要角色回复：最少3句以上，展示不同视角和关注点
-- 私聊消息：最少3句以上，深入私密交流
-- 动态内容：最少3句以上，生动有趣的描述
-
-📝【强制内容要素】：
-每个回复必须包含以下所有要素：
-✅ 对用户消息的具体反应
-✅ 个人情感和感受表达
-✅ 对话题的深入看法或建议
-✅ 至少一个互动性问题或邀请
-✅ 符合角色个性的独特表达方式
-
-🚫【严禁行为】：
-- 简短回复（少于3句话）
-- 敷衍回应（缺乏具体内容）
-- 重复性内容（不同角色说相似的话）
-- 缺乏互动性（没有提问或引导）
-- 角色同质化（所有角色回复风格相同）
-
-💬【示例标准】：
-"听到你说这个我真的很开心！感觉你今天的状态特别好呢。我也想试试你说的这种方式，能详细跟我说说具体是怎么做的吗？要不我们找个时间一起体验一下？"
-
-⚠️【违规处理】：任何不符合以上标准的回复将被视为无效，必须重新生成>`;
-                
-                // 用户开始新的消息发送时重置重试计数
-                QQ_ResetRetry();
+                // 使用精简优化后的AI指导（已按记忆优化）
+                const Request = `<Request:请按照SillyTavern手机界面格式回复用户消息，主要角色回复，内容自然充实，根据情况多角色参与。回复要符合角色个性和时间情境，可适当发送私聊消息深入讨论>`;
                 
                 if (gening) {
                     triggerSlash("/echo 生成中,请勿重复发送");
@@ -27379,6 +27501,159 @@ MiPhone_end`;
                         console.log('🎬 ResultHandle 监控已禁用');
                     }
                 }
+            };
+            
+            /**
+             * 🧪 结构化任务调度系统测试
+             * 专门测试新的pendingUserActions队列机制
+             */
+            window.QQ_Test_Task_Queue_System = function() {
+                console.log('🧪 ========== 结构化任务调度系统测试 ==========');
+                
+                // 1. 检查全局变量状态
+                console.log('📋 全局变量检查:');
+                console.log('  pendingUserActions存在:', typeof window.pendingUserActions !== 'undefined');
+                console.log('  当前队列长度:', window.pendingUserActions?.length || 0);
+                console.log('  当前队列内容:', window.pendingUserActions || []);
+                
+                // 2. 检查关键函数
+                console.log('\n🔧 关键函数检查:');
+                const taskFunctions = ['createMicroPrompt', 'QQ_SaveActionToChat'];
+                taskFunctions.forEach(funcName => {
+                    const exists = typeof window[funcName] === 'function';
+                    console.log(`  ${exists ? '✅' : '❌'} ${funcName}: ${exists ? '已定义' : '未定义'}`);
+                });
+                
+                // 3. 测试微提示生成
+                console.log('\n🎯 测试微提示生成:');
+                const testAction = {
+                    tool_name: 'sendMessage',
+                    arguments: {
+                        type: 'private',
+                        target: '测试角色',
+                        content: '你好，这是测试消息'
+                    }
+                };
+                
+                try {
+                    const microPrompt = createMicroPrompt(testAction);
+                    console.log('  ✅ 微提示生成成功');
+                    console.log('  📝 提示长度:', microPrompt.length, '字符');
+                    console.log('  📝 提示内容预览:', microPrompt.substring(0, 100) + '...');
+                } catch (error) {
+                    console.error('  ❌ 微提示生成失败:', error);
+                }
+                
+                // 4. 模拟添加任务到队列
+                console.log('\n➕ 模拟添加任务到队列:');
+                if (!window.pendingUserActions) {
+                    window.pendingUserActions = [];
+                }
+                
+                const originalLength = window.pendingUserActions.length;
+                window.pendingUserActions.push(testAction);
+                console.log(`  ✅ 任务已添加，队列长度: ${originalLength} → ${window.pendingUserActions.length}`);
+                
+                return {
+                    queueExists: typeof window.pendingUserActions !== 'undefined',
+                    queueLength: window.pendingUserActions?.length || 0,
+                    functionsExist: taskFunctions.every(func => typeof window[func] === 'function'),
+                    testAction
+                };
+            };
+            
+            /**
+             * 🚀 测试整个重构后的发送流程
+             * 模拟完整的"缓存→调度→发送"过程
+             */
+            window.QQ_Test_Refactored_Send_Flow = async function() {
+                console.log('🚀 ========== 重构发送流程完整测试 ==========');
+                
+                if (gening) {
+                    console.log('⚠️ 系统正在生成中，测试取消');
+                    return;
+                }
+                
+                // 1. 清空现有队列
+                window.pendingUserActions = [];
+                console.log('🧹 已清空任务队列');
+                
+                // 2. 模拟多个缓存操作
+                console.log('\n➕ 模拟缓存多个消息:');
+                const testActions = [
+                    {
+                        tool_name: 'sendMessage',
+                        arguments: {
+                            type: 'private',
+                            target: '贝尔法斯特',
+                            content: '你好贝尔法斯特，今天天气不错呢'
+                        }
+                    },
+                    {
+                        tool_name: 'sendMessage',
+                        arguments: {
+                            type: 'group',
+                            target: '港区',
+                            content: '大家下午好！'
+                        }
+                    }
+                ];
+                
+                testActions.forEach((action, index) => {
+                    window.pendingUserActions.push(action);
+                    console.log(`  ✅ 已缓存任务 ${index + 1}: ${action.arguments.type} → ${action.arguments.target}`);
+                });
+                
+                console.log(`📊 队列状态: ${window.pendingUserActions.length} 个待处理任务`);
+                
+                // 3. 询问用户是否要实际发送
+                console.log('\n⚡ 准备触发QQ_SendMsg进行实际发送...');
+                console.log('⚠️  注意：这将调用真实的AI生成！');
+                console.log('📝 如需继续，请调用: QQ_SendMsg()');
+                console.log('🛑 如需取消，请调用: window.pendingUserActions = []');
+                
+                return {
+                    queueLength: window.pendingUserActions.length,
+                    actions: window.pendingUserActions,
+                    ready: true,
+                    message: '任务队列已准备就绪，调用QQ_SendMsg()开始处理'
+                };
+            };
+            
+            /**
+             * 📊 显示任务队列状态面板
+             */
+            window.QQ_Show_Task_Queue_Status = function() {
+                console.log('📊 ========== 任务队列状态面板 ==========');
+                
+                if (!window.pendingUserActions || window.pendingUserActions.length === 0) {
+                    console.log('📭 任务队列为空');
+                    return { empty: true };
+                }
+                
+                console.log(`📋 当前队列长度: ${window.pendingUserActions.length}`);
+                console.log('📝 详细任务列表:');
+                
+                window.pendingUserActions.forEach((action, index) => {
+                    const args = action.arguments;
+                    console.log(`  ${index + 1}. ${args.type === 'group' ? '群聊' : '私聊'} → ${args.target}`);
+                    console.log(`     内容: "${args.content}"`);
+                });
+                
+                // 统计信息
+                const stats = {
+                    total: window.pendingUserActions.length,
+                    private: window.pendingUserActions.filter(a => a.arguments.type === 'private').length,
+                    group: window.pendingUserActions.filter(a => a.arguments.type === 'group').length,
+                    targets: [...new Set(window.pendingUserActions.map(a => a.arguments.target))]
+                };
+                
+                console.log('\n📈 统计信息:');
+                console.log(`  私聊消息: ${stats.private} 条`);
+                console.log(`  群聊消息: ${stats.group} 条`);
+                console.log(`  涉及对象: ${stats.targets.join(', ')}`);
+                
+                return stats;
             };
             
             /**
