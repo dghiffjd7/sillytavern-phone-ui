@@ -6303,13 +6303,24 @@
                     if (value) {
                         // *** 新增：检测用户输入的互动意图 ***
                         const userInput = content || SendValue || "";
-                        if (QQ_DetectInteractiveIntent(userInput)) {
-                            console.log('检测到用户互动意图，将引导AI回复互动内容');
-                            // 修改Request以引导AI生成互动内容
-                            const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
-                            value += `\n${timeContext}\n${modifiedRequest}`;
+                        const interactiveResult = QQ_DetectInteractiveIntent(userInput);
+                        
+                        if (interactiveResult && interactiveResult.isInteractive) {
+                            console.log(`检测到用户互动意图: ${interactiveResult.description}`);
+                            
+                            if (interactiveResult.triggerType === 'symbol') {
+                                // 特殊符号触发 - 直接请求互动内容
+                                console.log(`🎯 用户主动请求互动: ${interactiveResult.triggerSymbol} -> ${interactiveResult.cleanContent}`);
+                                const directInteractiveRequest = QQ_CreateDirectInteractiveRequest(interactiveResult.cleanContent);
+                                value += `\n${timeContext}\n${directInteractiveRequest}`;
+                            } else {
+                                // 关键词触发 - 惊喜模式
+                                console.log(`💫 惊喜模式激活: 检测到关键词互动意图`);
+                                const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
+                                value += `\n${timeContext}\n${modifiedRequest}`;
+                            }
                         } else {
-                        value += `\n${timeContext}\n${Request}`;
+                            value += `\n${timeContext}\n${Request}`;
                         }
                         const namevalue = QQ_GetValueName(value);
                         if (namevalue) {
@@ -6378,12 +6389,24 @@
                     }
                     
                     // *** 新增：对SendValue也检测互动意图 ***
-                    if (QQ_DetectInteractiveIntent(SendValue)) {
-                        console.log('检测到SendValue中的互动意图，将引导AI回复互动内容');
-                        const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
-                        value += `\n${timeContext}\n${modifiedRequest}`;
+                    const sendValueInteractiveResult = QQ_DetectInteractiveIntent(SendValue);
+                    
+                    if (sendValueInteractiveResult && sendValueInteractiveResult.isInteractive) {
+                        console.log(`检测到SendValue中的互动意图: ${sendValueInteractiveResult.description}`);
+                        
+                        if (sendValueInteractiveResult.triggerType === 'symbol') {
+                            // 特殊符号触发 - 直接请求互动内容
+                            console.log(`🎯 SendValue用户主动请求互动: ${sendValueInteractiveResult.triggerSymbol} -> ${sendValueInteractiveResult.cleanContent}`);
+                            const directInteractiveRequest = QQ_CreateDirectInteractiveRequest(sendValueInteractiveResult.cleanContent);
+                            value += `\n${timeContext}\n${directInteractiveRequest}`;
+                        } else {
+                            // 关键词触发 - 惊喜模式
+                            console.log(`💫 SendValue惊喜模式激活: 检测到关键词互动意图`);
+                            const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
+                            value += `\n${timeContext}\n${modifiedRequest}`;
+                        }
                     } else {
-                    value += `\n${timeContext}\n${Request}`;
+                        value += `\n${timeContext}\n${Request}`;
                     }
                 }
                 console.log(
@@ -7158,12 +7181,39 @@
             /**
              * 检测用户消息是否包含明显的互动意图
              * @param {string} content - 用户消息内容
-             * @returns {boolean} - 是否包含互动意图
+             * @returns {boolean|Object} - 如果检测到互动意图返回true或包含详细信息的对象
              */
             function QQ_DetectInteractiveIntent(content) {
                 if (!content || typeof content !== 'string') return false;
                 
+                const originalText = content.trim();
                 const text = content.toLowerCase().trim();
+                
+                // *** 优先检测：特殊符号触发 ***
+                const INTERACTIVE_TRIGGER_SYMBOLS = ['&&', '＆＆', '&amp;&amp;'];
+                
+                for (const symbol of INTERACTIVE_TRIGGER_SYMBOLS) {
+                    if (originalText.includes(symbol)) {
+                        console.log(`🎯 检测到互动触发符号: ${symbol}`);
+                        
+                        // 清理符号后的内容作为互动描述
+                        let cleanContent = originalText;
+                        INTERACTIVE_TRIGGER_SYMBOLS.forEach(sym => {
+                            cleanContent = cleanContent.replace(new RegExp(sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '');
+                        });
+                        cleanContent = cleanContent.trim();
+                        
+                        return {
+                            isInteractive: true,
+                            triggerType: 'symbol',
+                            triggerSymbol: symbol,
+                            cleanContent: cleanContent || '想要进行互动',
+                            description: '用户使用特殊符号主动请求互动内容'
+                        };
+                    }
+                }
+                
+                // *** 传统关键词检测（作为备用/惊喜机制） ***
                 
                 // 身体接触类关键词
                 const physicalContactKeywords = [
@@ -7238,16 +7288,26 @@
                     }
                 }
                 
-                // 判断是否为互动意图
-                const isInteractive = matchCount >= 2 || patternMatches >= 1 || 
+                // 判断是否为互动意图（关键词检测，作为惊喜机制）
+                const isKeywordInteractive = matchCount >= 2 || patternMatches >= 1 || 
                     (matchCount >= 1 && patternMatches >= 1);
                 
-                if (isInteractive) {
-                    console.log(`检测到互动意图: 关键词${matchCount}个, 模式${patternMatches}个`);
+                if (isKeywordInteractive) {
+                    console.log(`💫 检测到关键词互动意图 (惊喜模式): 关键词${matchCount}个, 模式${patternMatches}个`);
                     console.log('匹配的关键词/模式:', matchedKeywords);
+                    
+                    return {
+                        isInteractive: true,
+                        triggerType: 'keyword',
+                        matchCount: matchCount,
+                        patternMatches: patternMatches,
+                        matchedKeywords: matchedKeywords,
+                        cleanContent: originalText,
+                        description: '系统检测到关键词互动意图（惊喜功能）'
+                    };
                 }
                 
-                return isInteractive;
+                return false;
             }
             
             /**
@@ -9283,6 +9343,50 @@
                                 关闭
                             </button>
                         </div>
+                        
+                        <!-- 新增：互动符号提示 -->
+                        <div class="interactive-tip" style="
+                            padding: 12px 20px;
+                            background: linear-gradient(135deg, #E8F5E8 0%, #F0F8FF 100%);
+                            border-top: 1px solid #e9ecef;
+                            font-size: 12px;
+                            color: #666;
+                            line-height: 1.4;
+                        ">
+                            <div style="
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                margin-bottom: 6px;
+                                font-weight: 500;
+                            ">
+                                <span style="
+                                    display: inline-block;
+                                    width: 16px;
+                                    height: 16px;
+                                    background: #4CAF50;
+                                    border-radius: 50%;
+                                    color: white;
+                                    text-align: center;
+                                    line-height: 16px;
+                                    font-size: 10px;
+                                ">💡</span>
+                                <span style="color: #4CAF50;">快速互动小贴士</span>
+                            </div>
+                            <div style="margin-left: 24px;">
+                                在聊天中使用 <span style="
+                                    background: #4CAF50;
+                                    color: white;
+                                    padding: 2px 6px;
+                                    border-radius: 3px;
+                                    font-family: monospace;
+                                    font-weight: 600;
+                                ">&&</span> 符号可以直接触发互动内容
+                            </div>
+                            <div style="margin-left: 24px; margin-top: 4px; color: #888;">
+                                例如：<code style="background: #f8f9fa; padding: 1px 4px; border-radius: 2px;">&&想要拥抱你</code>
+                            </div>
+                        </div>
                     </div>
                     
                     <style>
@@ -9354,6 +9458,30 @@
                 } else {
                     return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
                 }
+            }
+            
+            /**
+             * *** 新增：创建直接的互动内容请求 ***
+             * @param {string} userDescription - 用户描述的互动内容
+             * @returns {string} 直接互动请求
+             */
+            function QQ_CreateDirectInteractiveRequest(userDescription) {
+                return `🎯 用户主动请求互动内容：
+请根据用户的描述："${userDescription}"，直接创建一个生动详细的互动场景。
+
+📋 请求要求：
+1. 直接生成互动内容，无需普通聊天回复
+2. 内容必须用 <content> 标签包裹
+3. 描述要生动详细，符合现实互动的感受
+4. 根据互动性质判断保存位置：
+   - 涉及多人/群体 → 公共互动空间
+   - 单独和角色 → 角色专属空间
+5. 互动内容要有沉浸感和真实感
+6. 包含动作、对话、感官细节、情感表达
+
+💡 这是用户使用特殊符号主动触发的互动请求，请积极回应！
+
+<Request:请根据上述用户描述生成互动内容，直接用content标签包裹>`;
             }
             
             /**
@@ -11514,6 +11642,11 @@ ${index + 1}. ${space.name}
                         action: () => QQ_ChangeUserName()
                     },
                     {
+                        icon: '💫',
+                        text: '互动使用指南',
+                        action: () => QQ_ShowInteractiveGuide()
+                    },
+                    {
                         icon: '📱',
                         text: '手机状态',
                         action: () => QQ_ShowPhoneStatus()
@@ -11582,6 +11715,47 @@ ${index + 1}. ${space.name}
                 }, 100);
             }
 
+            /**
+             * *** 新增：显示互动使用指南 ***
+             */
+            function QQ_ShowInteractiveGuide() {
+                const guideContent = `
+🎯 互动功能使用指南
+
+【主动触发互动】
+使用特殊符号 && 直接触发互动内容：
+
+✨ 使用方法：
+• "&&想要拥抱你" 
+• "抱抱你&&"  
+• "我想&&和你一起散步"
+
+🎪 效果：AI会直接生成互动场景，跳过普通聊天
+
+【惊喜模式互动】
+系统检测关键词自动触发（作为惊喜功能）：
+
+💫 关键词类型：
+• 身体接触：拥抱、亲吻、触摸、牵手
+• 面对面交流：面对面、走近、坐下
+• 情感表达：脸红、微笑、哭泣
+• 动作描述：*动作*、【情感】
+
+🏠 互动空间：
+• 点击私聊角色名称可查看角色专属精灵
+• 精灵可管理该角色的所有互动记录
+• 支持创建新互动和查看历史记录
+
+💡 小贴士：
+• 主动符号触发更精准
+• 惊喜模式在关键时刻激活
+• 所有互动内容保存在世界书中
+                `.trim();
+                
+                alert(guideContent);
+                console.log('显示互动使用指南');
+            }
+            
             /**
              * *** 新增：修改用户昵称 ***
              */
@@ -11704,22 +11878,53 @@ ${index + 1}. ${space.name}
                 if (text) {
                     // 测试单个文本
                     const result = QQ_DetectInteractiveIntent(text);
-                    const details = `
+                    
+                    let details = `
 === 互动意图检测测试 ===
-📝 测试文本: "${text}"
-🎯 检测结果: ${result ? '✅ 检测到互动意图' : '❌ 未检测到互动意图'}
+📝 测试文本: "${text}"`;
 
-💡 测试提示:
-• 身体接触词汇: 拥抱、亲吻、触摸、牵手等
+                    if (result && result.isInteractive) {
+                        details += `
+🎯 检测结果: ✅ 检测到互动意图
+🔧 触发类型: ${result.triggerType === 'symbol' ? '🎯 特殊符号触发' : '💫 关键词触发 (惊喜模式)'}`;
+                        
+                        if (result.triggerType === 'symbol') {
+                            details += `
+🔗 触发符号: ${result.triggerSymbol}
+📝 清理后内容: "${result.cleanContent}"
+💡 说明: ${result.description}`;
+                        } else {
+                            details += `
+📊 关键词匹配: ${result.matchCount || 0} 个
+🎭 模式匹配: ${result.patternMatches || 0} 个
+🔍 匹配内容: ${result.matchedKeywords ? result.matchedKeywords.join(', ') : '无'}
+💡 说明: ${result.description}`;
+                        }
+                    } else {
+                        details += `
+🎯 检测结果: ❌ 未检测到互动意图`;
+                    }
+
+                    details += `
+
+💡 使用指南:
+🎯 【主动触发】使用特殊符号:
+• "&&想要拥抱你" (✅ 符号触发)
+• "抱抱你&&" (✅ 符号触发)  
+• "我想&&和你一起散步" (✅ 符号触发)
+
+💫 【惊喜模式】传统关键词:
+• 身体接触: 拥抱、亲吻、触摸、牵手等
 • 面对面交流: 面对面、当面、走近、坐下等  
 • 情感表达: 脸红、害羞、微笑、哭泣等
 • 动作描述: *动作*、【情感】等格式
 • 需要2个关键词或1个模式匹配才触发
 
 📚 示例测试文本:
-• "我想抱抱你" (✅ 身体接触)
-• "*走向你*" (✅ 动作模式)
-• "面对面聊天" (✅ 面对面+动作)
+• "&&抱抱你" (🎯 符号触发)
+• "我想抱抱你" (💫 身体接触)
+• "*走向你*" (💫 动作模式) 
+• "面对面聊天" (💫 面对面+动作)
 • "你好吗？" (❌ 普通对话)
                 `;
                     console.log(details);
@@ -15800,9 +16005,21 @@ msg_end
                 }
                 
                 // *** 新增：检测动态评论的互动意图 ***
-                if (QQ_DetectInteractiveIntent(value)) {
-                    console.log('检测到动态评论中的互动意图，将引导AI回复互动内容');
-                    finalRequest = QQ_ModifyRequestForInteractive(finalRequest);
+                const momentInteractiveResult = QQ_DetectInteractiveIntent(value);
+                
+                if (momentInteractiveResult && momentInteractiveResult.isInteractive) {
+                    console.log(`检测到动态评论中的互动意图: ${momentInteractiveResult.description}`);
+                    
+                    if (momentInteractiveResult.triggerType === 'symbol') {
+                        // 特殊符号触发 - 直接请求互动内容
+                        console.log(`🎯 动态评论用户主动请求互动: ${momentInteractiveResult.triggerSymbol} -> ${momentInteractiveResult.cleanContent}`);
+                        const directInteractiveRequest = QQ_CreateDirectInteractiveRequest(momentInteractiveResult.cleanContent);
+                        finalRequest = directInteractiveRequest;
+                    } else {
+                        // 关键词触发 - 惊喜模式
+                        console.log(`💫 动态评论惊喜模式激活: 检测到关键词互动意图`);
+                        finalRequest = QQ_ModifyRequestForInteractive(finalRequest);
+                    }
                 }
                 
                 // *** 新增：添加时间上下文 ***
