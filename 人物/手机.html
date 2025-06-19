@@ -6708,7 +6708,7 @@
                     '现实中', '真实中', '现实里', '面对着',
                     '走向', '走近', '走过去', '过来', '靠过来',
                     '坐过来', '坐在身边', '坐在旁边',
-                    '躺着', '趴下',
+                    '躺着', '趴下', '我來了',
                     '蹲下', '跪下', '弯腰', '俯身'
                 ];
                 
@@ -6794,8 +6794,8 @@
                 }
                 
                 // 检测是否包含多个角色或群聊场景
-                const isMultiCharacter = QQ_DetectMultiCharacterInteraction(cleanContent);
                 const targetCharacter = characterName || QQ_LastRequestName || charcardname || "角色";
+                const isMultiCharacter = QQ_DetectMultiCharacterInteraction(cleanContent, targetCharacter);
                 
                 if (isMultiCharacter) {
                     // 多角色互动，显示在公共互动空间
@@ -6811,40 +6811,117 @@
             /**
              * 检测是否为多角色互动
              * @param {string} content - 互动内容
+             * @param {string} primaryCharacter - 主要互动的角色名（如私聊对象）
              * @returns {boolean} 是否为多角色互动
              */
-            function QQ_DetectMultiCharacterInteraction(content) {
-                // 检测群聊相关关键词
-                const groupKeywords = [
-                    '群聊', '大家', '所有人', '一起', '我们', '他们',
-                    '众人', '全体', '集体', '共同', '同时'
+            function QQ_DetectMultiCharacterInteraction(content, primaryCharacter = null) {
+                // *** 优化：强制多人互动关键词（明显的多人场景） ***
+                const strongMultiKeywords = [
+                    '群聊', '大家', '所有人', '众人', '全体', '集体', 
+                    '我们一起', '他们一起', '共同参与', '同时参与',
+                    '围成圈', '排成队', '分成组', '聚在一起'
                 ];
                 
-                if (groupKeywords.some(keyword => content.includes(keyword))) {
+                if (strongMultiKeywords.some(keyword => content.includes(keyword))) {
+                    console.log('检测到强制多人互动关键词:', strongMultiKeywords.find(k => content.includes(k)));
                     return true;
                 }
                 
-                // 检测多个角色名提及
+                // *** 优化：检测多个角色名提及，但考虑主要互动者 ***
                 const characterMentions = content.match(/[@【（＜]\s*([^@【（＜】）＞\s]{2,8})\s*[】）＞]/g) || [];
-                const uniqueCharacters = [...new Set(characterMentions)];
+                const uniqueCharacters = [...new Set(characterMentions.map(m => m.replace(/[@【（＜】）＞]/g, '').trim()))];
                 
+                // 如果有主要角色（如私聊对象），判断是否为主导互动
+                if (primaryCharacter && uniqueCharacters.length >= 1) {
+                    // 检查主要角色是否是互动的核心
+                    const isPrimaryDominant = QQ_IsPrimaryCharacterDominant(content, primaryCharacter, uniqueCharacters);
+                    if (isPrimaryDominant) {
+                        console.log('主要角色主导互动，归入角色专属空间:', primaryCharacter);
+                        return false; // 归入角色专属空间
+                    }
+                }
+                
+                // 多个角色且没有主导者，视为多人互动
                 if (uniqueCharacters.length > 1) {
+                    console.log('多个角色参与且无主导者，归入公共空间:', uniqueCharacters);
                     return true;
                 }
                 
-                // 检测多人场景描述
-                const multiPersonPatterns = [
-                    /(\w+)和(\w+)(?:一起|同时|互相)/,
-                    /(?:和|与|跟)(\w+)(?:一起|同时)/,
-                    /(\w+)、(\w+)(?:等|们)/,
-                    /大家|众人|所有人/
+                // *** 优化：检测多人场景描述，但更严格 ***
+                const strongMultiPersonPatterns = [
+                    /(\w+)和(\w+)(?:以及|还有|加上)(\w+)/,  // A和B以及C
+                    /(\w+)、(\w+)(?:、(\w+))+/,           // A、B、C等
+                    /(?:和|与|跟)(\w+)(?:他们|她们|大家)(?:一起|同时)/,  // 和某人他们一起
+                    /(?:我们|咱们)(?:几个|多个|全部)(?:一起|同时)/      // 我们几个一起
                 ];
                 
-                if (multiPersonPatterns.some(pattern => pattern.test(content))) {
+                if (strongMultiPersonPatterns.some(pattern => pattern.test(content))) {
+                    console.log('检测到强烈多人场景描述');
                     return true;
                 }
                 
+                console.log('判定为单人/角色主导互动');
                 return false;
+            }
+            
+            /**
+             * *** 新增：判断主要角色是否主导互动 ***
+             * @param {string} content - 互动内容
+             * @param {string} primaryCharacter - 主要角色名
+             * @param {string[]} allCharacters - 所有提及的角色
+             * @returns {boolean} 主要角色是否主导
+             */
+            function QQ_IsPrimaryCharacterDominant(content, primaryCharacter, allCharacters) {
+                // 计算主要角色在内容中的重要性权重
+                let primaryWeight = 0;
+                let otherWeight = 0;
+                
+                // 1. 角色名出现频率
+                const primaryCount = (content.match(new RegExp(primaryCharacter, 'g')) || []).length;
+                const otherCounts = allCharacters
+                    .filter(char => char !== primaryCharacter)
+                    .reduce((sum, char) => sum + (content.match(new RegExp(char, 'g')) || []).length, 0);
+                
+                primaryWeight += primaryCount * 2;
+                otherWeight += otherCounts;
+                
+                // 2. 互动动词的主语检测
+                const interactionPatterns = [
+                    new RegExp(`${primaryCharacter}(?:走向|走近|抱住|拉住|看着|对.*说)`, 'g'),
+                    new RegExp(`(?:走向|走近|抱住|拉住|看着|对)${primaryCharacter}`, 'g'),
+                ];
+                
+                interactionPatterns.forEach(pattern => {
+                    const matches = content.match(pattern) || [];
+                    primaryWeight += matches.length * 3;
+                });
+                
+                // 3. 直接对话检测
+                const directDialogPatterns = [
+                    new RegExp(`${primaryCharacter}[说道讲]`, 'g'),
+                    new RegExp(`对${primaryCharacter}说`, 'g'),
+                ];
+                
+                directDialogPatterns.forEach(pattern => {
+                    const matches = content.match(pattern) || [];
+                    primaryWeight += matches.length * 2;
+                });
+                
+                // 4. 位置关系检测（私密互动）
+                const intimatePatterns = [
+                    new RegExp(`(?:和|与|跟)${primaryCharacter}(?:单独|私下|悄悄|偷偷)`, 'g'),
+                    new RegExp(`${primaryCharacter}(?:单独|私下|悄悄|偷偷)`, 'g'),
+                ];
+                
+                intimatePatterns.forEach(pattern => {
+                    const matches = content.match(pattern) || [];
+                    primaryWeight += matches.length * 4;
+                });
+                
+                console.log(`角色主导权重分析 - ${primaryCharacter}: ${primaryWeight}, 其他角色: ${otherWeight}`);
+                
+                // 主要角色权重超过其他角色总和的60%时，认为是主导
+                return primaryWeight > otherWeight * 0.6;
             }
             
             /**
@@ -7413,15 +7490,26 @@
                 const interactiveGuidance = `
 <InteractiveGuidance:用户的消息包含明显的互动意图(如身体接触、面对面交流、现实动作等)。
 请在回复中：
-1. 将互动部分用<content>标签包裹
-2. <content>标签内描述具体的现实互动场景
-3. 包含感官细节、情感表达、动作描述
-4. 确保互动内容能够引发后续的现实互动
-示例格式：
-角色名--回复内容
+1. 【可选】先正常回复私聊/群聊消息（表达反应、确认等），然后
+2. 将互动部分用<content>标签包裹
+3. <content>标签内描述具体的现实互动场景
+4. 包含感官细节、情感表达、动作描述
+5. 确保互动内容能够引发后续的现实互动
+
+示例格式（两种方式）：
+方式1-仅互动：
+角色名--普通回复内容
 <content>
 *角色做出回应动作* 现实互动描述，包含感官和情感细节
 </content>
+
+方式2-先回复再互动（更真实）：
+角色名--我来了！
+<content>
+*小跑过来，轻轻拉住你的手* "刚才在忙别的事情，现在过来陪你了~" *眼中闪烁着期待的光芒*
+</content>
+
+注意：先回复可以增加真实性，比如用户说"过来吧"，可以先回复"好的！"或"我来了！"再描述互动。
 >`;
                 
                 // 在原始Request之前插入互动指导
@@ -13313,6 +13401,89 @@ ${index + 1}. ${space.name}
 
              // *** 添加到全局作用域便于调试 ***
              window.QQ_Check_Group_Message_Backup_Status = QQ_Check_Group_Message_Backup_Status;
+
+             /**
+              * *** 新增：测试互动内容优化功能的调试函数 ***
+              */
+             function QQ_Test_Interactive_Optimization() {
+                 console.log('=== 互动内容优化功能测试 ===');
+                 
+                 // 测试用例
+                 const testCases = [
+                     {
+                         content: '小明过来吧，我想和你聊聊',
+                         primaryChar: '小明',
+                         expected: '角色专属空间（小明主导）'
+                     },
+                     {
+                         content: '【小明】【小红】【小蓝】大家一起玩游戏吧',
+                         primaryChar: '小明',
+                         expected: '公共空间（明显多人）'
+                     },
+                     {
+                         content: '和小明单独聊天，顺便【小红】也来一下',
+                         primaryChar: '小明',
+                         expected: '角色专属空间（小明主导私密互动）'
+                     },
+                     {
+                         content: '小红和小蓝以及小绿一起唱歌',
+                         primaryChar: '小红',
+                         expected: '公共空间（多人活动）'
+                     },
+                     {
+                         content: '我来了！过来抱抱你',
+                         primaryChar: '小明',
+                         expected: '角色专属空间（单人互动）'
+                     }
+                 ];
+                 
+                 testCases.forEach((testCase, index) => {
+                     console.log(`\n测试案例 ${index + 1}:`);
+                     console.log(`内容: "${testCase.content}"`);
+                     console.log(`主要角色: ${testCase.primaryChar}`);
+                     console.log(`预期结果: ${testCase.expected}`);
+                     
+                     const isMultiCharacter = QQ_DetectMultiCharacterInteraction(testCase.content, testCase.primaryChar);
+                     const actualResult = isMultiCharacter ? '公共空间' : '角色专属空间';
+                     console.log(`实际结果: ${actualResult}`);
+                     console.log(`✓ 测试${actualResult.includes(testCase.expected.includes('公共') ? '公共' : '角色') ? '通过' : '失败'}`);
+                 });
+                 
+                 console.log('\n=== 测试完成 ===');
+                 console.log('提示：你可以使用 QQ_Test_Interactive_Content_Detection("测试内容", "角色名") 来测试特定内容');
+             }
+             
+             /**
+              * *** 新增：测试特定互动内容的检测结果 ***
+              */
+             function QQ_Test_Interactive_Content_Detection(content, primaryCharacter = null) {
+                 console.log(`\n=== 测试互动内容检测 ===`);
+                 console.log(`内容: "${content}"`);
+                 console.log(`主要角色: ${primaryCharacter || '无'}`);
+                 
+                 // 1. 测试是否为互动内容
+                 const isInteractive = QQ_IsInteractiveContent(content);
+                 console.log(`是否为互动内容: ${isInteractive ? '是' : '否'}`);
+                 
+                 if (isInteractive) {
+                     // 2. 测试多角色检测
+                     const isMultiCharacter = QQ_DetectMultiCharacterInteraction(content, primaryCharacter);
+                     console.log(`是否为多角色互动: ${isMultiCharacter ? '是' : '否'}`);
+                     console.log(`推荐存储位置: ${isMultiCharacter ? '公共互动空间' : (primaryCharacter ? primaryCharacter + '的专属空间' : '角色专属空间')}`);
+                     
+                     // 3. 测试场景命名
+                     const sceneName = primaryCharacter ? 
+                         `${primaryCharacter}·${QQ_GetSceneFromContent(content)}` :
+                         QQ_GetSpaceName(content);
+                     console.log(`建议空间名称: "${sceneName}"`);
+                 }
+                 
+                 console.log('=== 测试结束 ===\n');
+             }
+             
+             // *** 添加到全局作用域便于调试 ***
+             window.QQ_Test_Interactive_Optimization = QQ_Test_Interactive_Optimization;
+             window.QQ_Test_Interactive_Content_Detection = QQ_Test_Interactive_Content_Detection;
              function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
