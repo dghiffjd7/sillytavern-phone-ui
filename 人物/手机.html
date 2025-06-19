@@ -12928,9 +12928,27 @@ ${index + 1}. ${space.name}
                     sendvalue += `用户在${name}的动态下评论：${value}\n\n`;
                 }
                 
-                // *** 新增：检测动态评论的互动意图 ***
-                let finalRequest = `<Request:本次响应必须使用线上格式回复，只能回复评论，严禁重复生成完整动态内容。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end 注意：只回复评论内容，不要重复原动态的文字、图片或任何内容>`;
+                // *** 修复：检查是否有缓存消息需要回复 ***
+                const originalCacheMsg = QQ_CacheSendMsg && QQ_CacheSendMsg.trim();
+                const hasCachedMessages = originalCacheMsg && originalCacheMsg.length > 0 && !originalCacheMsg.includes(`用户在${name}的动态下评论`);
                 
+                // *** 修复：根据是否有缓存消息调整AI指导 ***
+                let finalRequest;
+                if (hasCachedMessages) {
+                    finalRequest = `<Request:本次响应需要处理用户的多条消息：包括之前发送给群聊/私聊的消息和动态评论。请按照以下格式回复：
+【私聊回复】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊回复内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end
+【群聊回复】msg_start\\n<群聊名>\\n角色名--群聊回复内容--时间\\n</群聊名>\\nmsg_end  
+【动态评论回复】moment_start\\n角色名--评论回复内容\\nmoment_end
+注意：
+1. 优先回复私聊和群聊消息，这些是用户主动发送的
+2. 然后回复动态评论  
+3. 严禁重复生成完整动态内容
+4. 可以选择回复部分或全部消息，但不要遗漏重要消息>`;
+                } else {
+                    finalRequest = `<Request:本次响应只需回复动态评论，使用线上格式。回复格式：【动态评论】moment_start\\n角色名--评论内容\\nmoment_end 【可选私聊】msg_start\\n<${UserName}和角色名的私聊>\\n角色名--私聊内容--时间\\n</${UserName}和角色名的私聊>\\nmsg_end 注意：只回复评论内容，不要重复原动态的文字、图片或任何内容>`;
+                }
+                
+                // *** 新增：检测动态评论的互动意图 ***
                 if (QQ_DetectInteractiveIntent(value)) {
                     console.log('检测到动态评论中的互动意图，将引导AI回复互动内容');
                     finalRequest = QQ_ModifyRequestForInteractive(finalRequest);
@@ -13068,6 +13086,18 @@ ${index + 1}. ${space.name}
                      
                      // *** 处理私聊消息 ***
                      await QQ_Handle_Private_Messages(content);
+                     
+                     // *** 额外检查：如果检测到缓存消息格式，确保处理所有消息类型 ***
+                     if (content.includes('msg_start')) {
+                         console.log('检测到msg格式，开始额外的消息处理检查...');
+                         // 通过QQ_Msg_Parse来处理可能的群聊消息
+                         const allMsgMatches = content.matchAll(/msg_start([\s\S]*?)msg_end/g);
+                         for (const msgMatch of allMsgMatches) {
+                             const msgContent = msgMatch[1].trim();
+                             console.log('处理消息内容:', msgContent);
+                             await QQ_Msg_Parse(msgContent);
+                         }
+                     }
                      
                  } catch (error) {
                      console.error('处理AI评论时出错:', error);
@@ -13484,6 +13514,81 @@ ${index + 1}. ${space.name}
              // *** 添加到全局作用域便于调试 ***
              window.QQ_Test_Interactive_Optimization = QQ_Test_Interactive_Optimization;
              window.QQ_Test_Interactive_Content_Detection = QQ_Test_Interactive_Content_Detection;
+
+             /**
+              * *** 新增：检查两阶段发送机制状态的调试函数 ***
+              */
+             function QQ_Check_Two_Stage_Send_Status() {
+                 console.log('=== 两阶段发送机制状态检查 ===');
+                 
+                 // 检查缓存消息状态
+                 console.log(`缓存消息状态: ${QQ_CacheSendMsg ? '有缓存' : '无缓存'}`);
+                 if (QQ_CacheSendMsg) {
+                     console.log(`缓存内容: "${QQ_CacheSendMsg}"`);
+                     
+                     // 解析缓存消息
+                     const namevalue = QQ_GetValueName(QQ_CacheSendMsg);
+                     if (namevalue && namevalue.length > 0) {
+                         console.log(`解析到 ${namevalue.length} 条缓存消息:`);
+                         namevalue.forEach((match, index) => {
+                             const type = QQ_Groups.includes(match.name) ? '群聊' : '私聊';
+                             console.log(`  ${index + 1}. ${type} - ${match.name}: "${match.value}"`);
+                         });
+                     } else {
+                         console.log('缓存消息解析失败');
+                     }
+                 }
+                 
+                 // 检查最近的消息保存状态
+                 console.log('\n=== 最近消息保存状态 ===');
+                 
+                 // 检查私聊消息
+                 console.log('私聊消息数量:', Object.keys(QQ_msgjson.私聊).length);
+                 Object.entries(QQ_msgjson.私聊).forEach(([chatKey, messages]) => {
+                     if (Array.isArray(messages) && messages.length > 0) {
+                         const lastMsg = messages[messages.length - 1];
+                         console.log(`  ${chatKey}: 最后消息 "${lastMsg}"`);
+                     }
+                 });
+                 
+                 // 检查群聊消息
+                 console.log('群聊消息数量:', Object.keys(QQ_msgjson.群聊).length);
+                 Object.entries(QQ_msgjson.群聊).forEach(([groupName, groupData]) => {
+                     if (groupData && groupData.msgs && Array.isArray(groupData.msgs) && groupData.msgs.length > 0) {
+                         const lastMsg = groupData.msgs[groupData.msgs.length - 1];
+                         console.log(`  ${groupName}: 最后消息 "${lastMsg}"`);
+                     }
+                 });
+                 
+                 console.log('\n=== 检查完成 ===');
+                 console.log('提示：可以使用 QQ_Test_Cache_Message_Parsing("测试内容") 来测试消息解析');
+             }
+             
+             /**
+              * *** 新增：测试缓存消息解析的调试函数 ***
+              */
+             function QQ_Test_Cache_Message_Parsing(testContent) {
+                 console.log(`\n=== 测试缓存消息解析 ===`);
+                 console.log(`测试内容: "${testContent}"`);
+                 
+                 const namevalue = QQ_GetValueName(testContent);
+                 if (namevalue && namevalue.length > 0) {
+                     console.log(`✓ 解析成功，共 ${namevalue.length} 条消息:`);
+                     namevalue.forEach((match, index) => {
+                         const type = QQ_Groups.includes(match.name) ? '群聊' : '私聊';
+                         console.log(`  ${index + 1}. ${type} - 对象: "${match.name}", 内容: "${match.value}"`);
+                     });
+                 } else {
+                     console.log('❌ 解析失败，无法识别消息格式');
+                     console.log('提示：确保消息格式为 "目标名字：消息内容" 或类似格式');
+                 }
+                 
+                 console.log('=== 测试结束 ===\n');
+             }
+             
+             // *** 添加到全局作用域便于调试 ***
+             window.QQ_Check_Two_Stage_Send_Status = QQ_Check_Two_Stage_Send_Status;
+             window.QQ_Test_Cache_Message_Parsing = QQ_Test_Cache_Message_Parsing;
              function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
