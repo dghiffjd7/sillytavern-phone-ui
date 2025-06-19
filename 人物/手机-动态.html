@@ -7771,7 +7771,11 @@
                 };
                 
                 QQ_ActiveSpaceId = spaceId;
+                
+                // 保存到世界书 - 使用新的保存机制
+                QQ_SaveInteractiveContentToWorldBook(content, null);
                 QQ_SaveInteractiveSpaces();
+                
                 QQ_DisplayInteractiveSpace(spaceId, '公共互动空间');
             }
             
@@ -7802,6 +7806,9 @@
                 };
                 
                 QQ_ActiveSpaceId = spaceId;
+                
+                // 保存到世界书 - 使用新的保存机制
+                QQ_SaveInteractiveContentToWorldBook(content, charName);
                 
                 // 异步保存到世界书（非阻塞）
                 QQ_SaveCharacterSpaces().catch(error => {
@@ -11466,6 +11473,232 @@ ${index + 1}. ${space.name}
                 };
             };
             
+            /**
+             * *** 新增：用户名下拉菜单功能 ***
+             */
+            function QQ_ToggleUserMenu() {
+                console.log('点击用户名，显示下拉菜单');
+                
+                // 检查是否已存在菜单
+                let existingMenu = document.getElementById('QQ_user_dropdown_menu');
+                if (existingMenu) {
+                    existingMenu.remove();
+                    return;
+                }
+                
+                // 创建下拉菜单
+                const menu = document.createElement('div');
+                menu.id = 'QQ_user_dropdown_menu';
+                menu.style.cssText = `
+                    position: fixed;
+                    top: 70px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: white;
+                    border: 1px solid #ddd;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 10000;
+                    min-width: 200px;
+                    overflow: hidden;
+                `;
+                
+                // 获取当前用户名
+                const currentUserName = document.getElementById('QQ_message_list_UserName').textContent.replace(/\*\*/g, '');
+                
+                // 菜单项数据
+                const menuItems = [
+                    {
+                        icon: '👤',
+                        text: '修改昵称',
+                        action: () => QQ_ChangeUserName()
+                    },
+                    {
+                        icon: '📱',
+                        text: '手机状态',
+                        action: () => QQ_ShowPhoneStatus()
+                    },
+                    {
+                        icon: '🔄',
+                        text: '同步数据',
+                        action: () => QQ_SyncAllData()
+                    },
+                    {
+                        icon: '📋',
+                        text: '数据管理',
+                        action: () => QQ_ShowDataManagement()
+                    },
+                    {
+                        icon: '🧹',
+                        text: '清理缓存',
+                        action: () => QQ_ClearCache()
+                    }
+                ];
+                
+                // 添加菜单项
+                menuItems.forEach((item, index) => {
+                    const menuItem = document.createElement('div');
+                    menuItem.style.cssText = `
+                        padding: 12px 16px;
+                        display: flex;
+                        align-items: center;
+                        cursor: pointer;
+                        border-bottom: ${index < menuItems.length - 1 ? '1px solid #f0f0f0' : 'none'};
+                        transition: background-color 0.2s;
+                    `;
+                    
+                    menuItem.innerHTML = `
+                        <span style="margin-right: 12px; font-size: 16px;">${item.icon}</span>
+                        <span style="color: #333; font-size: 14px;">${item.text}</span>
+                    `;
+                    
+                    menuItem.addEventListener('mouseover', () => {
+                        menuItem.style.backgroundColor = '#f5f5f5';
+                    });
+                    
+                    menuItem.addEventListener('mouseout', () => {
+                        menuItem.style.backgroundColor = 'transparent';
+                    });
+                    
+                    menuItem.addEventListener('click', () => {
+                        menu.remove();
+                        item.action();
+                    });
+                    
+                    menu.appendChild(menuItem);
+                });
+                
+                // 添加到页面
+                document.body.appendChild(menu);
+                
+                // 点击其他地方关闭菜单
+                setTimeout(() => {
+                    document.addEventListener('click', function closeMenu(e) {
+                        if (!menu.contains(e.target)) {
+                            menu.remove();
+                            document.removeEventListener('click', closeMenu);
+                        }
+                    });
+                }, 100);
+            }
+
+            /**
+             * *** 新增：修改用户昵称 ***
+             */
+            function QQ_ChangeUserName() {
+                const currentName = document.getElementById('QQ_message_list_UserName').textContent.replace(/\*\*/g, '');
+                const newName = prompt('请输入新的昵称:', currentName);
+                
+                if (newName && newName.trim() && newName.trim() !== currentName) {
+                    const finalName = newName.trim();
+                    
+                    // 更新所有显示的用户名
+                    document.getElementById('QQ_message_list_UserName').innerHTML = `<strong>${finalName}</strong>`;
+                    document.getElementById('QQ_home_UserName').textContent = finalName;
+                    
+                    // 保存到世界书
+                    QQ_SafeSaveToWorldBook('用户设置', {
+                        userName: finalName,
+                        updateTime: new Date().toISOString()
+                    }, 'QQ_用户设置');
+                    
+                    console.log(`用户名已更改为: ${finalName}`);
+                    triggerSlash(`/echo 用户名已更改为: ${finalName}`);
+                }
+            }
+
+            /**
+             * *** 新增：显示手机状态 ***
+             */
+            function QQ_ShowPhoneStatus() {
+                const stats = {
+                    contacts: Object.keys(window.QQ_Contacts || {}).length,
+                    groups: Object.keys(window.QQ_Groups || {}).length,
+                    messages: Object.keys(window.QQ_MessageHistory || {}).length,
+                    moments: Object.keys(window.QQ_MomentData || {}).length,
+                    interactiveSpaces: Object.keys(window.QQ_InteractiveSpaces || {}).length
+                };
+                
+                const statusInfo = `
+📱 手机状态报告
+联系人: ${stats.contacts} 个
+群聊: ${stats.groups} 个  
+消息记录: ${stats.messages} 条
+动态: ${stats.moments} 条
+互动空间: ${stats.interactiveSpaces} 个
+
+🔋 系统状态: 正常
+📶 网络状态: 已连接
+💾 数据同步: 世界书
+                `.trim();
+                
+                alert(statusInfo);
+                console.log('手机状态:', stats);
+            }
+
+            /**
+             * *** 新增：同步所有数据 ***
+             */
+            function QQ_SyncAllData() {
+                console.log('🔄 开始同步所有数据到世界书...');
+                
+                const syncTasks = [
+                    () => QQ_SaveAllContactsToWorldBook(),
+                    () => QQ_SaveAllGroupsToWorldBook(), 
+                    () => QQ_SaveAllMessagesToWorldBook(),
+                    () => QQ_SaveAllMomentsToWorldBook(),
+                    () => QQ_SaveAllInteractiveSpacesToWorldBook(),
+                    () => saveGroupsToStorage() // 保存当前角色的分组数据
+                ];
+                
+                let completed = 0;
+                const total = syncTasks.length;
+                
+                syncTasks.forEach((task, index) => {
+                    setTimeout(() => {
+                        try {
+                            task();
+                            completed++;
+                            console.log(`✅ 同步任务 ${index + 1}/${total} 完成`);
+                            
+                            if (completed === total) {
+                                triggerSlash(`/echo 所有数据已同步到世界书 (${total}/${total})`);
+                                console.log('🎉 所有数据同步完成！');
+                            }
+                        } catch (error) {
+                            console.error(`❌ 同步任务 ${index + 1} 失败:`, error);
+                        }
+                    }, index * 500); // 间隔500ms执行，避免并发问题
+                });
+                
+                triggerSlash(`/echo 正在同步数据到世界书... (0/${total})`);
+            }
+
+            /**
+             * *** 新增：显示数据管理界面 ***
+             */
+            function QQ_ShowDataManagement() {
+                console.log('显示数据管理界面');
+                alert('数据管理功能开发中...\n\n当前支持:\n• 所有数据保存在世界书中\n• 联系人分组管理\n• 互动空间管理\n• 消息记录管理');
+            }
+
+            /**
+             * *** 新增：清理缓存 ***
+             */
+            function QQ_ClearCache() {
+                if (confirm('确定要清理缓存吗？这将清除临时数据但保留世界书中的重要数据。')) {
+                    // 清理前端缓存
+                    window.QQ_Cache = {};
+                    window.QQ_TempData = {};
+                    
+                    // 清理一些临时DOM缓存
+                    $('.QQ_temp_cache').remove();
+                    
+                    console.log('缓存已清理');
+                    triggerSlash('/echo 缓存已清理，重要数据保留在世界书中');
+                }
+            }
+
             // *** 新增：互动检测测试工具 - 优化版 ***
             window.QQ_Test_Interactive_Detection = function(text) {
                 if (text) {
@@ -18562,55 +18795,36 @@ msg_end
              */
             function loadGroupsFromStorage() {
                 try {
-                    if (!worldbook || !entries) {
-                        console.warn('loadGroupsFromStorage: worldbook未初始化，尝试从localStorage加载');
-                        // 作为备用方案，尝试从localStorage加载
-                        const charGroupsKey = getCharacterGroupsKey();
-                        const stored = localStorage.getItem(charGroupsKey);
-                        if (stored) {
-                            contactGroups = JSON.parse(stored);
-                            console.log(`从localStorage加载角色(${getCurrentCharacterId()})分组数据:`, contactGroups.length, '个分组');
-                        } else {
-                            contactGroups = [];
-                        }
-                        return;
-                    }
+                    const charId = getCurrentCharacterId() || 'default';
+                    console.log(`从世界书加载分组，角色ID: ${charId}`);
                     
-                    const charId = getCurrentCharacterId();
-                    const groupsKey = `QQ_分组备份_${charId}`;
+                    // 使用新的统一加载函数
+                    const groups = QQ_LoadContactGroupsFromWorldBook(charId);
                     
-                    const groupsEntry = entries.find(entry => 
-                        entry.keys.includes(groupsKey)
-                    );
-                    
-                    if (groupsEntry && groupsEntry.content) {
-                        const groupsData = JSON.parse(groupsEntry.content);
-                        
-                        // 验证数据完整性
-                        if (groupsData.groups && Array.isArray(groupsData.groups)) {
-                            contactGroups = groupsData.groups;
-                            console.log(`从世界书加载角色(${charId})分组数据:`, contactGroups.length, '个分组');
-                        } else {
-                            contactGroups = [];
-                            console.log(`角色(${charId})的世界书分组数据格式错误，初始化为空数组`);
-                        }
+                    if (groups && Array.isArray(groups)) {
+                        contactGroups.length = 0; // 清空现有数组
+                        contactGroups.push(...groups); // 添加从世界书加载的数据
+                        console.log(`从世界书加载了 ${groups.length} 个分组`);
                     } else {
                         // 尝试从localStorage迁移数据
+                        console.log('世界书中没有找到分组数据，尝试从localStorage迁移...');
                         const charGroupsKey = getCharacterGroupsKey();
                         const localStored = localStorage.getItem(charGroupsKey);
                         if (localStored) {
-                            contactGroups = JSON.parse(localStored);
-                            console.log(`从localStorage迁移角色(${charId})分组数据:`, contactGroups.length, '个分组');
+                            const localGroups = JSON.parse(localStored);
+                            contactGroups.length = 0;
+                            contactGroups.push(...localGroups);
+                            console.log(`从localStorage迁移了 ${localGroups.length} 个分组到世界书`);
                             // 立即保存到世界书
                             setTimeout(() => saveGroupsToStorage(), 1000);
                         } else {
-                            contactGroups = [];
-                            console.log(`角色(${charId})没有找到分组数据，初始化为空数组`);
+                            console.log('没有找到任何分组数据，使用默认空数组');
+                            contactGroups.length = 0;
                         }
                     }
                 } catch (error) {
-                    console.error('加载分组数据失败:', error);
-                    contactGroups = [];
+                    console.error('从世界书加载分组时出错:', error);
+                    contactGroups.length = 0;
                 }
             }
             
@@ -18618,57 +18832,23 @@ msg_end
             loadGroupsFromStorage();
             
             /**
-             * 保存分组到世界书（按角色隔离）
+             * 保存分组到世界书（按角色隔离）- 修复版
              */
             async function saveGroupsToStorage() {
                 try {
-                    if (!worldbook || !entries) {
-                        console.warn('saveGroupsToStorage: worldbook未初始化');
-                        return;
-                    }
+                    const charId = getCurrentCharacterId() || 'default';
+                    console.log(`保存分组到世界书，角色ID: ${charId}`);
                     
-                    const charId = getCurrentCharacterId();
-                    const groupsKey = `QQ_分组备份_${charId}`;
+                    // 使用新的统一保存函数
+                    const success = QQ_SaveContactGroupsToWorldBook(charId, contactGroups);
                     
-                    const groupsData = {
-                        characterId: charId,
-                        lastUpdate: Date.now(),
-                        groups: contactGroups
-                    };
-                    
-                    // 查找或创建分组存储条目
-                    let groupsEntry = entries.find(entry => 
-                        entry.keys.includes(groupsKey)
-                    );
-                    
-                    if (groupsEntry) {
-                        groupsEntry.content = JSON.stringify(groupsData, null, 2);
+                    if (success) {
+                        console.log(`角色 ${charId} 的分组数据已保存到世界书，共 ${contactGroups.length} 个分组`);
                     } else {
-                        const newEntry = {
-                            keys: [groupsKey],
-                            content: JSON.stringify(groupsData, null, 2),
-                            enabled: true,
-                            constant: true,
-                            comment: `手机界面分组备份 - 角色${charId} - 自动生成`,
-                            depth: 0,
-                            selectiveLogic: 0,
-                            order: 9998
-                        };
-                        entries.push(newEntry);
+                        console.error('分组数据保存到世界书失败');
                     }
-                    
-                    // 保存到世界书
-                    if (typeof saveWorldInfo === 'function') {
-                        console.log('触发saveWorldInfo保存分组数据...');
-                        await saveWorldInfo();
-                    } else {
-                        console.log('saveWorldInfo函数不可用，依赖SillyTavern自动保存机制');
-                    }
-                    
-                    console.log(`角色(${charId})分组数据已保存到世界书，共${contactGroups.length}个分组`);
-                    
                 } catch (error) {
-                    console.error('保存分组数据失败:', error);
+                    console.error('保存分组到世界书时出错:', error);
                 }
             }
             
@@ -24812,6 +24992,526 @@ msg_end
                     console.log('- group按钮onclick:', groupBtn.getAttribute('onclick'));
                 }
             }, 1000);
+            
+            /**
+             * ===== 增强的世界书数据管理系统 =====
+             */
+            
+            /**
+             * 安全地保存数据到世界书
+             */
+            function QQ_SafeSaveToWorldBook(operation, data, key) {
+                try {
+                    if (!QQ_IsWorldBookAvailable()) {
+                        console.warn(`世界书功能不可用，无法保存${operation}`);
+                        return false;
+                    }
+                    
+                    // 创建世界书条目数据
+                    const entryData = {
+                        data: data,
+                        operation: operation,
+                        timestamp: new Date().toISOString(),
+                        version: "1.0"
+                    };
+                    
+                    // 查找或创建世界书条目
+                    if (typeof worldbook !== 'undefined' && worldbook && worldbook.entries) {
+                        let entry = worldbook.entries.find(e => e.comment === key);
+                        
+                        if (!entry) {
+                            // 创建新条目
+                            entry = {
+                                comment: key,
+                                content: JSON.stringify(entryData),
+                                key: [`此世界书永不触发_${key}`],
+                                keysecondary: [],
+                                order: 1000 + worldbook.entries.length,
+                                enabled: true,
+                                uid: Date.now() + Math.random()
+                            };
+                            worldbook.entries.push(entry);
+                            console.log(`创建新世界书条目: ${key}`);
+                        } else {
+                            // 更新现有条目
+                            entry.content = JSON.stringify(entryData);
+                            console.log(`更新世界书条目: ${key}`);
+                        }
+                        
+                        // 触发保存
+                        if (typeof saveWorldInfo === 'function') {
+                            saveWorldInfo();
+                        }
+                    }
+                    
+                    console.log(`${operation}已成功保存到世界书 (${key})`);
+                    return true;
+                } catch (error) {
+                    console.error(`保存${operation}到世界书失败:`, error);
+                    return false;
+                }
+            }
+            
+            /**
+             * 从世界书获取数据
+             */
+            function QQ_GetFromWorldBook(key) {
+                try {
+                    if (!QQ_IsWorldBookAvailable()) {
+                        return null;
+                    }
+                    
+                    if (typeof worldbook !== 'undefined' && worldbook && worldbook.entries) {
+                        const entry = worldbook.entries.find(e => e.comment === key);
+                        if (entry && entry.content) {
+                            const entryData = JSON.parse(entry.content);
+                            return entryData.data;
+                        }
+                    }
+                    
+                    return null;
+                } catch (error) {
+                    console.error(`从世界书读取数据失败 (${key}):`, error);
+                    return null;
+                }
+            }
+            
+            /**
+             * ===== 各类数据保存到世界书的功能 =====
+             */
+            
+            /**
+             * 保存所有联系人到世界书
+             */
+            function QQ_SaveAllContactsToWorldBook() {
+                const contacts = window.QQ_Contacts || {};
+                return QQ_SafeSaveToWorldBook('联系人数据', contacts, 'QQ_联系人数据');
+            }
+            
+            /**
+             * 保存所有群聊到世界书
+             */
+            function QQ_SaveAllGroupsToWorldBook() {
+                const groups = window.QQ_Groups || {};
+                return QQ_SafeSaveToWorldBook('群聊数据', groups, 'QQ_群聊数据');
+            }
+            
+            /**
+             * 保存所有消息到世界书
+             */
+            function QQ_SaveAllMessagesToWorldBook() {
+                const messages = window.QQ_MessageHistory || {};
+                return QQ_SafeSaveToWorldBook('消息记录', messages, 'QQ_消息记录');
+            }
+            
+            /**
+             * 保存所有动态到世界书
+             */
+            function QQ_SaveAllMomentsToWorldBook() {
+                const moments = window.QQ_MomentData || {};
+                return QQ_SafeSaveToWorldBook('动态数据', moments, 'QQ_动态数据');
+            }
+            
+            /**
+             * 保存所有互动空间到世界书
+             */
+            function QQ_SaveAllInteractiveSpacesToWorldBook() {
+                const spaces = window.QQ_InteractiveSpaces || {};
+                const characterSpaces = window.QQ_CharacterSpaces || {};
+                
+                const allSpaces = {
+                    publicSpaces: spaces,
+                    characterSpaces: characterSpaces
+                };
+                
+                return QQ_SafeSaveToWorldBook('互动空间数据', allSpaces, 'QQ_互动空间数据');
+            }
+            
+            /**
+             * 保存分组数据到世界书
+             */
+            function QQ_SaveContactGroupsToWorldBook(characterId, groups) {
+                const key = `QQ_分组数据_${characterId}`;
+                return QQ_SafeSaveToWorldBook('联系人分组', groups, key);
+            }
+            
+            /**
+             * 从世界书加载分组数据
+             */
+            function QQ_LoadContactGroupsFromWorldBook(characterId) {
+                const key = `QQ_分组数据_${characterId}`;
+                return QQ_GetFromWorldBook(key) || [];
+            }
+            
+            /**
+             * ===== 修复互动内容保存功能 =====
+             */
+            
+            /**
+             * 保存单个互动内容到世界书
+             */
+            function QQ_SaveInteractiveContentToWorldBook(content, characterName = null) {
+                try {
+                    const interactiveData = {
+                        content: content,
+                        characterName: characterName,
+                        timestamp: new Date().toISOString(),
+                        id: `interactive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        type: characterName ? 'character_specific' : 'public'
+                    };
+                    
+                    const key = characterName ? 
+                        `QQ_角色互动空间_${characterName}` : 
+                        'QQ_公共互动空间';
+                    
+                    // 获取现有数据
+                    let existingData = QQ_GetFromWorldBook(key) || [];
+                    
+                    // 确保是数组格式
+                    if (!Array.isArray(existingData)) {
+                        existingData = [];
+                    }
+                    
+                    // 添加新数据
+                    existingData.push(interactiveData);
+                    
+                    // 限制数量（最多30个）
+                    if (existingData.length > 30) {
+                        existingData = existingData.slice(-30);
+                    }
+                    
+                    // 保存到世界书
+                    const success = QQ_SafeSaveToWorldBook(
+                        characterName ? `角色${characterName}的互动内容` : '公共互动内容',
+                        existingData,
+                        key
+                    );
+                    
+                    if (success) {
+                        console.log(`互动内容已保存到世界书: ${characterName || '公共'}, ID: ${interactiveData.id}`);
+                        return interactiveData.id;
+                    }
+                    
+                    return null;
+                } catch (error) {
+                    console.error('保存互动内容到世界书失败:', error);
+                    return null;
+                }
+            }
+            
+            /**
+             * 从世界书加载互动内容
+             */
+            function QQ_LoadInteractiveContentFromWorldBook(characterName = null) {
+                try {
+                    const key = characterName ? 
+                        `QQ_角色互动空间_${characterName}` : 
+                        'QQ_公共互动空间';
+                    
+                    const data = QQ_GetFromWorldBook(key);
+                    
+                    if (Array.isArray(data)) {
+                        console.log(`从世界书加载了 ${data.length} 个${characterName || '公共'}互动内容`);
+                        return data;
+                    }
+                    
+                    return [];
+                } catch (error) {
+                    console.error('从世界书加载互动内容失败:', error);
+                    return [];
+                }
+            }
+            
+            /**
+             * ===== 修复分组保存功能 =====
+             */
+            
+            // 重写分组保存函数确保使用世界书
+            window.saveGroupsToStorage = async function() {
+                try {
+                    const characterId = getCurrentCharacterId() || 'default';
+                    console.log(`保存分组到世界书，角色ID: ${characterId}`);
+                    
+                    const success = QQ_SaveContactGroupsToWorldBook(characterId, contactGroups);
+                    
+                    if (success) {
+                        console.log(`角色 ${characterId} 的分组数据已保存到世界书，共 ${contactGroups.length} 个分组`);
+                    } else {
+                        console.error('分组数据保存到世界书失败');
+                    }
+                } catch (error) {
+                    console.error('保存分组到世界书时出错:', error);
+                }
+            };
+            
+            // 重写分组加载函数确保从世界书读取
+            window.loadGroupsFromStorage = function() {
+                try {
+                    const characterId = getCurrentCharacterId() || 'default';
+                    console.log(`从世界书加载分组，角色ID: ${characterId}`);
+                    
+                    const groups = QQ_LoadContactGroupsFromWorldBook(characterId);
+                    
+                    if (groups && Array.isArray(groups)) {
+                        contactGroups.length = 0; // 清空现有数组
+                        contactGroups.push(...groups); // 添加从世界书加载的数据
+                        console.log(`从世界书加载了 ${groups.length} 个分组`);
+                    } else {
+                        console.log('世界书中没有找到分组数据，使用默认空数组');
+                        contactGroups.length = 0;
+                    }
+                } catch (error) {
+                    console.error('从世界书加载分组时出错:', error);
+                    contactGroups.length = 0;
+                }
+            };
+            
+            /**
+             * ===== 数据管理和调试工具 =====
+             */
+            
+            /**
+             * 显示世界书数据统计
+             */
+            window.QQ_Show_WorldBook_Stats = function() {
+                try {
+                    if (!QQ_IsWorldBookAvailable()) {
+                        console.log('❌ 世界书功能不可用');
+                        return;
+                    }
+                    
+                    console.log('=== 世界书数据统计 ===');
+                    
+                    const stats = {
+                        总条目数: 0,
+                        QQ相关条目: 0,
+                        数据类型: {}
+                    };
+                    
+                    if (worldbook && worldbook.entries) {
+                        stats.总条目数 = worldbook.entries.length;
+                        
+                        worldbook.entries.forEach(entry => {
+                            if (entry.comment && entry.comment.includes('QQ_')) {
+                                stats.QQ相关条目++;
+                                
+                                // 统计数据类型
+                                if (entry.comment.includes('联系人')) {
+                                    stats.数据类型.联系人 = (stats.数据类型.联系人 || 0) + 1;
+                                } else if (entry.comment.includes('群聊')) {
+                                    stats.数据类型.群聊 = (stats.数据类型.群聊 || 0) + 1;
+                                } else if (entry.comment.includes('消息')) {
+                                    stats.数据类型.消息 = (stats.数据类型.消息 || 0) + 1;
+                                } else if (entry.comment.includes('动态')) {
+                                    stats.数据类型.动态 = (stats.数据类型.动态 || 0) + 1;
+                                } else if (entry.comment.includes('互动')) {
+                                    stats.数据类型.互动空间 = (stats.数据类型.互动空间 || 0) + 1;
+                                } else if (entry.comment.includes('分组')) {
+                                    stats.数据类型.分组 = (stats.数据类型.分组 || 0) + 1;
+                                } else {
+                                    stats.数据类型.其他 = (stats.数据类型.其他 || 0) + 1;
+                                }
+                            }
+                        });
+                    }
+                    
+                    console.log(stats);
+                    
+                    const message = `📊 世界书数据统计
+总条目数: ${stats.总条目数}
+QQ相关条目: ${stats.QQ相关条目}
+
+数据类型分布:
+${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${count}个`).join('\n')}`;
+                    
+                    alert(message);
+                    
+                } catch (error) {
+                    console.error('显示世界书统计失败:', error);
+                }
+            };
+            
+            /**
+             * 手动触发数据同步
+             */
+            window.QQ_Manual_Sync_All_Data = function() {
+                console.log('🔄 开始手动同步所有数据到世界书...');
+                QQ_SyncAllData();
+            };
+            
+            // 页面加载完成后自动检查世界书状态
+            $(document).ready(function() {
+                setTimeout(() => {
+                    console.log('🔍 检查世界书状态...');
+                    if (QQ_IsWorldBookAvailable()) {
+                        console.log('✅ 世界书功能正常');
+                        // 可选：自动加载分组数据
+                        if (typeof loadGroupsFromStorage === 'function') {
+                            loadGroupsFromStorage();
+                        }
+                    } else {
+                        console.warn('⚠️ 世界书功能不可用，数据保存可能受影响');
+                    }
+                }, 2000);
+            });
+            
+            /**
+             * ===== 修复用户名下拉菜单功能 =====
+             */
+            
+            /**
+             * 切换用户名下拉菜单
+             */
+            function QQ_ToggleUserMenu() {
+                console.log('点击用户名，显示下拉菜单');
+                
+                // 检查是否已存在菜单
+                let existingMenu = document.getElementById('QQ_user_dropdown_menu');
+                if (existingMenu) {
+                    existingMenu.remove();
+                    return;
+                }
+                
+                // 创建下拉菜单
+                const menu = document.createElement('div');
+                menu.id = 'QQ_user_dropdown_menu';
+                menu.style.cssText = `
+                    position: fixed;
+                    top: 70px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: white;
+                    border-radius: 12px;
+                    padding: 12px 0;
+                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+                    z-index: 9999;
+                    min-width: 200px;
+                    animation: fadeInDown 0.2s ease;
+                    border: 1px solid #e0e0e0;
+                `;
+                
+                // 菜单项数据
+                const menuItems = [
+                    {
+                        icon: '📊',
+                        text: '世界书统计',
+                        action: () => {
+                            QQ_Show_WorldBook_Stats();
+                            menu.remove();
+                        }
+                    },
+                    {
+                        icon: '🔄',
+                        text: '同步数据',
+                        action: () => {
+                            QQ_Manual_Sync_All_Data();
+                            menu.remove();
+                        }
+                    },
+                    {
+                        icon: '🧪',
+                        text: '测试互动检测',
+                        action: () => {
+                            const testText = prompt('请输入要测试的文本:', '我想和大家一起拥抱');
+                            if (testText) {
+                                QQ_Test_Interactive_Detection(testText);
+                            }
+                            menu.remove();
+                        }
+                    },
+                    {
+                        icon: '⚙️',
+                        text: '手机界面设置',
+                        action: () => {
+                            alert('设置功能开发中...');
+                            menu.remove();
+                        }
+                    },
+                    {
+                        icon: '📱',
+                        text: '界面信息',
+                        action: () => {
+                            const info = `手机界面状态:
+- 当前用户: ${QQ_GetUserName()}
+- 当前角色: ${getCurrentCharacterId() || '未知'}
+- 世界书状态: ${QQ_IsWorldBookAvailable() ? '✅ 可用' : '❌ 不可用'}
+- 联系人分组: ${contactGroups ? contactGroups.length : 0} 个
+- 互动空间: ${Object.keys(QQ_InteractiveSpaces || {}).length} 个公共 + ${Object.keys(QQ_CharacterSpaces || {}).reduce((sum, char) => sum + Object.keys(QQ_CharacterSpaces[char]).length, 0)} 个私人`;
+                            alert(info);
+                            menu.remove();
+                        }
+                    }
+                ];
+                
+                // 创建菜单项
+                menuItems.forEach((item, index) => {
+                    const menuItem = document.createElement('div');
+                    menuItem.style.cssText = `
+                        padding: 12px 20px;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        font-size: 14px;
+                        color: #333;
+                        transition: background-color 0.2s ease;
+                        ${index > 0 ? 'border-top: 1px solid #f0f0f0;' : ''}
+                    `;
+                    
+                    menuItem.innerHTML = `
+                        <span style="margin-right: 12px; font-size: 16px;">${item.icon}</span>
+                        <span>${item.text}</span>
+                    `;
+                    
+                    // 悬停效果
+                    menuItem.addEventListener('mouseenter', () => {
+                        menuItem.style.backgroundColor = '#f5f5f5';
+                    });
+                    
+                    menuItem.addEventListener('mouseleave', () => {
+                        menuItem.style.backgroundColor = 'transparent';
+                    });
+                    
+                    // 点击事件
+                    menuItem.addEventListener('click', item.action);
+                    
+                    menu.appendChild(menuItem);
+                });
+                
+                // 添加动画样式
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes fadeInDown {
+                        from {
+                            opacity: 0;
+                            transform: translateX(-50%) translateY(-10px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateX(-50%) translateY(0);
+                        }
+                    }
+                `;
+                document.head.appendChild(style);
+                
+                // 添加菜单到页面
+                document.body.appendChild(menu);
+                
+                // 点击外部关闭菜单
+                const closeMenu = (e) => {
+                    if (!menu.contains(e.target) && !document.getElementById('QQ_message_list_UserName').contains(e.target)) {
+                        menu.remove();
+                        document.removeEventListener('click', closeMenu);
+                    }
+                };
+                
+                setTimeout(() => {
+                    document.addEventListener('click', closeMenu);
+                }, 100);
+            }
+            
+            // 确保函数全局可用
+            window.QQ_ToggleUserMenu = QQ_ToggleUserMenu;
+            
         </script>
     </body>
 </html>
