@@ -6261,7 +6261,7 @@
                             const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
                             value += `\n${modifiedRequest}`;
                         } else {
-                            value += `\n${Request}`;
+                        value += `\n${Request}`;
                         }
                         const namevalue = QQ_GetValueName(value);
                         if (namevalue) {
@@ -6335,7 +6335,7 @@
                         const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
                         value += `\n${modifiedRequest}`;
                     } else {
-                        value += `\n${Request}`;
+                    value += `\n${Request}`;
                     }
                 }
                 console.log(
@@ -6386,8 +6386,8 @@
                             // 确保重试时设置gening状态
                             gening = true;
                             try {
-                                const retryResult = await QQ_Gen(QQ_LastRequest);
-                                return await ResultHandle(retryResult, true);
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
                             } finally {
                                 gening = false;
                             }
@@ -6674,6 +6674,182 @@
             // 全局变量管理互动空间
             let QQ_InteractiveSpaces = {}; // 存储所有公共互动空间数据
             let QQ_CharacterSpaces = {}; // 存储角色专属互动空间数据
+            
+            /**
+             * 确保角色互动空间的独立性
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_EnsureCharacterSpaceIndependence(characterName) {
+                if (!characterName || typeof characterName !== 'string') {
+                    console.warn('QQ_EnsureCharacterSpaceIndependence: 无效的角色名称', characterName);
+                    return false;
+                }
+                
+                // 确保每个角色都有独立的空间对象
+                if (!QQ_CharacterSpaces[characterName]) {
+                    QQ_CharacterSpaces[characterName] = {};
+                    console.log(`为角色 "${characterName}" 创建了独立的互动空间容器`);
+                }
+                
+                // 验证独立性 - 确保不会引用其他角色的数据
+                const characterSpace = QQ_CharacterSpaces[characterName];
+                const allCharacters = Object.keys(QQ_CharacterSpaces);
+                
+                for (const otherChar of allCharacters) {
+                    if (otherChar !== characterName && QQ_CharacterSpaces[otherChar] === characterSpace) {
+                        console.error(`检测到角色空间数据引用冲突: ${characterName} 和 ${otherChar} 共享同一个对象`);
+                        QQ_CharacterSpaces[characterName] = {};
+                        console.log(`已为角色 "${characterName}" 重新创建独立的空间对象`);
+                        break;
+                    }
+                }
+                
+                return true;
+            }
+            
+            /**
+             * 测试角色互动空间的独立性
+             * 用于调试和验证
+             */
+            function QQ_TestCharacterSpaceIndependence() {
+                console.log('=== 角色互动空间独立性测试 ===');
+                
+                // 创建测试角色
+                const testCharacters = ['角色A', '角色B', '角色C'];
+                
+                testCharacters.forEach(charName => {
+                    QQ_EnsureCharacterSpaceIndependence(charName);
+                });
+                
+                // 验证独立性
+                const spaces = {};
+                testCharacters.forEach(charName => {
+                    spaces[charName] = QQ_CharacterSpaces[charName];
+                });
+                
+                // 检查是否有引用冲突
+                let hasConflict = false;
+                for (let i = 0; i < testCharacters.length; i++) {
+                    for (let j = i + 1; j < testCharacters.length; j++) {
+                        const char1 = testCharacters[i];
+                        const char2 = testCharacters[j];
+                        if (spaces[char1] === spaces[char2]) {
+                            console.error(`检测到引用冲突: ${char1} 和 ${char2} 共享同一个对象`);
+                            hasConflict = true;
+                        }
+                    }
+                }
+                
+                if (!hasConflict) {
+                    console.log('✅ 所有角色的互动空间都是独立的');
+                } else {
+                    console.error('❌ 检测到角色互动空间数据引用冲突');
+                }
+                
+                // 测试添加数据的独立性
+                QQ_CharacterSpaces['角色A']['test_space_1'] = { id: 'test1', name: '测试空间A' };
+                QQ_CharacterSpaces['角色B']['test_space_2'] = { id: 'test2', name: '测试空间B' };
+                
+                if (QQ_CharacterSpaces['角色A']['test_space_2']) {
+                    console.error('❌ 数据泄露: 角色A 访问到了角色B的数据');
+                } else if (QQ_CharacterSpaces['角色B']['test_space_1']) {
+                    console.error('❌ 数据泄露: 角色B 访问到了角色A的数据');
+                } else {
+                    console.log('✅ 角色数据添加独立性测试通过');
+                }
+                
+                console.log('当前角色空间数据结构:', QQ_CharacterSpaces);
+                
+                return !hasConflict;
+            }
+            
+            /**
+             * 测试私聊界面名称点击功能
+             * 用于调试验证点击事件是否正常工作
+             */
+            function QQ_TestChatTitleClick() {
+                console.log('=== 私聊界面名称点击功能测试 ===');
+                
+                // 检查当前是否在私聊界面
+                const chatPage = document.querySelector('.QQ_chat_page');
+                if (!chatPage) {
+                    console.warn('当前不在聊天界面，无法测试点击功能');
+                    return false;
+                }
+                
+                // 查找聊天标题元素
+                const chatTitle = document.getElementById('QQ_chat_username');
+                if (!chatTitle) {
+                    console.error('❌ 找不到聊天标题元素 #QQ_chat_username');
+                    return false;
+                }
+                
+                console.log('✅ 找到聊天标题元素:', chatTitle);
+                console.log('标题文本:', chatTitle.textContent);
+                console.log('onclick属性:', chatTitle.getAttribute('onclick'));
+                
+                // 检查handleChatTitleClick函数是否存在
+                if (typeof handleChatTitleClick === 'function') {
+                    console.log('✅ handleChatTitleClick 函数存在');
+                } else {
+                    console.error('❌ handleChatTitleClick 函数不存在');
+                    return false;
+                }
+                
+                // 检查QQ_ShowCharacterInteractiveMenu函数是否存在
+                if (typeof QQ_ShowCharacterInteractiveMenu === 'function') {
+                    console.log('✅ QQ_ShowCharacterInteractiveMenu 函数存在');
+                } else {
+                    console.error('❌ QQ_ShowCharacterInteractiveMenu 函数不存在');
+                    return false;
+                }
+                
+                // 模拟点击测试
+                try {
+                    console.log('🔨 模拟点击聊天标题...');
+                    chatTitle.click();
+                    console.log('✅ 点击事件执行完成');
+                    
+                    // 检查是否出现了角色菜单
+                    setTimeout(() => {
+                        const menu = document.querySelector('.QQ_character_menu');
+                        if (menu) {
+                            console.log('✅ 角色互动菜单成功显示');
+                            console.log('菜单元素:', menu);
+                        } else {
+                            console.warn('⚠️ 点击后未显示角色互动菜单');
+                        }
+                    }, 100);
+                    
+                } catch (error) {
+                    console.error('❌ 点击测试失败:', error);
+                    return false;
+                }
+                
+                return true;
+            }
+            
+            /**
+             * 调试私聊界面点击功能 - 手动调用菜单显示
+             * 用于在控制台手动测试
+             */
+            function QQ_DebugShowCharacterMenu() {
+                console.log('=== 手动测试角色互动菜单 ===');
+                
+                // 检查当前聊天界面的角色名称
+                const chatTitle = document.getElementById('QQ_chat_username');
+                if (!chatTitle) {
+                    console.error('找不到聊天标题元素');
+                    return;
+                }
+                
+                const characterName = chatTitle.textContent.trim();
+                console.log('当前角色名称:', characterName);
+                
+                // 直接调用菜单显示函数
+                QQ_ShowCharacterInteractiveMenu(characterName, chatTitle);
+            }
+            
             let QQ_ActiveSpaceId = null; // 当前活动的互动空间ID
             let QQ_SpiritVisible = false; // 精灵按钮是否可见
             const QQ_INTERACTIVE_BACKUP_KEY = "QQ_互动空间备份";
@@ -6964,10 +7140,8 @@
                 const spaceName = `${charName}·${QQ_GetSceneFromContent(content)}`;
                 const charAvatar = charAvatarPath || "default_avatar.png";
                 
-                // 初始化角色专属空间数据
-                if (!QQ_CharacterSpaces[charName]) {
-                    QQ_CharacterSpaces[charName] = {};
-                }
+                // 使用独立性检查初始化角色专属空间数据
+                QQ_EnsureCharacterSpaceIndependence(charName);
                 
                 // 保存到角色专属空间
                 QQ_CharacterSpaces[charName][spaceId] = {
@@ -7276,12 +7450,41 @@
              * @param {HTMLElement} element - 点击的元素
              */
             function QQ_ShowCharacterInteractiveMenu(characterName, element) {
+                console.log(`=== QQ_ShowCharacterInteractiveMenu 被调用 ===`);
+                console.log('角色名称:', characterName);
+                console.log('点击元素:', element);
+                console.log('QQ_CharacterSpaces 全局对象:', QQ_CharacterSpaces);
+                
+                // 确保角色名称有效
+                if (!characterName || typeof characterName !== 'string') {
+                    console.error('无效的角色名称:', characterName);
+                    toastr.error('无法获取角色信息');
+                    return;
+                }
+                
                 // 移除现有的菜单
                 $('.QQ_character_menu').remove();
                 
-                // 获取角色的互动空间列表
-                const characterSpaces = QQ_CharacterSpaces[characterName] || {};
+                // 使用独立性检查确保数据安全
+                if (!QQ_EnsureCharacterSpaceIndependence(characterName)) {
+                    console.error(`角色 ${characterName} 的互动空间独立性检查失败`);
+                    toastr.error('互动空间数据错误');
+                    return;
+                }
+                
+                // 获取角色的互动空间列表（确保独立性）
+                const characterSpaces = QQ_CharacterSpaces[characterName];
                 const spaceList = Object.values(characterSpaces);
+                
+                console.log(`角色 ${characterName} 的互动空间数量:`, spaceList.length);
+                console.log(`角色 ${characterName} 的互动空间数据:`, characterSpaces);
+                
+                // 验证每个空间数据的完整性
+                spaceList.forEach((space, index) => {
+                    if (!space.id || !space.name || !space.characterName) {
+                        console.warn(`角色 ${characterName} 的第 ${index} 个互动空间数据不完整:`, space);
+                    }
+                });
                 
                 // 创建菜单HTML
                 const menuHtml = `
@@ -7354,10 +7557,41 @@
                                 color: #999;
                             ">
                                 <div style="font-size: 48px; margin-bottom: 10px;">🌟</div>
-                                <div style="font-size: 14px;">还没有互动记录</div>
-                                <div style="font-size: 12px; margin-top: 5px;">开始一段现实互动吧～</div>
+                                <div style="font-size: 14px; margin-bottom: 5px;">还没有互动记录</div>
+                                <div style="font-size: 12px; color: #bbb;">开始一段现实互动吧～</div>
                             </div>
                         `}
+                        
+                        <div class="new-space-action" style="
+                            padding: 12px 20px;
+                            border-top: 1px solid #f0f0f0;
+                            cursor: pointer;
+                            transition: background-color 0.2s ease;
+                            display: flex;
+                            align-items: center;
+                            gap: 10px;
+                            background: linear-gradient(90deg, #fff5f5 0%, #fff8f8 100%);
+                        " onmouseover="this.style.backgroundColor='#f0f9ff'" 
+                           onmouseout="this.style.backgroundColor='transparent'">
+                            <div style="
+                                width: 24px;
+                                height: 24px;
+                                border-radius: 50%;
+                                background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                color: white;
+                                font-size: 14px;
+                                font-weight: bold;
+                                flex-shrink: 0;
+                            ">+</div>
+                            <div style="
+                                font-size: 14px;
+                                font-weight: 500;
+                                color: #FF6B6B;
+                            ">创建新的互动空间</div>
+                        </div>
                         
                         <div class="menu-footer" style="
                             padding: 15px 20px;
@@ -7436,10 +7670,19 @@
                         e.stopPropagation();
                         
                         const spaceItem = e.target.closest('.space-item');
+                        const newSpaceAction = e.target.closest('.new-space-action');
+                        
                         if (spaceItem) {
+                            // 点击现有互动空间
                             const spaceId = spaceItem.getAttribute('data-space-id');
+                            console.log(`点击查看互动空间: ${spaceId}`);
                             QQ_DisplayCharacterSpace(spaceId, characterName);
                             $('.QQ_character_menu').remove();
+                        } else if (newSpaceAction) {
+                            // 点击创建新互动空间
+                            console.log(`为角色 ${characterName} 创建新的互动空间`);
+                            $('.QQ_character_menu').remove();
+                            QQ_ShowCharacterInteractiveSpace(characterName);
                         }
                         
                         if (e.target.classList.contains('close-menu-btn')) {
@@ -7680,7 +7923,7 @@
                     QQ_CharacterSpaces = {};
                 }
             }
-            
+
             /**
              * 在手机界面显示互动空间
              * @param {string} content - 互动内容
@@ -7912,7 +8155,7 @@
              */
             function QQ_CloseInteractiveSpace() {
                 $('.QQ_interactive_space').fadeOut(300, function() {
-                    $(this).remove();
+                            $(this).remove();
                     // 显示精灵按钮
                     QQ_ShowSpiritButton();
                 });
@@ -9059,7 +9302,7 @@ ${index + 1}. ${space.name}
                 alert(details);
                 return result;
             };
-
+            
             function QQ_UpdateNewTips() {
                 // 刷新左上角未读信息数字
                 let ids = $(".QQ_chat_page")
@@ -16344,32 +16587,32 @@ ${index + 1}. ${space.name}
                 const isGroupChat = checkIfGroupChat(chatName);
                 if (isGroupChat) {
                     // 群聊逻辑
-                    const cleanGroupName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
-                    
-                    // 从QQ_msgjson.群聊中获取群聊数据
-                    let groupData = null;
-                    if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[cleanGroupName]) {
-                        const msgGroupData = QQ_msgjson.群聊[cleanGroupName];
-                        groupData = {
-                            name: cleanGroupName,
-                            members: msgGroupData.members || [],
-                            avatar: 'https://files.catbox.moe/skngqq.jpg' // 默认头像
-                        };
-                    }
-                    
-                    // 如果没有找到群聊数据，创建一个基本的数据结构
-                    if (!groupData) {
-                        groupData = {
-                            name: cleanGroupName,
-                            members: ['成员1', '成员2', '成员3'], // 示例成员
-                            avatar: 'https://files.catbox.moe/skngqq.jpg'
-                        };
-                        console.warn(`群聊 ${cleanGroupName} 数据未找到，使用默认数据`);
-                    }
-                    
-                    // 调用群聊管理菜单
-                    console.log('显示群聊管理菜单:', groupData);
-                    showGroupManagementMenu(groupData, element);
+                const cleanGroupName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
+                
+                // 从QQ_msgjson.群聊中获取群聊数据
+                let groupData = null;
+                if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[cleanGroupName]) {
+                    const msgGroupData = QQ_msgjson.群聊[cleanGroupName];
+                    groupData = {
+                        name: cleanGroupName,
+                        members: msgGroupData.members || [],
+                        avatar: 'https://files.catbox.moe/skngqq.jpg' // 默认头像
+                    };
+                }
+                
+                // 如果没有找到群聊数据，创建一个基本的数据结构
+                if (!groupData) {
+                    groupData = {
+                        name: cleanGroupName,
+                        members: ['成员1', '成员2', '成员3'], // 示例成员
+                        avatar: 'https://files.catbox.moe/skngqq.jpg'
+                    };
+                    console.warn(`群聊 ${cleanGroupName} 数据未找到，使用默认数据`);
+                }
+                
+                // 调用群聊管理菜单
+                console.log('显示群聊管理菜单:', groupData);
+                showGroupManagementMenu(groupData, element);
                 } else {
                     // 私聊逻辑 - 显示角色专属互动空间菜单
                     console.log('这是私聊，显示角色互动空间菜单');
