@@ -4939,6 +4939,10 @@
             let QQ_Groups = [];
             // 确保QQ_Groups作为全局变量可访问
             window.QQ_Groups = QQ_Groups;
+            
+            // *** 新增：群聊初始消息防重复机制 ***
+            let QQ_GroupInitializedSet = new Set(); // 记录已初始化过初始消息的群聊
+            window.QQ_GroupInitializedSet = QQ_GroupInitializedSet;
             let gening;
             let worldbook;
             let entries;
@@ -15287,23 +15291,37 @@ ${index + 1}. ${space.name}
             function addGroupWelcomeMessages(groupName, members) {
                 console.log(`addGroupWelcomeMessages 被调用: ${groupName}`);
                 
+                // *** 第一层检查：Session级防重复机制 ***
+                if (QQ_GroupInitializedSet.has(groupName)) {
+                    console.log(`群聊 ${groupName} 在当前会话中已初始化过，跳过添加`);
+                    return;
+                }
+                
                 if (!QQ_msgjson.群聊[groupName]) {
                     QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
                 }
                 
                 const groupData = QQ_msgjson.群聊[groupName];
                 
-                // *** 修复：检查是否已有系统初始消息，避免重复添加 ***
-                const hasInitialMessages = groupData.msgs.some(msg => 
-                    msg.startsWith('系统消息--') && (
-                        msg.includes('创建成功') || 
-                        msg.includes('加入了群聊') ||
-                        /系统消息--\d{2}:\d{2}--\d{2}:\d{2}$/.test(msg)
-                    )
-                );
+                // *** 第二层检查：更严格的检查是否已有系统初始消息，避免重复添加 ***
+                const hasInitialMessages = groupData.msgs.some(msg => {
+                    if (!msg.startsWith('系统消息--')) return false;
+                    
+                    // 检查消息内容部分（第二个--分隔的部分）
+                    const parts = msg.split('--');
+                    if (parts.length < 2) return false;
+                    
+                    const content = parts[1];
+                    return content.includes('创建成功') || 
+                           content.includes('加入了群聊') ||
+                           /^\d{2}:\d{2}$/.test(content); // 纯时间消息格式
+                });
                 
                 if (hasInitialMessages) {
                     console.log(`群聊 ${groupName} 已有系统初始消息，跳过添加`);
+                    console.log(`现有消息列表:`, groupData.msgs.slice(0, 5)); // 显示前5条消息便于调试
+                    // 标记为已初始化，避免后续重复检查
+                    QQ_GroupInitializedSet.add(groupName);
                     return;
                 }
                 
@@ -15335,6 +15353,9 @@ ${index + 1}. ${space.name}
                 
                 // *** 新增：立即更新群聊的最后消息和时间显示 ***
                 updateGroupLastMessageDisplay(groupName);
+                
+                // *** 新增：标记群聊已初始化，避免重复添加 ***
+                QQ_GroupInitializedSet.add(groupName);
                 
                 console.log(`为群聊 ${groupName} 生成了 ${groupData.msgs.length} 条新的初始消息。`);
             }
