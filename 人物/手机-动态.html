@@ -22867,10 +22867,16 @@ msg_end
                     console.log('开始更新所有群聊的最后消息显示...');
                     try {
                         const groups = await loadGroupsFromStorage();
-                        groups.forEach(groupData => {
-                            updateGroupLastMessageDisplay(groupData.name);
-                        });
-                        console.log('所有群聊最后消息显示更新完成');
+                        if (groups && Array.isArray(groups)) {
+                            groups.forEach(groupData => {
+                                if (groupData && groupData.name) {
+                                    updateGroupLastMessageDisplay(groupData.name);
+                                }
+                            });
+                            console.log('所有群聊最后消息显示更新完成');
+                        } else {
+                            console.warn('群聊数据无效，跳过最后消息显示更新');
+                        }
                     } catch (error) {
                         console.error('更新群聊最后消息显示时出错:', error);
                     }
@@ -28287,7 +28293,8 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     momentsDataCheck: false,
                     functionsCheck: false,
                     nextVariableCheck: false,
-                    arrayOperationsCheck: false
+                    arrayOperationsCheck: false,
+                    groupsDataCheck: false
                 };
                 
                 try {
@@ -28299,8 +28306,30 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         console.warn('⚠️ QQ_MomentsData 未定义或不是数组:', typeof QQ_MomentsData);
                     }
                     
+                    // 检查群聊相关数据
+                    console.log('🧪 检查群聊数据结构...');
+                    if (typeof loadGroupsFromStorage === 'function') {
+                        console.log('✅ loadGroupsFromStorage 函数已定义');
+                        try {
+                            loadGroupsFromStorage().then(groups => {
+                                if (groups && Array.isArray(groups)) {
+                                    console.log('✅ 群聊数据加载正常，数量:', groups.length);
+                                } else {
+                                    console.warn('⚠️ 群聊数据无效:', groups);
+                                }
+                            }).catch(e => {
+                                console.warn('⚠️ 群聊数据加载失败:', e);
+                            });
+                        } catch (e) {
+                            console.warn('⚠️ 群聊数据同步检查失败:', e);
+                        }
+                        results.groupsDataCheck = true;
+                    } else {
+                        console.warn('⚠️ loadGroupsFromStorage 函数未定义');
+                    }
+                    
                     // 检查关键函数
-                    const functionList = ['QQ_Save_Moments', 'QQ_CleanOldMoments', 'QQ_OptimizeCommentsStorage', 'QQ_SendMsg'];
+                    const functionList = ['QQ_Save_Moments', 'QQ_CleanOldMoments', 'QQ_OptimizeCommentsStorage', 'QQ_SendMsg', 'updateGroupLastMessageDisplay'];
                     let allFunctionsExist = true;
                     functionList.forEach(funcName => {
                         if (typeof window[funcName] === 'function') {
@@ -28357,6 +28386,15 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         console.error('❌ 清理函数测试失败:', e);
                     }
                     
+                    // 添加错误监听器来捕获运行时错误
+                    window.addEventListener('error', function(e) {
+                        if (e.message.includes('next is not defined')) {
+                            console.error('🚨 捕获到next未定义错误:', e);
+                            console.error('错误位置:', e.filename, '行号:', e.lineno);
+                            console.error('错误堆栈:', e.error ? e.error.stack : '无堆栈信息');
+                        }
+                    });
+                    
                 } catch (error) {
                     console.error('❌ 错误检查过程中出现异常:', error);
                 }
@@ -28372,11 +28410,64 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 return results;
             };
             
+            /**
+             * *** 新增：专门检查QQ_SendMsg函数的错误 ***
+             */
+            window.QQ_Debug_SendMsg = function() {
+                console.log('=== 🔧 QQ_SendMsg 调试开始 ===');
+                
+                try {
+                    // 检查QQ_SendMsg函数定义
+                    if (typeof QQ_SendMsg === 'function') {
+                        console.log('✅ QQ_SendMsg 函数已定义');
+                        
+                        // 获取函数源码并检查是否有next引用
+                        const funcStr = QQ_SendMsg.toString();
+                        if (funcStr.includes('next(') || funcStr.includes('next;')) {
+                            console.warn('⚠️ QQ_SendMsg 函数中可能包含next变量引用');
+                            
+                            // 尝试找到next引用的位置
+                            const lines = funcStr.split('\n');
+                            lines.forEach((line, index) => {
+                                if (line.includes('next') && !line.includes('.next(')) {
+                                    console.warn(`⚠️ 第${index + 1}行可能有问题: ${line.trim()}`);
+                                }
+                            });
+                        } else {
+                            console.log('✅ QQ_SendMsg 函数中未发现直接的next变量引用');
+                        }
+                    } else {
+                        console.error('❌ QQ_SendMsg 函数未定义');
+                        return;
+                    }
+                    
+                    // 检查QQ_SendMsg可能使用的全局变量
+                    const globalVars = ['QQ_msgjson', 'QQ_Groups', 'UserName', 'targetGroupName'];
+                    globalVars.forEach(varName => {
+                        if (typeof window[varName] !== 'undefined') {
+                            console.log(`✅ 全局变量 ${varName} 已定义`);
+                        } else {
+                            console.warn(`⚠️ 全局变量 ${varName} 未定义`);
+                        }
+                    });
+                    
+                } catch (error) {
+                    console.error('❌ QQ_SendMsg 调试过程中出现异常:', error);
+                }
+                
+                console.log('=== ✅ QQ_SendMsg 调试完成 ===');
+            };
+            
             // 页面加载完成后自动执行一次检查
             $(document).ready(function() {
                 setTimeout(() => {
                     console.log('🔍 自动执行错误检查...');
                     QQ_Check_Errors();
+                    
+                    // 额外执行QQ_SendMsg调试
+                    setTimeout(() => {
+                        QQ_Debug_SendMsg();
+                    }, 1000);
                 }, 3000);
             });
             
