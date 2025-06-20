@@ -6709,46 +6709,26 @@
                 ];
                 
                 if (matches.length == 0) {
-                    // *** 修复：AI没有回复线上格式 - 这是触发互动内容的第一种情况 ***
-                    console.log("AI没有回复线上格式，检查是否应该触发互动内容");
+                    // *** 惊喜机制：AI没有回复线上格式 - 直接触发互动内容（不需要检查用户是否主动触发） ***
+                    console.log("AI没有回复线上格式，启动惊喜机制");
                     
-                    // 这是用户要求的第一种情况：AI没有回复线上格式时，才可能触发互动内容
-                    if (QQ_UserTriggeredInteractive) {
-                        console.log("用户之前主动触发了互动，AI没有线上格式回复被视为互动内容");
-                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
-                        QQ_ResetRetry();
-                        return;
-                    }
+                    // 先显示失败警告，让用户以为失败了
+                    triggerSlash("/echo AI没有回复线上格式，处理中...");
                     
-                    // 使用重试机制
-                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
-                        QQ_RetryCount++;
-                        console.log(`AI没有回复线上格式，开始第${QQ_RetryCount}次重试`);
-                        triggerSlash(`/echo AI格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
-                        
-                        if (QQ_LastRequest) {
-                            // 重要：设置gening状态和异步执行重试
-                            gening = true;
-                            try {
-                                // 添加延迟避免过快重试（防止缓存问题）
-                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                                const retryResult = await QQ_Gen(QQ_LastRequest);
-                                return await ResultHandle(retryResult, true);
-                            } finally {
-                                gening = false;
-                            }
-                        }
-                    } else {
-                        // 重试用完，判断是否为互动内容
-                        if (QQ_IsInteractiveContent(result)) {
-                            // 在手机界面显示互动内容
+                    // 延迟一点时间，然后惊喜地显示互动空间
+                    setTimeout(async () => {
+                        console.log("🎉 惊喜！显示互动空间而不是失败信息");
+                        // 检查是否真的是互动内容（使用惊喜机制检查）
+                        if (QQ_IsInteractiveContent(result, true)) {
                             QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         } else {
+                            // 如果不是互动内容，则输出到新楼层
                             triggerSlash("/echo AI没有回复线上格式,原文直接输出到新楼层");
                             triggerSlash(`/sendas name={{char}} ${result}`);
                         }
                         QQ_ResetRetry();
-                    }
+                    }, 1500); // 1.5秒延迟，让用户先看到"失败"消息
+                    
                     return;
                 } else if (matches.length > 1) {
                     // 回复了多个线上格式 - 使用重试机制
@@ -7024,23 +7004,29 @@
 
             /**
              * *** 修复版：严格的互动内容检测 ***
-             * 只有在特定情况下才认为是互动内容：
-             * 1. AI没有回复线上格式时，用户之前主动触发了互动
+             * 三种触发互动内容的情况：
+             * 1. AI没有回复线上格式时（惊喜机制，不需要检查用户主动触发）
              * 2. 用户发送了&&特殊符号
              * 3. 用户打开了关键词触发，并输入了对应关键词
              * @param {string} content - AI回复的内容
+             * @param {boolean} isNoFormatResponse - 是否为AI没有回复线上格式的情况
              * @returns {boolean} 是否为互动内容
              */
-            function QQ_IsInteractiveContent(content) {
-                // *** 关键修复：不再仅仅因为有content标签就认为是互动内容 ***
-                // 只有在用户主动触发互动的情况下，才检查content标签
+            function QQ_IsInteractiveContent(content, isNoFormatResponse = false) {
+                // *** 惊喜机制：AI没有回复线上格式时，如果有content标签则直接认为是互动内容 ***
+                if (isNoFormatResponse && QQ_HasContentTag(content)) {
+                    console.log('🎉 AI没有回复线上格式且有content标签，惊喜机制触发互动内容');
+                    return true;
+                }
+                
+                // *** 用户主动触发：只有在用户主动触发互动的情况下，才检查content标签 ***
                 if (QQ_UserTriggeredInteractive && QQ_HasContentTag(content)) {
                     console.log('🎯 用户主动触发互动且AI回复包含content标签，识别为互动内容');
                     return true;
                 }
                 
-                // 如果用户没有主动触发互动，则不认为是互动内容
-                if (!QQ_UserTriggeredInteractive) {
+                // 如果用户没有主动触发互动且不是惊喜机制，则不认为是互动内容
+                if (!QQ_UserTriggeredInteractive && !isNoFormatResponse) {
                     return false;
                 }
                 
@@ -17653,22 +17639,33 @@ msg_end
                     console.log(`📝 "${input}": ${result ? `${result.triggerType} - ${result.description}` : '无互动意图'}`);
                 });
                 
-                // 5. 显示总结
+                // 5. 测试惊喜机制
+                console.log('\n📋 测试5: 惊喜机制');
+                QQ_UserTriggeredInteractive = false;  // 确保用户没有主动触发
+                const surpriseResult = QQ_IsInteractiveContent(normalChatContent, true);  // 模拟AI没有回复线上格式
+                console.log(`🎉 惊喜机制(AI没有回复格式): ${surpriseResult ? '✅ 正确触发互动' : '❌ 未能触发惊喜'}`);
+                
+                // 6. 显示总结
                 console.log('\n📊 修复总结:');
                 console.log('✅ 只有以下情况才会触发互动内容:');
-                console.log('   1. AI没有回复线上格式 + 用户之前主动触发');
+                console.log('   1. AI没有回复线上格式时（惊喜机制，不需要用户主动触发）');
                 console.log('   2. 用户发送了&&特殊符号');
                 console.log('   3. 用户开启关键词触发并输入对应关键词');
                 console.log('❌ 以下情况不再会误触发:');
-                console.log('   - AI正常回复包含<content>标签');
+                console.log('   - AI正常回复包含<content>标签（但用户没有主动触发）');
                 console.log('   - 用户普通聊天消息');
                 console.log('   - 系统自动生成的内容');
+                console.log('\n🎉 惊喜机制流程:');
+                console.log('   1. AI没有回复线上格式');
+                console.log('   2. 先显示"AI没有回复线上格式，处理中..."让用户以为失败');
+                console.log('   3. 延迟1.5秒后，如果有<content>标签则惊喜显示互动空间');
                 
                 return {
                     normalChatMisdetection: normalResult,
                     userTriggeredDetection: triggerResult,
+                    surpriseMechanismWorking: surpriseResult,
                     resetWorking: !QQ_UserTriggeredInteractive,
-                    testPassed: !normalResult && triggerResult && !QQ_UserTriggeredInteractive
+                    testPassed: !normalResult && triggerResult && surpriseResult && !QQ_UserTriggeredInteractive
                 };
             }
             
