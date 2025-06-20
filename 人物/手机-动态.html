@@ -22817,7 +22817,8 @@ msg_end
              */
             const originalQQGen = window.QQ_Gen;
             if (originalQQGen) {
-                window.QQ_Gen = async function(prompt) {
+                            window.QQ_Gen = async function(prompt, callback) {
+                try {
                     // 如果在群聊中，添加隔离信息
                     if (window.currentGroupChat) {
                         const groupName = window.currentGroupChat.name;
@@ -22834,8 +22835,29 @@ msg_end
                     const result = await originalQQGen(prompt);
                     
                     // 对结果进行群聊过滤
-                    return filterGroupChatResponse(result);
-                };
+                    const filteredResult = filterGroupChatResponse(result);
+                    
+                    // 如果提供了回调函数，调用它
+                    if (typeof callback === 'function') {
+                        await callback(filteredResult);
+                    }
+                    
+                    return filteredResult;
+                } catch (error) {
+                    console.error('QQ_Gen执行错误:', error);
+                    
+                    // 如果提供了回调函数，也要通知错误
+                    if (typeof callback === 'function') {
+                        try {
+                            await callback(null, error);
+                        } catch (callbackError) {
+                            console.error('回调函数执行错误:', callbackError);
+                        }
+                    }
+                    
+                    throw error;
+                }
+            };
             }
             
             // ==================== 页面初始化增强 ====================
@@ -28311,15 +28333,24 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     if (typeof loadGroupsFromStorage === 'function') {
                         console.log('✅ loadGroupsFromStorage 函数已定义');
                         try {
-                            loadGroupsFromStorage().then(groups => {
-                                if (groups && Array.isArray(groups)) {
-                                    console.log('✅ 群聊数据加载正常，数量:', groups.length);
-                                } else {
-                                    console.warn('⚠️ 群聊数据无效:', groups);
-                                }
-                            }).catch(e => {
-                                console.warn('⚠️ 群聊数据加载失败:', e);
-                            });
+                            const groupsResult = loadGroupsFromStorage();
+                            if (groupsResult && typeof groupsResult.then === 'function') {
+                                // 如果返回Promise
+                                groupsResult.then(groups => {
+                                    if (groups && Array.isArray(groups)) {
+                                        console.log('✅ 群聊数据加载正常，数量:', groups.length);
+                                    } else {
+                                        console.warn('⚠️ 群聊数据无效:', groups);
+                                    }
+                                }).catch(e => {
+                                    console.warn('⚠️ 群聊数据加载失败:', e);
+                                });
+                            } else if (Array.isArray(groupsResult)) {
+                                // 如果直接返回数组
+                                console.log('✅ 群聊数据加载正常（同步），数量:', groupsResult.length);
+                            } else {
+                                console.warn('⚠️ loadGroupsFromStorage 返回值无效:', typeof groupsResult);
+                            }
                         } catch (e) {
                             console.warn('⚠️ 群聊数据同步检查失败:', e);
                         }
@@ -28441,21 +28472,45 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         return;
                     }
                     
-                    // 检查QQ_SendMsg可能使用的全局变量
-                    const globalVars = ['QQ_msgjson', 'QQ_Groups', 'UserName', 'targetGroupName'];
-                    globalVars.forEach(varName => {
-                        if (typeof window[varName] !== 'undefined') {
-                            console.log(`✅ 全局变量 ${varName} 已定义`);
-                        } else {
-                            console.warn(`⚠️ 全局变量 ${varName} 未定义`);
-                        }
-                    });
-                    
                 } catch (error) {
                     console.error('❌ QQ_SendMsg 调试过程中出现异常:', error);
                 }
                 
                 console.log('=== ✅ QQ_SendMsg 调试完成 ===');
+            };
+            
+            /**
+             * *** 新增：修复QQ_Gen回调函数问题 ***
+             */
+            window.QQ_Fix_Next_Error = function() {
+                console.log('=== 🔧 修复QQ_Gen回调函数问题开始 ===');
+                
+                try {
+                    // 检查QQ_Gen函数是否正确支持回调
+                    if (typeof QQ_Gen === 'function') {
+                        const funcStr = QQ_Gen.toString();
+                        if (funcStr.includes('callback')) {
+                            console.log('✅ QQ_Gen函数已正确支持回调参数');
+                        } else {
+                            console.warn('⚠️ QQ_Gen函数可能不支持回调参数');
+                        }
+                    }
+                    
+                    // 验证测试一个简单的QQ_Gen调用
+                    console.log('🧪 测试QQ_Gen回调功能...');
+                    if (typeof QQ_Gen === 'function') {
+                        QQ_Gen('测试提示词', function(response) {
+                            console.log('✅ QQ_Gen回调测试成功，收到响应:', response ? '有响应' : '无响应');
+                        }).catch(error => {
+                            console.warn('⚠️ QQ_Gen回调测试失败:', error);
+                        });
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 修复QQ_Gen回调函数问题过程中出现异常:', error);
+                }
+                
+                console.log('=== ✅ 修复QQ_Gen回调函数问题完成 ===');
             };
             
             // 页面加载完成后自动执行一次检查
@@ -28464,9 +28519,10 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     console.log('🔍 自动执行错误检查...');
                     QQ_Check_Errors();
                     
-                    // 额外执行QQ_SendMsg调试
+                    // 额外执行调试和修复
                     setTimeout(() => {
                         QQ_Debug_SendMsg();
+                        QQ_Fix_Next_Error();
                     }, 1000);
                 }, 3000);
             });
