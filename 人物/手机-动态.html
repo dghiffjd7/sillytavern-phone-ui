@@ -6929,8 +6929,26 @@
                     }
                     return;
                 } else {
+                    // *** 修复：处理包含多种内容类型的AI回复 ***
                     result = matches[0][1];
+                    
+                    // 先应用智能提取，确保不遗漏任何内容
+                    console.log("🔍 标准格式中可能包含多种内容，进行智能提取验证");
+                    const extractedInfo = QQ_ExtractValidInfo(result);
+                    
+                    if (extractedInfo.hasValidInfo) {
+                        console.log("✅ 在标准格式中发现额外的有效信息");
+                        console.log("提取的额外信息:", extractedInfo);
+                        
+                        // 将提取的信息转换为标准格式并处理
+                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                        if (convertedResult) {
+                            console.log("✅ 处理标准格式中的额外内容");
+                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                        }
+                    }
                 }
+                
                 let ok = false;
                 if (
                     result.indexOf("msg_start") < 0 ||
@@ -7272,46 +7290,76 @@
                     dynamics: []        // 动态内容
                 };
                 
-                // 1. 提取群聊信息 <群聊:群名>...</群聊:群名>
-                const groupMatches = content.match(/<群聊:([^>]+)>([\s\S]*?)<\/群聊:[^>]*>/g);
-                if (groupMatches && groupMatches.length > 0) {
-                    console.log("✅ 找到群聊信息", groupMatches.length);
+                // 1. 提取群聊信息 - 增强版：支持多种群聊格式
+                const groupPatterns = [
+                    // 标准格式：<群聊:群名>...</群聊:群名>
+                    /<群聊:([^>]+)>([\s\S]*?)<\/群聊:[^>]*>/g,
+                    // 简化格式：<群聊:群名>内容（可能没有结束标签）
+                    /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    // 更宽松的格式：检测群聊内容
+                    /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                ];
+                
+                let groupMatches = [];
+                for (const pattern of groupPatterns) {
+                    const matches = [...content.matchAll(pattern)];
+                    if (matches.length > 0) {
+                        groupMatches = matches;
+                        console.log(`✅ 找到群聊信息 (使用模式: ${pattern.source.substring(0, 50)}...)`, matches.length);
+                        break;
+                    }
+                }
+                
+                if (groupMatches.length > 0) {
                     extractedInfo.hasValidInfo = true;
                     extractedInfo.chatType = 'group';
                     
                     for (const match of groupMatches) {
-                        const groupContent = match.match(/<群聊:([^>]+)>([\s\S]*?)<\/群聊:[^>]*>/);
-                        if (groupContent) {
-                            extractedInfo.chatName = groupContent[1];
-                            console.log(`群聊名: ${extractedInfo.chatName}`);
-                            
-                            // 提取群聊中的消息
-                            const messages = QQ_ExtractMessagesFromContent(groupContent[2]);
-                            extractedInfo.messages = messages;
-                            console.log(`提取到 ${messages.length} 条群聊消息`);
-                        }
+                        extractedInfo.chatName = match[1];
+                        console.log(`群聊名: ${extractedInfo.chatName}`);
+                        
+                        // 提取群聊中的消息
+                        const messages = QQ_ExtractMessagesFromContent(match[2]);
+                        extractedInfo.messages = extractedInfo.messages.concat(messages);
+                        console.log(`从当前群聊提取到 ${messages.length} 条消息`);
+                    }
+                    console.log(`总共提取到 ${extractedInfo.messages.length} 条群聊消息`);
+                }
+                
+                // 2. 提取私聊信息 - 增强版：支持多种私聊格式
+                const privatePatterns = [
+                    // 标准格式：<xxx和yyy的私聊>...</xxx和yyy的私聊>
+                    /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)<\/[^>]*和[^>]*的(?:私聊|聊天)>/g,
+                    // 简化格式：<xxx和yyy的私聊>内容（可能没有结束标签）
+                    /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    // 更宽松的格式：捕获任何包含"和"的标签
+                    /<([^>]*和[^>]*(?:私聊|聊天)[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                ];
+                
+                let privateMatches = [];
+                for (const pattern of privatePatterns) {
+                    const matches = [...content.matchAll(pattern)];
+                    if (matches.length > 0) {
+                        privateMatches = matches;
+                        console.log(`✅ 找到私聊信息 (使用模式: ${pattern.source.substring(0, 50)}...)`, matches.length);
+                        break;
                     }
                 }
                 
-                // 2. 提取私聊信息 <{{user}}和xxx的私聊>...</{{user}}和xxx的私聊>
-                const privateMatches = content.match(/<[^>]*和[^>]*的(?:私聊|聊天)>([\s\S]*?)<\/[^>]*和[^>]*的(?:私聊|聊天)>/g);
-                if (privateMatches && privateMatches.length > 0) {
-                    console.log("✅ 找到私聊信息", privateMatches.length);
+                if (privateMatches.length > 0) {
                     extractedInfo.hasValidInfo = true;
                     if (!extractedInfo.chatType) extractedInfo.chatType = 'private';
                     
                     for (const match of privateMatches) {
-                        const privateContent = match.match(/<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)<\/[^>]*和[^>]*的(?:私聊|聊天)>/);
-                        if (privateContent) {
-                            extractedInfo.chatName = privateContent[1];
-                            console.log(`私聊对象: ${extractedInfo.chatName}`);
-                            
-                            // 提取私聊中的消息
-                            const messages = QQ_ExtractMessagesFromContent(privateContent[2]);
-                            extractedInfo.privateMessages = messages;
-                            console.log(`提取到 ${messages.length} 条私聊消息`);
-                        }
+                        extractedInfo.chatName = match[1];
+                        console.log(`私聊对象: ${extractedInfo.chatName}`);
+                        
+                        // 提取私聊中的消息
+                        const messages = QQ_ExtractMessagesFromContent(match[2]);
+                        extractedInfo.privateMessages = extractedInfo.privateMessages.concat(messages);
+                        console.log(`从当前私聊提取到 ${messages.length} 条消息`);
                     }
+                    console.log(`总共提取到 ${extractedInfo.privateMessages.length} 条私聊消息`);
                 }
                 
                 // 3. 提取动态内容（如果存在）
@@ -7340,6 +7388,9 @@
             function QQ_ExtractMessagesFromContent(content) {
                 const messages = [];
                 
+                // 先清理内容，移除HTML注释和多余的空白
+                content = QQ_CleanMessageContent(content);
+                
                 // 匹配各种可能的消息格式
                 const patterns = [
                     // 标准格式: 角色名--时间--消息内容
@@ -7347,34 +7398,68 @@
                     // 简化格式: 角色名: 消息内容
                     /([^:\n]+):\s*(.+?)(?=\n[^:\n]+:|\n*$)/gs,
                     // 更松散的格式匹配
-                    /(.+?)说[：:]\s*(.+?)(?=\n.+?说[：:]|\n*$)/gs
+                    /(.+?)说[：:]\s*(.+?)(?=\n.+?说[：:]|\n*$)/gs,
+                    // 新增：基于换行的简单格式匹配
+                    /([^\n]+)\n([^\n]+)(?=\n[^\n]+\n|$)/gs,
+                    // 新增：直接文本格式（没有角色名的情况）
+                    /^(.+)$/gm
                 ];
+                
+                console.log('准备提取消息的内容:', content.substring(0, 200) + '...');
                 
                 for (const pattern of patterns) {
                     const matches = [...content.matchAll(pattern)];
                     if (matches.length > 0) {
-                        console.log(`使用模式匹配到 ${matches.length} 条消息: ${pattern.source}`);
+                        console.log(`使用模式匹配到 ${matches.length} 条消息: ${pattern.source.substring(0, 50)}...`);
+                        
                         for (const match of matches) {
+                            let name, time, msg;
+                            
                             if (pattern.source.includes('--')) {
-                                // 标准格式
-                                messages.push({
-                                    name: match[1].trim(),
-                                    time: match[2].trim(),
-                                    msg: match[3].trim()
-                                });
+                                // 标准格式: 角色名--时间--消息内容
+                                name = match[1].trim();
+                                time = match[2].trim();
+                                msg = match[3].trim();
+                            } else if (pattern.source.includes(':')) {
+                                // 冒号格式: 角色名: 消息内容
+                                name = match[1].trim();
+                                time = new Date().toLocaleTimeString('zh-CN', {hour12: false, hour: '2-digit', minute: '2-digit'});
+                                msg = match[2].trim();
+                            } else if (pattern.source.includes('说')) {
+                                // 说话格式: 角色名说: 内容
+                                name = match[1].trim();
+                                time = new Date().toLocaleTimeString('zh-CN', {hour12: false, hour: '2-digit', minute: '2-digit'});
+                                msg = match[2].trim();
+                            } else if (match.length === 3) {
+                                // 两行格式：第一行是角色，第二行是内容
+                                name = match[1].trim();
+                                time = new Date().toLocaleTimeString('zh-CN', {hour12: false, hour: '2-digit', minute: '2-digit'});
+                                msg = match[2].trim();
                             } else {
-                                // 简化格式，自动生成时间
+                                // 直接文本格式
+                                name = '未知角色';
+                                time = new Date().toLocaleTimeString('zh-CN', {hour12: false, hour: '2-digit', minute: '2-digit'});
+                                msg = match[1].trim();
+                            }
+                            
+                            // 验证提取的内容
+                            if (name && msg && msg.length > 0 && msg.length < 1000) {
                                 messages.push({
-                                    name: match[1].trim(),
-                                    time: new Date().toLocaleTimeString('zh-CN', {hour12: false, hour: '2-digit', minute: '2-digit'}),
-                                    msg: match[2].trim()
+                                    name: name,
+                                    time: time,
+                                    msg: msg
                                 });
+                                console.log(`提取消息 - ${name}: ${msg.substring(0, 50)}${msg.length > 50 ? '...' : ''}`);
                             }
                         }
-                        break; // 找到一种格式就停止
+                        
+                        if (messages.length > 0) {
+                            break; // 找到有效消息就停止
+                        }
                     }
                 }
                 
+                console.log(`消息提取完成，共提取到 ${messages.length} 条消息`);
                 return messages;
             }
             
@@ -7389,23 +7474,112 @@
                 const standardData = {};
                 
                 // 转换群聊消息
-                if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
-                    standardData[extractedInfo.chatName] = extractedInfo.messages;
-                    console.log(`✅ 转换群聊消息: ${extractedInfo.chatName} (${extractedInfo.messages.length}条)`);
+                if (extractedInfo.messages.length > 0) {
+                    const groupChatKey = extractedInfo.chatName || 'group_chat';
+                    standardData[groupChatKey] = extractedInfo.messages;
+                    console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
                 }
                 
                 // 转换私聊消息
                 if (extractedInfo.privateMessages.length > 0) {
-                    // 提取私聊对象名称
-                    const privateChatKey = extractedInfo.chatName || 'private_chat';
+                    // 创建独立的私聊key，避免与群聊冲突
+                    const privateChatKey = extractedInfo.chatName ? 
+                        `${extractedInfo.chatName}_private` : 'private_chat';
                     standardData[privateChatKey] = extractedInfo.privateMessages;
                     console.log(`✅ 转换私聊消息: ${privateChatKey} (${extractedInfo.privateMessages.length}条)`);
                 }
+                
+                console.log(`✅ 转换完成，总共生成 ${Object.keys(standardData).length} 个聊天组`);
                 
                 return Object.keys(standardData).length > 0 ? standardData : null;
             }
 
             // *** 清理：移除过期的测试函数 ***
+            
+            /**
+             * *** 新增：测试多内容类型提取功能 ***
+             * 验证修复后的智能提取功能是否能正确处理包含多种内容的AI回复
+             */
+            function QQ_Test_Multi_Content_Extraction() {
+                console.log('=== 🧪 多内容类型提取测试 ===');
+                
+                // 模拟用户描述的AI回复格式
+                const testContent = `
+                MiPhone_start
+                <阿伟和爱右的私聊>
+                阿伟--13:26
+                爱右--指挥官今天怎么样。
+                13:26
+                阿伟，你在呢~
+                </阿伟和爱右的私聊>
+                
+                <群聊:大姐姐>
+                阿伟和爱右的私聊--13:29
+                阿伟给我过来帮忙呀，呵呵。
+                爱右--这是真的！
+                阿伟--一起来吧！
+                </群聊:大姐姐>
+                
+                moment_start
+                爱右发布了一条动态："今天阳光真好！"
+                moment_end
+                MiPhone_end
+                `;
+                
+                console.log('测试内容:', testContent);
+                
+                // 测试智能提取功能
+                const extractedInfo = QQ_ExtractValidInfo(testContent);
+                
+                console.log('\n=== 提取结果 ===');
+                console.log('hasValidInfo:', extractedInfo.hasValidInfo);
+                console.log('chatType:', extractedInfo.chatType);
+                console.log('chatName:', extractedInfo.chatName);
+                console.log('群聊消息数量:', extractedInfo.messages.length);
+                console.log('私聊消息数量:', extractedInfo.privateMessages.length);
+                console.log('动态数量:', extractedInfo.dynamics.length);
+                
+                if (extractedInfo.messages.length > 0) {
+                    console.log('\n--- 群聊消息 ---');
+                    extractedInfo.messages.forEach((msg, index) => {
+                        console.log(`${index + 1}. ${msg.name} (${msg.time}): ${msg.msg}`);
+                    });
+                }
+                
+                if (extractedInfo.privateMessages.length > 0) {
+                    console.log('\n--- 私聊消息 ---');
+                    extractedInfo.privateMessages.forEach((msg, index) => {
+                        console.log(`${index + 1}. ${msg.name} (${msg.time}): ${msg.msg}`);
+                    });
+                }
+                
+                if (extractedInfo.dynamics.length > 0) {
+                    console.log('\n--- 动态内容 ---');
+                    extractedInfo.dynamics.forEach((dynamic, index) => {
+                        console.log(`${index + 1}. ${dynamic}`);
+                    });
+                }
+                
+                // 测试转换功能
+                const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                console.log('\n--- 转换结果 ---');
+                console.log('convertedResult:', convertedResult);
+                
+                // 提供建议
+                const suggestions = [];
+                if (extractedInfo.messages.length === 0) suggestions.push('❌ 群聊消息提取失败');
+                if (extractedInfo.privateMessages.length === 0) suggestions.push('❌ 私聊消息提取失败');
+                if (extractedInfo.dynamics.length === 0) suggestions.push('❌ 动态内容提取失败');
+                
+                if (suggestions.length === 0) {
+                    console.log('\n✅ 所有内容类型都成功提取！');
+                } else {
+                    console.log('\n⚠️ 需要改进的地方:');
+                    suggestions.forEach(suggestion => console.log(suggestion));
+                }
+                
+                return extractedInfo;
+            }
             
             /**
              * *** 新增：手动测试惊喜机制验证 ***
@@ -30044,4 +30218,5 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             
         </script>
     </body>
+</html>
 </html>
