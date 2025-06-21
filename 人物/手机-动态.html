@@ -4959,6 +4959,93 @@
             let gening;
             let worldbook;
             let entries;
+            
+            /**
+             * *** 新增：世界书初始化函数 ***
+             * 确保世界书变量在页面加载后正确初始化
+             */
+            async function QQ_InitializeWorldBook() {
+                try {
+                    console.log('🔄 开始初始化世界书变量...');
+                    
+                    // 等待SillyTavern完全加载
+                    let retryCount = 0;
+                    const maxRetries = 10;
+                    
+                    while (retryCount < maxRetries) {
+                        // 检查必要的全局变量
+                        if (typeof window.world_info !== 'undefined' && window.world_info) {
+                            worldbook = window.world_info;
+                            console.log('✅ 从window.world_info获取世界书对象');
+                            break;
+                        } else if (typeof getContext === 'function') {
+                            try {
+                                const context = getContext();
+                                if (context && context.worldInfo) {
+                                    worldbook = context.worldInfo;
+                                    console.log('✅ 从context.worldInfo获取世界书对象');
+                                    break;
+                                }
+                            } catch (e) {
+                                console.log('获取context失败，继续尝试其他方法...');
+                            }
+                        }
+                        
+                        // 检查是否有其他可用的世界书引用
+                        if (typeof globalThis !== 'undefined' && globalThis.world_info) {
+                            worldbook = globalThis.world_info;
+                            console.log('✅ 从globalThis.world_info获取世界书对象');
+                            break;
+                        }
+                        
+                        retryCount++;
+                        console.log(`⏳ 世界书变量尚未可用，重试 ${retryCount}/${maxRetries}`);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                    
+                    if (!worldbook) {
+                        console.warn('⚠️ 无法获取世界书对象，可能需要等待SillyTavern完全加载');
+                        return false;
+                    }
+                    
+                    // 尝试获取世界书条目
+                    if (typeof getLorebookEntries === 'function') {
+                        try {
+                            entries = await getLorebookEntries(worldbook);
+                            if (entries) {
+                                console.log(`✅ 世界书条目获取成功，共 ${entries.length} 个条目`);
+                            } else {
+                                console.log('⚠️ 世界书条目为空');
+                                entries = [];
+                            }
+                        } catch (e) {
+                            console.error('获取世界书条目失败:', e);
+                            entries = [];
+                        }
+                    } else {
+                        console.warn('⚠️ getLorebookEntries 函数不可用');
+                        entries = [];
+                    }
+                    
+                    // 检查其他必要的函数
+                    const requiredFunctions = ['saveWorldInfo', 'createLorebookEntry', 'setLorebookEntries'];
+                    const missingFunctions = requiredFunctions.filter(func => typeof window[func] !== 'function');
+                    
+                    if (missingFunctions.length > 0) {
+                        console.warn('⚠️ 缺少必要的世界书函数:', missingFunctions.join(', '));
+                        console.log('这可能会影响数据保存功能');
+                    } else {
+                        console.log('✅ 所有必要的世界书函数都可用');
+                    }
+                    
+                    console.log('🎯 世界书初始化完成');
+                    return true;
+                    
+                } catch (error) {
+                    console.error('❌ 世界书初始化失败:', error);
+                    return false;
+                }
+            }
             let newgen = true;
             let QQ_CharSettings = new MyINI();
             let Phone_Settings = new MyINI();
@@ -9631,10 +9718,50 @@ MiPhone_End`,
              * 检查世界书保存功能是否可用
              * @returns {boolean} 世界书功能是否可用
              */
+            /**
+             * *** 更新：增强的世界书可用性检测函数 ***
+             * 检查世界书相关变量和函数是否可用
+             */
             function QQ_IsWorldBookAvailable() {
-                return typeof worldbook !== 'undefined' && 
-                       worldbook !== null && 
-                       typeof saveWorldInfo === 'function';
+                // 基本检查
+                const hasWorldbook = typeof worldbook !== 'undefined' && worldbook !== null;
+                const hasSaveFunction = typeof saveWorldInfo === 'function';
+                const hasGetFunction = typeof getLorebookEntries === 'function';
+                
+                // 如果基本检查通过，返回true
+                if (hasWorldbook && hasSaveFunction && hasGetFunction) {
+                    return true;
+                }
+                
+                // 如果基本检查不通过，尝试重新获取世界书对象
+                if (!hasWorldbook) {
+                    // 尝试从不同的全局变量获取世界书
+                    if (typeof window.world_info !== 'undefined' && window.world_info) {
+                        worldbook = window.world_info;
+                        return QQ_IsWorldBookAvailable(); // 递归检查
+                    } else if (typeof getContext === 'function') {
+                        try {
+                            const context = getContext();
+                            if (context && context.worldInfo) {
+                                worldbook = context.worldInfo;
+                                return QQ_IsWorldBookAvailable(); // 递归检查
+                            }
+                        } catch (e) {
+                            // 忽略错误，继续其他检查
+                        }
+                    }
+                }
+                
+                // 记录详细的检查结果
+                console.log('世界书可用性检查结果:', {
+                    hasWorldbook: hasWorldbook,
+                    hasSaveFunction: hasSaveFunction,
+                    hasGetFunction: hasGetFunction,
+                    worldbookType: typeof worldbook,
+                    worldbookValue: worldbook ? '有值' : '无值'
+                });
+                
+                return hasWorldbook && hasSaveFunction;
             }
             
             /**
@@ -29527,6 +29654,70 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             // *** 消息清理功能 ***
             window.QQ_CleanMessageContent = QQ_CleanMessageContent;
             
+            // *** 世界书初始化功能 ***
+            window.QQ_InitializeWorldBook = QQ_InitializeWorldBook;
+            
+            /**
+             * *** 新增：手动修复世界书问题的工具函数 ***
+             */
+            window.QQ_FixWorldBookIssues = async function() {
+                console.log('=== 🔧 开始修复世界书问题 ===');
+                
+                try {
+                    // 第一步：重新初始化世界书
+                    console.log('🔄 步骤1: 重新初始化世界书...');
+                    const initSuccess = await QQ_InitializeWorldBook();
+                    
+                    if (initSuccess) {
+                        console.log('✅ 世界书重新初始化成功');
+                        
+                        // 第二步：测试世界书功能
+                        console.log('🧪 步骤2: 测试世界书功能...');
+                        const testSuccess = await QQ_DataManager.testWorldBook();
+                        
+                        if (testSuccess) {
+                            console.log('✅ 世界书功能测试成功');
+                            
+                            // 第三步：重新加载所有数据
+                            console.log('📊 步骤3: 重新加载所有数据...');
+                            
+                            try {
+                                await QQ_Load_Moments();
+                                console.log('✅ 动态数据重新加载成功');
+                            } catch (e) {
+                                console.warn('⚠️ 动态数据重新加载失败:', e);
+                            }
+                            
+                            try {
+                                if (typeof loadGroupsFromStorage === 'function') {
+                                    await loadGroupsFromStorage();
+                                    console.log('✅ 分组数据重新加载成功');
+                                }
+                            } catch (e) {
+                                console.warn('⚠️ 分组数据重新加载失败:', e);
+                            }
+                            
+                            console.log('🎉 世界书问题修复完成！');
+                            triggerSlash('/echo ✅ 世界书问题已修复，所有功能恢复正常');
+                            
+                        } else {
+                            console.warn('⚠️ 世界书功能测试失败');
+                            triggerSlash('/echo ⚠️ 世界书功能仍有问题，可能需要检查SillyTavern设置');
+                        }
+                        
+                    } else {
+                        console.error('❌ 世界书重新初始化失败');
+                        triggerSlash('/echo ❌ 世界书初始化失败，请检查SillyTavern是否完全加载');
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 修复世界书问题时出错:', error);
+                    triggerSlash('/echo ❌ 修复过程中出现错误: ' + error.message);
+                }
+                
+                console.log('=== 🔧 世界书问题修复完成 ===');
+            };
+            
             /**
              * *** 新增：简化的数据管理使用说明 ***
              */
@@ -29561,6 +29752,12 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 console.log('QQ_DataManager.showStats(); // 查看当前数据统计');
                 console.log('await QQ_DataManager.saveAll(); // 保存所有数据');
                 console.log('QQ_CleanMessageContent("消息内容<!--consider: 思考-->"); // 清理消息');
+                console.log('');
+                console.log('🔧 故障排除：');
+                console.log('• 如果出现"世界书功能不可用"错误：');
+                console.log('  1. 等待3-5秒让SillyTavern完全加载');
+                console.log('  2. 运行 QQ_FixWorldBookIssues() 自动修复');
+                console.log('  3. 手动运行 await QQ_InitializeWorldBook()');
                 console.log('');
                 console.log('✅ 如需技术支持，请查看控制台日志或联系开发者');
             };
@@ -29773,18 +29970,76 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 console.log('=== ✅ 修复QQ_Gen回调函数问题完成 ===');
             };
             
-            // 页面加载完成后自动执行一次检查
+            /**
+             * *** 新增：页面加载完成后的初始化流程 ***
+             */
             $(document).ready(function() {
-                setTimeout(() => {
-                    console.log('🔍 自动执行错误检查...');
-                    QQ_Check_Errors();
+                console.log('📱 SillyTavern手机前端界面开始初始化...');
+                
+                // 第一步：初始化世界书（延迟执行确保SillyTavern完全加载）
+                setTimeout(async () => {
+                    console.log('🔄 开始世界书初始化...');
                     
-                    // 额外执行调试和修复
+                    try {
+                        const worldbookInitialized = await QQ_InitializeWorldBook();
+                        
+                        if (worldbookInitialized) {
+                            console.log('✅ 世界书初始化成功，开始加载数据...');
+                            
+                            // 第二步：加载动态数据
+                            try {
+                                await QQ_Load_Moments();
+                                console.log('✅ 动态数据加载完成');
+                            } catch (e) {
+                                console.warn('⚠️ 动态数据加载失败:', e);
+                            }
+                            
+                            // 第三步：加载分组数据
+                            try {
+                                if (typeof loadGroupsFromStorage === 'function') {
+                                    await loadGroupsFromStorage();
+                                    console.log('✅ 分组数据加载完成');
+                                }
+                            } catch (e) {
+                                console.warn('⚠️ 分组数据加载失败:', e);
+                            }
+                            
+                            // 第四步：加载互动空间数据
+                            try {
+                                if (typeof QQ_LoadInteractiveSpaces === 'function') {
+                                    await QQ_LoadInteractiveSpaces();
+                                    console.log('✅ 互动空间数据加载完成');
+                                }
+                            } catch (e) {
+                                console.warn('⚠️ 互动空间数据加载失败:', e);
+                            }
+                            
+                        } else {
+                            console.warn('⚠️ 世界书初始化失败，数据管理功能可能受影响');
+                            console.log('💡 提示：这通常是因为SillyTavern尚未完全加载，请稍后手动调用 QQ_InitializeWorldBook()');
+                        }
+                        
+                    } catch (error) {
+                        console.error('❌ 初始化过程中出现错误:', error);
+                    }
+                    
+                    // 第五步：执行系统检查
                     setTimeout(() => {
-                        QQ_Debug_SendMsg();
-                        QQ_Fix_Next_Error();
-                    }, 1000);
-                }, 3000);
+                        console.log('🔍 执行系统检查...');
+                        if (typeof QQ_Check_Errors === 'function') {
+                            QQ_Check_Errors();
+                        }
+                        
+                        // 显示初始化完成消息
+                        console.log('🎉 SillyTavern手机前端界面初始化完成！');
+                        console.log('💡 可用工具：');
+                        console.log('  • QQ_DataManager.showStats() - 查看数据统计');
+                        console.log('  • QQ_ShowDataManagerHelp() - 查看使用说明');
+                        console.log('  • QQ_InitializeWorldBook() - 重新初始化世界书');
+                        
+                    }, 2000);
+                    
+                }, 2000); // 延迟2秒确保SillyTavern基本加载完成
             });
             
         </script>
