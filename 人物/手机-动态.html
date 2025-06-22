@@ -21267,13 +21267,22 @@ msg_end
                 };
                 
                 contactGroups.push(newGroup);
-                await saveGroupsToStorage();
-                
-                closeNewGroupModal();
                 
                 console.log('创建新分组成功:', newGroup);
                 
-                // *** 修复：在alert之后再刷新界面，确保用户点击确认后才看到变化 ***
+                // *** 修复：确保世界书保存完成后再提示用户 ***
+                const saveSuccess = await saveGroupsToStorage();
+                if (!saveSuccess) {
+                    alert('分组创建失败：保存到世界书时出错');
+                    // 回滚分组创建
+                    const index = contactGroups.indexOf(newGroup);
+                    if (index > -1) {
+                        contactGroups.splice(index, 1);
+                    }
+                    return;
+                }
+                
+                closeNewGroupModal();
                 alert('分组"' + groupName + '"创建成功！');
                 
                 // 用户点击确认后，等待一小段时间确保世界书保存完成，然后刷新界面
@@ -21523,24 +21532,29 @@ msg_end
                 
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
                     console.log(`🗑️ 删除分组: ${group.name} (${group.contacts.length}人)`);
+                    
                     // 移除分组
                     contactGroups = contactGroups.filter(g => g.id !== groupId);
                     
-                    // 保存更新后的分组数据（没有被删除的分组）到世界书
-                    await saveGroupsToStorage();
+                    // *** 修复：确保世界书保存完成后再提示用户 ***
+                    const saveSuccess = await saveGroupsToStorage();
+                    if (!saveSuccess) {
+                        alert('分组删除失败：保存到世界书时出错');
+                        // 回滚分组删除
+                        contactGroups.push(group);
+                        return;
+                    }
                     
-                    // *** 修复：等待世界书保存完成后再刷新界面 ***
-                    console.log('用户确认删除后，等待世界书保存完成后重新加载数据...');
-                    setTimeout(() => {
-                        console.log('开始重新加载分组数据以更新界面显示');
-                        QQ_ForceReloadContactGroups().then(() => {
-                            return renderContactGroups();
-                        }).then(() => {
-                            console.log('分组删除界面刷新完成');
-                        }).catch(error => {
-                            console.error('分组删除界面刷新失败:', error);
-                        });
-                    }, 1000); // 增加到1.5秒确保世界书保存完成
+                    console.log('分组删除成功，开始刷新界面...');
+                    
+                    // 立即刷新界面，不再使用setTimeout延迟
+                    try {
+                        await QQ_ForceReloadContactGroups();
+                        await renderContactGroups();
+                        console.log('分组删除界面刷新完成');
+                    } catch (error) {
+                        console.error('分组删除界面刷新失败:', error);
+                    }
                 }
             }
             
@@ -22700,16 +22714,8 @@ msg_end
                         updatedContent += `成员=${members.join(',')}\n`;
                     }
                     
-                    // 更新世界书
-                    await setLorebookEntries(worldbook, [
-                        {
-                            uid: groupEntry.uid,
-                            content: updatedContent.trim(),
-                        }
-                    ]);
-                    
-                    // 重新加载entries以更新本地数据
-                    entries = await getLorebookEntries(worldbook);
+                    // 使用简化方式直接更新条目内容
+                    groupEntry.content = updatedContent.trim();
                     
                     // 同步更新本地数据结构
                     if (QQ_msgjson.群聊[groupName]) {
@@ -23097,14 +23103,8 @@ msg_end
                         throw new Error('添加到世界书失败');
                     }
                     
-                    // 立即刷新entries，确保新创建的群聊能被加载
-                    console.log('刷新entries以包含新创建的群聊');
-                    try {
-                        entries = await getLorebookEntries(worldbook);
-                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
-                    } catch (e) {
-                        console.warn('刷新entries失败，但群聊已创建:', e);
-                    }
+                    // *** 修复：不再使用复杂的API调用，依赖简化保存机制 ***
+                    console.log('群聊已保存到世界书，无需手动刷新entries');
                     
                     // 2. 确保群聊立即加入QQ_Groups数组
                     if (!QQ_Groups.includes(groupName)) {
@@ -23165,14 +23165,8 @@ msg_end
                     // 4. 删除聊天页面
                     $(`.QQ_chat_page[data-name='${groupName}']`).remove();
                     
-                    // 5. 立即刷新entries，确保删除的群聊从界面消失
-                    console.log('刷新entries以移除已删除的群聊');
-                    try {
-                        entries = await getLorebookEntries(worldbook);
-                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
-                    } catch (e) {
-                        console.warn('刷新entries失败，但群聊已删除:', e);
-                    }
+                    // *** 修复：不再使用复杂的API调用，依赖简化保存机制 ***
+                    console.log('群聊已从世界书删除，无需手动刷新entries');
                     
                     // 6. 立即重新加载群聊以确保已删除的群聊从界面消失
                     console.log('立即重新加载群聊数据以移除已删除的群聊');
