@@ -21287,7 +21287,7 @@ msg_end
                     }).catch(error => {
                         console.error('分组界面刷新失败:', error);
                     });
-                }, 1500); // 增加到1.5秒确保世界书保存完成
+                }, 1000); // 增加到1.5秒确保世界书保存完成
             }
             
             /**
@@ -21525,6 +21525,8 @@ msg_end
                     console.log(`🗑️ 删除分组: ${group.name} (${group.contacts.length}人)`);
                     // 移除分组
                     contactGroups = contactGroups.filter(g => g.id !== groupId);
+                    
+                    // 保存更新后的分组数据（没有被删除的分组）到世界书
                     await saveGroupsToStorage();
                     
                     // *** 修复：等待世界书保存完成后再刷新界面 ***
@@ -21538,7 +21540,7 @@ msg_end
                         }).catch(error => {
                             console.error('分组删除界面刷新失败:', error);
                         });
-                    }, 1500); // 增加到1.5秒确保世界书保存完成
+                    }, 1000); // 增加到1.5秒确保世界书保存完成
                 }
             }
             
@@ -22521,8 +22523,9 @@ msg_end
                     let groupEntry = null;
                     const groupEntryKey = `手机-群聊-${groupData.name}`;
                     
+                    // 修复：使用正确的uniqueComment进行查找
                     groupEntry = entries.find(e => 
-                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)
+                        e.comment === uniqueComment || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`))
                     );
                     
                     // 构建群聊条目内容 - 智能头像混合存储方案
@@ -25324,7 +25327,7 @@ msg_end
                                 }).catch(error => {
                                     console.error('群聊删除界面刷新失败:', error);
                                 });
-                            }, 1500); // 等待1.5秒确保世界书保存完成
+                            }, 1000); // 等待1.5秒确保世界书保存完成
                             
                         } catch (error) {
                             console.error('删除群聊时出错:', error);
@@ -27746,6 +27749,107 @@ msg_end
              * 替代过期的测试函数，提供简洁的数据管理功能
              */
             window.QQ_DataManager = {
+                /**
+                 * *** 新增：测试群聊创建和分组删除功能 ***
+                 */
+                async testGroupAndChatFunctions() {
+                    console.log('=== 🧪 测试群聊创建和分组删除功能 ===');
+                    
+                    try {
+                        // 1. 测试世界书基本状态
+                        console.log('\\n1️⃣ 检查世界书基本状态...');
+                        if (!worldbook || !entries) {
+                            console.error('❌ 世界书或entries不可用');
+                            return false;
+                        }
+                        console.log(`✅ 世界书可用, entries数量: ${entries.length}`);
+                        
+                        // 2. 测试群聊创建相关函数
+                        console.log('\\n2️⃣ 测试群聊创建功能...');
+                        const testGroupData = {
+                            name: '测试群聊_' + Date.now().toString().slice(-4),
+                            members: ['测试用户1', '测试用户2'],
+                            avatar: {
+                                type: 'upload',
+                                imageData: 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif'
+                            }
+                        };
+                        
+                        console.log('准备创建测试群聊:', testGroupData.name);
+                        
+                        // 测试addGroupToWorldbook函数
+                        if (typeof addGroupToWorldbook === 'function') {
+                            const createResult = await addGroupToWorldbook(testGroupData);
+                            console.log(`群聊创建结果: ${createResult ? '✅ 成功' : '❌ 失败'}`);
+                            
+                            if (createResult) {
+                                // 验证群聊是否真的保存到世界书
+                                const savedEntry = entries.find(e => 
+                                    e.comment === `手机-群聊-${testGroupData.name}` || 
+                                    (e.content && e.content.includes(`[${testGroupData.name}]`))
+                                );
+                                
+                                if (savedEntry) {
+                                    console.log('✅ 群聊已正确保存到世界书');
+                                    console.log('保存的内容:', savedEntry.content.substring(0, 100) + '...');
+                                } else {
+                                    console.error('❌ 群聊未保存到世界书');
+                                }
+                            }
+                        } else {
+                            console.error('❌ addGroupToWorldbook函数不存在');
+                        }
+                        
+                        // 3. 测试分组删除功能
+                        console.log('\\n3️⃣ 测试分组删除功能...');
+                        const characterId = getCurrentCharacterId() || 'default';
+                        console.log(`当前角色ID: ${characterId}`);
+                        
+                        // 查找现有分组数据
+                        const groupEntryComment = `QQ_分组备份_${characterId}`;
+                        const groupEntry = entries.find(e => e.comment === groupEntryComment);
+                        
+                        if (groupEntry) {
+                            console.log('✅ 找到分组数据条目');
+                            try {
+                                const groupData = JSON.parse(groupEntry.content);
+                                console.log(`当前分组数量: ${groupData.length}`);
+                                groupData.forEach((group, index) => {
+                                    console.log(`  ${index + 1}. ${group.name} (${group.contacts.length}个联系人)`);
+                                });
+                            } catch (e) {
+                                console.error('❌ 分组数据解析失败:', e);
+                            }
+                        } else {
+                            console.log('ℹ️ 当前角色没有分组数据');
+                        }
+                        
+                        // 4. 测试分组相关函数
+                        console.log('\\n4️⃣ 检查分组相关函数...');
+                        const functions = [
+                            'QQ_SaveContactGroupsToWorldBook',
+                            'QQ_LoadContactGroupsFromWorldBook', 
+                            'saveGroupsToStorage',
+                            'deleteContactGroup'
+                        ];
+                        
+                        functions.forEach(funcName => {
+                            if (typeof window[funcName] === 'function') {
+                                console.log(`✅ ${funcName} 函数可用`);
+                            } else {
+                                console.error(`❌ ${funcName} 函数不存在`);
+                            }
+                        });
+                        
+                        console.log('\\n🎯 测试完成! 检查上述结果以诊断问题。');
+                        return true;
+                        
+                    } catch (error) {
+                        console.error('❌ 测试过程中出错:', error);
+                        return false;
+                    }
+                },
+                
                 /**
                  * *** 新增：测试分组加载修复 ***
                  */
