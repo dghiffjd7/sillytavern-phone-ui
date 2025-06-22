@@ -27562,7 +27562,7 @@ msg_end
              */
             
             /**
-             * *** 新增：统一的世界书保存函数 ***
+             * *** 简化版：统一的世界书保存函数 - 使用与动态内容相同的简单机制 ***
              * 参考QQ_Save_Moments的成功实现，为所有类型数据提供统一的保存机制
              */
             async function QQ_UnifiedSaveToWorldBook(dataType, dataContent, comment, keyPrefix = 'QQ') {
@@ -27572,41 +27572,36 @@ msg_end
                         return false;
                     }
                     
+                    // *** 使用与动态内容相同的简单保存方式 ***
                     // 查找现有条目
                     let targetEntry = entries.find(entry => entry.comment === comment);
                     
-                    // 准备保存的数据
-                    const saveData = {
-                        type: dataType,
-                        content: dataContent,
-                        lastUpdated: new Date().toISOString(),
-                        version: "1.0"
-                    };
-                    
-                    const jsonData = JSON.stringify(saveData, null, 2);
+                    // 准备保存的数据（简化格式）
+                    const jsonData = JSON.stringify(dataContent, null, 2);
                     console.log(`准备保存${dataType}数据: ${comment}`);
                     
                     if (targetEntry) {
-                        // 更新现有条目
-                        await setLorebookEntries(worldbook, [{
-                            uid: targetEntry.uid,
-                            content: jsonData,
-                        }]);
+                        // 直接更新现有条目的内容
+                        targetEntry.content = jsonData;
                         console.log(`✅ ${dataType}数据已更新到现有世界书条目: ${comment}`);
                     } else {
-                        // 创建新条目
-                        await createLorebookEntry(worldbook, {
+                        // *** 简化版：直接创建新条目到entries数组 ***
+                        const newEntry = {
+                            uid: Date.now(),
                             comment: comment,
                             key: [`此世界书永不触发_${keyPrefix}_${dataType}`],
                             content: jsonData,
-                            position: "at_depth_as_system",
-                            type: "selective",
-                            depth: 0,
-                            exclude_recursion: true,
-                            order: 9998,
                             enabled: true,
-                        });
+                            order: 9998,
+                            depth: 0
+                        };
+                        entries.push(newEntry);
                         console.log(`✅ ${dataType}数据已保存到新世界书条目: ${comment}`);
+                    }
+                    
+                    // *** 简化版：只在函数存在时调用saveWorldInfo ***
+                    if (typeof saveWorldInfo === 'function') {
+                        await saveWorldInfo();
                     }
                     
                     return true;
@@ -27617,7 +27612,7 @@ msg_end
             }
             
             /**
-             * *** 新增：统一的世界书加载函数 ***
+             * *** 简化版：统一的世界书加载函数 - 使用与动态内容相同的简单机制 ***
              */
             async function QQ_UnifiedLoadFromWorldBook(comment, defaultValue = null) {
                 try {
@@ -27631,9 +27626,20 @@ msg_end
                     
                     if (targetEntry && targetEntry.content) {
                         try {
+                            // *** 简化版：直接解析JSON内容，不需要包装格式 ***
                             const data = JSON.parse(targetEntry.content);
-                            console.log(`✅ 从世界书加载数据成功: ${comment}`);
-                            return data.content || defaultValue;
+                            console.log(`✅ 从世界书加载数据成功: ${comment}`, data);
+                            
+                            // *** 兼容性处理：支持新旧数据格式 ***
+                            if (data && typeof data === 'object' && data.content !== undefined) {
+                                // 旧格式：带有wrapper的数据
+                                console.log(`检测到旧格式数据，提取content部分`);
+                                return data.content || defaultValue;
+                            } else {
+                                // 新格式：直接的数据
+                                console.log(`检测到新格式数据，直接返回`);
+                                return data || defaultValue;
+                            }
                         } catch (parseError) {
                             console.error(`解析世界书数据失败 (${comment}):`, parseError);
                             return defaultValue;
@@ -27731,6 +27737,82 @@ msg_end
              * 替代过期的测试函数，提供简洁的数据管理功能
              */
             window.QQ_DataManager = {
+                /**
+                 * *** 新增：测试分组加载修复 ***
+                 */
+                async testGroupLoading() {
+                    console.log('=== 🧪 测试分组加载修复 ===');
+                    
+                    try {
+                        const characterId = getCurrentCharacterId() || 'default';
+                        console.log(`\n🎭 测试角色ID: ${characterId}`);
+                        
+                        // 1. 检查世界书基本可用性
+                        console.log('\n1️⃣ 检查世界书基本状态...');
+                        if (!worldbook || !entries) {
+                            console.error('❌ 世界书或entries不可用');
+                            return false;
+                        }
+                        console.log(`✅ 世界书可用, entries数量: ${entries.length}`);
+                        
+                        // 2. 查找分组条目
+                        console.log('\n2️⃣ 查找分组条目...');
+                        const comment = `QQ_分组备份_${characterId}`;
+                        const targetEntry = entries.find(entry => entry.comment === comment);
+                        
+                        if (targetEntry) {
+                            console.log(`✅ 找到分组条目: ${comment}`);
+                            console.log(`📄 条目内容长度: ${targetEntry.content?.length || 0}`);
+                            console.log(`📄 条目内容预览:`, targetEntry.content?.substring(0, 200) + '...');
+                            
+                            // 3. 尝试解析数据
+                            console.log('\n3️⃣ 尝试解析分组数据...');
+                            try {
+                                const data = JSON.parse(targetEntry.content);
+                                console.log(`✅ JSON解析成功:`, data);
+                                
+                                // 4. 检查数据格式
+                                console.log('\n4️⃣ 检查数据格式...');
+                                let groupsData = null;
+                                if (data && typeof data === 'object' && data.content !== undefined) {
+                                    console.log(`📋 检测到旧格式数据，提取content部分`);
+                                    groupsData = data.content;
+                                } else {
+                                    console.log(`📋 检测到新格式数据，直接使用`);
+                                    groupsData = data;
+                                }
+                                
+                                if (Array.isArray(groupsData)) {
+                                    console.log(`✅ 成功获取分组数据: ${groupsData.length}个分组`);
+                                    groupsData.forEach((group, index) => {
+                                        console.log(`📂 分组${index + 1}: ${group.name} (${group.contacts?.length || 0}个联系人)`);
+                                    });
+                                    return true;
+                                } else {
+                                    console.error(`❌ 分组数据格式错误，不是数组:`, typeof groupsData);
+                                    return false;
+                                }
+                            } catch (parseError) {
+                                console.error(`❌ JSON解析失败:`, parseError);
+                                return false;
+                            }
+                        } else {
+                            console.log(`❌ 没有找到分组条目: ${comment}`);
+                            console.log(`📋 可用的条目列表:`);
+                            entries.forEach((entry, index) => {
+                                if (entry.comment && entry.comment.includes('分组')) {
+                                    console.log(`  ${index}: ${entry.comment}`);
+                                }
+                            });
+                            return false;
+                        }
+                        
+                    } catch (error) {
+                        console.error('❌ 测试分组加载失败:', error);
+                        return false;
+                    }
+                },
+                
                 /**
                  * 显示所有世界书数据统计
                  */
