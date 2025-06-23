@@ -21267,27 +21267,26 @@ msg_end
                 };
                 
                 contactGroups.push(newGroup);
-                await saveGroupsToStorage();
                 
-                closeNewGroupModal();
-                
-                console.log('创建新分组成功:', newGroup);
-                
-                // *** 修复：在alert之后再刷新界面，确保用户点击确认后才看到变化 ***
-                alert('分组"' + groupName + '"创建成功！');
-                
-                // 用户点击确认后，等待一小段时间确保世界书保存完成，然后刷新界面
-                console.log('用户确认后，等待世界书保存完成后重新加载分组数据...');
-                setTimeout(() => {
-                    console.log('开始重新加载分组数据以显示新创建的分组');
-                    QQ_ForceReloadContactGroups().then(() => {
-                        return renderContactGroups();
-                    }).then(() => {
-                        console.log('分组界面刷新完成');
-                    }).catch(error => {
-                        console.error('分组界面刷新失败:', error);
-                    });
-                }, 1500); // 增加到1.5秒确保世界书保存完成
+                // *** 修复：确保保存完成后再关闭弹窗和显示消息 ***
+                try {
+                    await saveGroupsToStorage();
+                    console.log('✅ 新分组保存到世界书成功');
+                    
+                    closeNewGroupModal();
+                    alert('分组"' + groupName + '"创建成功！');
+                    
+                    console.log('创建新分组成功:', newGroup);
+                    
+                    // *** 修复：在用户点击确认后立即刷新界面 ***
+                    await QQ_ForceReloadContactGroups();
+                    await renderContactGroups();
+                    console.log('分组创建界面刷新完成');
+                    
+                } catch (error) {
+                    console.error('❌ 保存新分组失败:', error);
+                    alert('分组创建失败，请重试');
+                }
             }
             
             /**
@@ -21523,22 +21522,23 @@ msg_end
                 
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
                     console.log(`🗑️ 删除分组: ${group.name} (${group.contacts.length}人)`);
-                    // 移除分组
-                    contactGroups = contactGroups.filter(g => g.id !== groupId);
-                    await saveGroupsToStorage();
                     
-                    // *** 修复：等待世界书保存完成后再刷新界面 ***
-                    console.log('用户确认删除后，等待世界书保存完成后重新加载数据...');
-                    setTimeout(() => {
-                        console.log('开始重新加载分组数据以更新界面显示');
-                        QQ_ForceReloadContactGroups().then(() => {
-                            return renderContactGroups();
-                        }).then(() => {
-                            console.log('分组删除界面刷新完成');
-                        }).catch(error => {
-                            console.error('分组删除界面刷新失败:', error);
-                        });
-                    }, 1500); // 增加到1.5秒确保世界书保存完成
+                    // *** 修复：确保删除和保存操作正确完成 ***
+                    try {
+                        // 移除分组
+                        contactGroups = contactGroups.filter(g => g.id !== groupId);
+                        await saveGroupsToStorage();
+                        console.log('✅ 分组删除并保存到世界书成功');
+                        
+                        // *** 修复：立即刷新界面显示最新状态 ***
+                        await QQ_ForceReloadContactGroups();
+                        await renderContactGroups();
+                        console.log('分组删除界面刷新完成');
+                        
+                    } catch (error) {
+                        console.error('❌ 删除分组失败:', error);
+                        alert('删除分组失败，请重试');
+                    }
                 }
             }
             
@@ -27599,12 +27599,24 @@ msg_end
                         console.log(`✅ ${dataType}数据已保存到新世界书条目: ${comment}`);
                     }
                     
-                    // *** 简化版：只在函数存在时调用saveWorldInfo ***
+                    // *** 修复：强制同步保存到世界书 ***
                     if (typeof saveWorldInfo === 'function') {
                         await saveWorldInfo();
+                        console.log(`🔄 世界书保存操作已执行`);
+                    } else {
+                        console.warn('⚠️ saveWorldInfo函数不存在，依赖自动保存机制');
                     }
                     
-                    return true;
+                    // *** 新增：验证保存是否成功 ***
+                    const verifyEntry = entries.find(entry => entry.comment === comment);
+                    if (verifyEntry && verifyEntry.content === jsonData) {
+                        console.log(`✅ 验证成功：${dataType}数据已正确保存到世界书`);
+                        return true;
+                    } else {
+                        console.error(`❌ 验证失败：${dataType}数据保存可能有问题`);
+                        return false;
+                    }
+                    
                 } catch (error) {
                     console.error(`保存${dataType}数据到世界书失败:`, error);
                     return false;
@@ -28021,6 +28033,81 @@ msg_end
             /**
              * ===== 数据管理和调试工具 =====
              */
+            
+            /**
+             * *** 新增：测试分组功能的完整性 ***
+             */
+            window.QQ_Test_Group_Functions = async function() {
+                console.log('=== 🧪 测试分组功能开始 ===');
+                
+                try {
+                    const characterId = getCurrentCharacterId() || 'default';
+                    console.log(`测试角色ID: ${characterId}`);
+                    
+                    // 1. 测试加载功能
+                    console.log('1️⃣ 测试分组加载功能...');
+                    const loadedGroups = await QQ_LoadContactGroupsFromWorldBook(characterId);
+                    console.log(`✅ 加载测试完成，当前分组数量: ${loadedGroups ? loadedGroups.length : 0}`);
+                    
+                    // 2. 测试世界书查找功能
+                    console.log('2️⃣ 测试世界书查找功能...');
+                    const expectedComment = `QQ_分组备份_${characterId}`;
+                    const existingEntry = entries ? entries.find(entry => entry.comment === expectedComment) : null;
+                    if (existingEntry) {
+                        console.log(`✅ 找到世界书条目: ${expectedComment}`);
+                        console.log('条目内容预览:', existingEntry.content.substring(0, 100) + '...');
+                    } else {
+                        console.log(`⚠️ 未找到世界书条目: ${expectedComment}`);
+                    }
+                    
+                    // 3. 测试保存功能
+                    console.log('3️⃣ 测试分组保存功能...');
+                    const testGroup = {
+                        id: 'test_group_' + Date.now(),
+                        name: '测试分组_' + Date.now(),
+                        contacts: [],
+                        collapsed: false,
+                        order: 999
+                    };
+                    
+                    const currentGroups = [...contactGroups, testGroup];
+                    const saveResult = await QQ_SaveContactGroupsToWorldBook(characterId, currentGroups);
+                    console.log(`保存测试结果: ${saveResult ? '✅ 成功' : '❌ 失败'}`);
+                    
+                    // 4. 测试删除功能（移除测试分组）
+                    console.log('4️⃣ 测试分组删除功能...');
+                    const cleanGroups = contactGroups.filter(g => !g.name.includes('测试分组'));
+                    const deleteResult = await QQ_SaveContactGroupsToWorldBook(characterId, cleanGroups);
+                    console.log(`删除测试结果: ${deleteResult ? '✅ 成功' : '❌ 失败'}`);
+                    
+                    // 5. 验证最终状态
+                    console.log('5️⃣ 验证最终状态...');
+                    const finalGroups = await QQ_LoadContactGroupsFromWorldBook(characterId);
+                    console.log(`✅ 最终分组数量: ${finalGroups ? finalGroups.length : 0}`);
+                    
+                    const summary = `
+📊 分组功能测试总结:
+- 角色ID: ${characterId}
+- 加载功能: ${loadedGroups !== null ? '✅ 正常' : '❌ 异常'}
+- 世界书条目: ${existingEntry ? '✅ 存在' : '⚠️ 不存在'}
+- 保存功能: ${saveResult ? '✅ 正常' : '❌ 异常'}
+- 删除功能: ${deleteResult ? '✅ 正常' : '❌ 异常'}
+- 当前分组数: ${finalGroups ? finalGroups.length : 0}个
+
+${finalGroups && finalGroups.length > 0 ? 
+'分组详情: ' + finalGroups.map(g => `${g.name}(${g.contacts.length}人)`).join(', ') : 
+'当前无分组'}`;
+                    
+                    console.log(summary);
+                    alert(summary);
+                    
+                } catch (error) {
+                    console.error('分组功能测试失败:', error);
+                    alert('分组功能测试失败: ' + error.message);
+                }
+                
+                console.log('=== 🧪 测试分组功能结束 ===');
+            };
             
             /**
              * 显示世界书数据统计
