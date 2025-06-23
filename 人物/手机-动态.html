@@ -25254,17 +25254,9 @@ msg_end
                             
 
                             
-                            // 从数据结构中删除群聊
+                            // 从数据结构中删除群聊（内存清理）
                             delete QQ_msgjson.群聊[deletedGroupName];
-                            
-                            // 修复：确保QQ_Groups是有效的数组
-                            if (QQ_Groups && Array.isArray(QQ_Groups)) {
-                                const index = QQ_Groups.findIndex(g => g && (g.id === deletedGroupId || g.name === deletedGroupName));
-                            if (index > -1) {
-                                QQ_Groups.splice(index, 1);
-                                }
-                            }
-                            console.log('群聊已从数据结构中删除，当前QQ_Groups:', QQ_Groups.length);
+                            console.log('群聊已从QQ_msgjson中删除');
                             
                             // **先清除群聊状态，避免跳转时的状态冲突**
                             if (wasInGroupChat) {
@@ -25312,8 +25304,26 @@ msg_end
                             // 先显示确认消息
                             alert('群聊已删除');
                             
-                            // *** 关键修复：用户点击确认后，在跳转回联系人界面的当下重新渲染 ***
-                            console.log('用户确认删除完成，现在重新渲染联系人界面');
+                            // *** 关键修复：用户点击确认后，确保QQ_Groups基于最新数据，然后重新渲染 ***
+                            console.log('用户确认删除完成，现在确保QQ_Groups数据最新并重新渲染联系人界面');
+                            
+                            // 关键步骤：清空QQ_Groups并基于最新的世界书数据重建
+                            console.log('删除前QQ_Groups:', QQ_Groups.length, '个群聊');
+                            QQ_Groups.length = 0; // 清空数组
+                            
+                            // 重新从最新的世界书数据构建QQ_Groups（不包含已删除的群聊）
+                            if (entries) {
+                                const remainingGroupEntries = entries.filter(e => e.comment && e.comment.startsWith("手机-群聊-"));
+                                remainingGroupEntries.forEach(entry => {
+                                    const groupName = entry.comment.replace('手机-群聊-', '');
+                                    if (groupName && !QQ_Groups.includes(groupName)) {
+                                        QQ_Groups.push(groupName);
+                                    }
+                                });
+                                console.log('删除后QQ_Groups:', QQ_Groups.length, '个群聊');
+                            }
+                            
+                            // 现在重新渲染联系人界面，基于正确的QQ_Groups数据
                             if (typeof renderContactGroups === 'function') {
                                 await renderContactGroups();
                                 console.log('联系人界面重新渲染完成，群聊已从界面消失');
