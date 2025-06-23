@@ -21037,79 +21037,50 @@ msg_end
             var draggedFromGroup = null;
             
             /**
-             * 获取当前角色ID用于数据隔离 - 增强调试版本
+             * 获取当前角色ID用于数据隔离
              */
             function getCurrentCharacterId() {
                 try {
-                    let charId = null;
-                    let source = '';
-                    
                     // 方式1：优先使用SillyTavern的characterId
                     if (window.SillyTavern && window.SillyTavern.characterId !== undefined) {
-                        charId = window.SillyTavern.characterId;
-                        source = 'SillyTavern.characterId';
+                        return window.SillyTavern.characterId;
                     }
                     
                     // 方式2：尝试调用SillyTavern的getContext方法
-                    else if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
+                    if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
                         const context = window.SillyTavern.getContext();
                         if (context && context.characterId !== undefined) {
-                            charId = context.characterId;
-                            source = 'SillyTavern.getContext().characterId';
+                            return context.characterId;
                         }
                     }
                     
                     // 方式3：从window.this_chid获取（酒馆内部变量）
-                    else if (window.this_chid !== undefined) {
-                        charId = window.this_chid;
-                        source = 'window.this_chid';
+                    if (window.this_chid !== undefined) {
+                        return window.this_chid;
                     }
                     
                     // 方式4：从URL参数获取
-                    else {
-                        const urlParams = new URLSearchParams(window.location.search);
-                        const urlCharId = urlParams.get('charId') || urlParams.get('characterId');
-                        if (urlCharId) {
-                            charId = urlCharId;
-                            source = 'URL参数';
-                        }
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const charId = urlParams.get('charId') || urlParams.get('characterId');
+                    if (charId) {
+                        return charId;
                     }
                     
                     // 方式5：使用当前角色名
-                    if (!charId && window.currentCharacterName) {
-                        charId = window.currentCharacterName;
-                        source = 'currentCharacterName';
+                    if (window.currentCharacterName) {
+                        return window.currentCharacterName;
                     }
                     
                     // 方式6：从header中的角色名获取
-                    if (!charId) {
-                        const headerName = document.querySelector('.QQ_home_nick')?.textContent?.trim();
-                        if (headerName) {
-                            charId = headerName;
-                            source = 'header角色名';
-                        }
+                    const headerName = document.querySelector('.QQ_home_nick')?.textContent?.trim();
+                    if (headerName) {
+                        return headerName;
                     }
                     
                     // 最后的备用方案
-                    if (!charId) {
-                        charId = 'default';
-                        source = '默认值';
-                    }
-                    
-                    // *** 重要调试信息 - 每次调用都输出 ***
-                    console.log(`🎭 getCurrentCharacterId(): "${charId}" (来源: ${source})`);
-                    console.log('🔍 可用的数据源检查:', {
-                        'SillyTavern存在': !!window.SillyTavern,
-                        'SillyTavern.characterId': window.SillyTavern?.characterId,
-                        'window.this_chid': window.this_chid,
-                        'currentCharacterName': window.currentCharacterName,
-                        'header角色名': document.querySelector('.QQ_home_nick')?.textContent?.trim(),
-                        'URL参数': new URLSearchParams(window.location.search).get('charId') || new URLSearchParams(window.location.search).get('characterId')
-                    });
-                    
-                    return charId;
+                    return 'default';
                 } catch (error) {
-                    console.error('❌ 获取角色ID失败，使用默认值:', error);
+                    console.warn('获取角色ID失败，使用默认值:', error);
                     return 'default';
                 }
             }
@@ -21139,39 +21110,65 @@ msg_end
             }
             
             /**
-             * 从世界书加载分组（按角色隔离）
+             * 从世界书加载分组（按角色隔离）- 修复版
              */
             async function loadGroupsFromStorage() {
                 try {
                     const charId = getCurrentCharacterId() || 'default';
-                    console.log(`从世界书加载分组，角色ID: ${charId}`);
+                    console.log(`🔄 loadGroupsFromStorage: 开始加载分组，角色ID: ${charId}`);
                     
-                    // 使用新的统一加载函数
-                    const groups = await QQ_LoadContactGroupsFromWorldBook(charId);
+                    // *** 修复：直接使用与动态内容相同的简单加载方式 ***
+                    if (!worldbook || !entries) {
+                        console.warn('⚠️ loadGroupsFromStorage: 世界书未初始化，使用空数组');
+                        contactGroups.length = 0;
+                        return;
+                    }
                     
-                    if (groups && Array.isArray(groups)) {
-                        contactGroups.length = 0; // 清空现有数组
-                        contactGroups.push(...groups); // 添加从世界书加载的数据
-                        console.log(`从世界书加载了 ${groups.length} 个分组`);
+                    const comment = `QQ_分组备份_${charId}`;
+                    
+                    // 查找目标条目
+                    const targetEntry = entries.find(entry => entry.comment === comment);
+                    
+                    if (targetEntry && targetEntry.content) {
+                        try {
+                            // 直接解析JSON内容
+                            const groups = JSON.parse(targetEntry.content);
+                            console.log(`✅ 从世界书加载分组数据成功: ${comment}`, groups);
+                            
+                            if (Array.isArray(groups)) {
+                                contactGroups.length = 0; // 清空现有数组
+                                contactGroups.push(...groups); // 添加从世界书加载的数据
+                                console.log(`📋 成功加载 ${groups.length} 个分组`);
+                            } else {
+                                console.warn('⚠️ 世界书中的分组数据格式不正确，使用空数组');
+                                contactGroups.length = 0;
+                            }
+                        } catch (parseError) {
+                            console.error(`❌ 解析世界书分组数据失败 (${comment}):`, parseError);
+                            contactGroups.length = 0;
+                        }
                     } else {
-                        // 尝试从localStorage迁移数据
-                        console.log('世界书中没有找到分组数据，尝试从localStorage迁移...');
-                        const charGroupsKey = getCharacterGroupsKey();
-                        const localStored = localStorage.getItem(charGroupsKey);
-                        if (localStored) {
-                            const localGroups = JSON.parse(localStored);
-                            contactGroups.length = 0;
-                            contactGroups.push(...localGroups);
-                            console.log(`从localStorage迁移了 ${localGroups.length} 个分组到世界书`);
-                            // 立即保存到世界书
-                            setTimeout(() => saveGroupsToStorage(), 1000);
-                        } else {
-                            console.log('没有找到任何分组数据，使用默认空数组');
-                            contactGroups.length = 0;
+                        console.log(`📋 世界书中没有找到分组条目: ${comment}，使用空数组`);
+                        contactGroups.length = 0;
+                        
+                        // *** 可选：尝试从localStorage迁移历史数据 ***
+                        try {
+                            const localStored = localStorage.getItem('contact_groups');
+                            if (localStored) {
+                                const localGroups = JSON.parse(localStored);
+                                if (Array.isArray(localGroups) && localGroups.length > 0) {
+                                    contactGroups.push(...localGroups);
+                                    console.log(`🔄 从localStorage迁移了 ${localGroups.length} 个分组，将保存到世界书`);
+                                    // 立即保存到世界书
+                                    setTimeout(() => saveGroupsToStorage(), 500);
+                                }
+                            }
+                        } catch (migrateError) {
+                            console.error('迁移localStorage数据失败:', migrateError);
                         }
                     }
                 } catch (error) {
-                    console.error('从世界书加载分组时出错:', error);
+                    console.error('❌ loadGroupsFromStorage: 从世界书加载分组时出错:', error);
                     contactGroups.length = 0;
                 }
             }
@@ -21182,56 +21179,66 @@ msg_end
             });
             
             /**
-             * 保存分组到世界书（按角色隔离）- 增强验证版本
+             * 保存分组到世界书（按角色隔离）- 修复版
              */
             async function saveGroupsToStorage() {
                 try {
                     const charId = getCurrentCharacterId() || 'default';
-                    console.log(`🔄 开始保存分组到世界书，角色ID: ${charId}`);
-                    console.log(`📊 当前分组数据:`, contactGroups);
+                    console.log(`🔄 saveGroupsToStorage: 开始保存分组，角色ID: ${charId}`);
+                    console.log(`📋 当前分组数据:`, contactGroups);
                     
-                    // *** 保存前验证世界书状态 ***
+                    // *** 修复：直接使用与动态内容相同的简单保存方式 ***
                     if (!worldbook || !entries) {
-                        console.error('❌ 世界书不可用，无法保存分组数据');
-                        console.log('🔍 世界书状态:', {
-                            worldbook: !!worldbook,
-                            entries: !!entries,
-                            entriesLength: entries ? entries.length : 'undefined'
-                        });
+                        console.error('❌ saveGroupsToStorage: 世界书未初始化');
                         return false;
                     }
                     
-                    // 使用新的统一保存函数
-                    const success = await QQ_SaveContactGroupsToWorldBook(charId, contactGroups);
+                    const comment = `QQ_分组备份_${charId}`;
                     
-                    if (success) {
-                        console.log(`✅ 角色 ${charId} 的分组数据已保存到世界书，共 ${contactGroups.length} 个分组`);
-                        
-                        // *** 新增：立即验证保存结果 ***
-                        const expectedComment = `QQ_分组备份_${charId}`;
-                        const verifyEntry = entries.find(entry => entry.comment === expectedComment);
-                        
-                        if (verifyEntry) {
-                            console.log(`✅ 验证成功：世界书条目 "${expectedComment}" 已存在`);
-                            console.log(`📝 条目内容预览:`, verifyEntry.content ? verifyEntry.content.substring(0, 200) + '...' : '空内容');
-                            
-                            try {
-                                const savedData = JSON.parse(verifyEntry.content);
-                                console.log(`✅ 验证数据完整性：保存了 ${Array.isArray(savedData) ? savedData.length : '非数组'} 个分组`);
-                            } catch (parseError) {
-                                console.error('❌ 验证失败：无法解析保存的数据', parseError);
-                            }
-                        } else {
-                            console.error(`❌ 验证失败：世界书中未找到条目 "${expectedComment}"`);
-                            console.log('🔍 当前世界书条目列表:', entries.map(e => e.comment).filter(c => c && c.includes('分组')));
-                        }
+                    // 查找或创建世界书条目
+                    let targetEntry = entries.find(entry => entry.comment === comment);
+                    
+                    const jsonData = JSON.stringify(contactGroups, null, 2);
+                    
+                    if (targetEntry) {
+                        // 更新现有条目
+                        targetEntry.content = jsonData;
+                        console.log(`✅ 已更新现有分组条目: ${comment}`);
                     } else {
-                        console.error('❌ 分组数据保存到世界书失败');
+                        // 创建新条目
+                        const newEntry = {
+                            uid: Date.now(),
+                            comment: comment,
+                            key: [`此世界书永不触发_分组_${charId}`],
+                            content: jsonData,
+                            enabled: true,
+                            order: 9998,
+                            depth: 0
+                        };
+                        entries.push(newEntry);
+                        console.log(`✅ 已创建新分组条目: ${comment}`);
                     }
                     
-                    return success;
+                    // *** 修复：确保使用正确的保存函数 ***
+                    if (typeof saveWorldInfo === 'function') {
+                        await saveWorldInfo();
+                        console.log(`💾 分组数据已强制保存到世界书`);
+                    } else {
+                        console.warn('⚠️ saveWorldInfo函数不存在，依赖自动保存');
+                    }
+                    
+                    // *** 新增：验证保存结果 ***
+                    const verifyEntry = entries.find(entry => entry.comment === comment);
+                    if (verifyEntry && verifyEntry.content === jsonData) {
+                        console.log(`✅ 验证成功：分组数据已正确保存`);
+                        return true;
+                    } else {
+                        console.error(`❌ 验证失败：分组数据保存可能有问题`);
+                        return false;
+                    }
+                    
                 } catch (error) {
-                    console.error('❌ 保存分组到世界书时出错:', error);
+                    console.error('❌ saveGroupsToStorage: 保存分组到世界书时出错:', error);
                     return false;
                 }
             }
@@ -21293,7 +21300,7 @@ msg_end
             }
             
             /**
-             * 创建新的联系人分组 - 增强版本
+             * 创建新的联系人分组
              */
             async function createNewContactGroup() {
                 console.log('🆕 开始创建新分组...');
@@ -21303,7 +21310,7 @@ msg_end
                 
                 const input = document.getElementById('new_group_name_input');
                 if (!input) {
-                    console.error('❌ 未找到分组名称输入框元素');
+                    console.error('未找到分组名称输入框元素');
                     alert('界面元素未找到，请刷新页面重试');
                     return;
                 }
@@ -21320,10 +21327,6 @@ msg_end
                     return;
                 }
                 
-                // 获取当前角色ID用于调试
-                const currentCharId = getCurrentCharacterId();
-                console.log(`📝 为角色 "${currentCharId}" 创建分组 "${groupName}"`);
-                
                 // 创建新分组
                 const newGroup = {
                     id: 'group_' + Date.now(),
@@ -21333,43 +21336,41 @@ msg_end
                     order: contactGroups.length
                 };
                 
-                console.log('📋 创建的新分组对象:', newGroup);
                 contactGroups.push(newGroup);
-                console.log(`📊 当前总分组数: ${contactGroups.length}`);
                 
                 // *** 修复：确保保存完成后再关闭弹窗和显示消息 ***
                 try {
-                    console.log('💾 开始保存新分组到世界书...');
                     const saveResult = await saveGroupsToStorage();
                     
                     if (saveResult) {
                         console.log('✅ 新分组保存到世界书成功');
-                        
                         closeNewGroupModal();
                         alert('分组"' + groupName + '"创建成功！');
                         
-                        console.log('✅ 创建新分组成功:', newGroup);
+                        console.log('创建新分组成功:', newGroup);
                         
                         // *** 修复：在用户点击确认后立即刷新界面 ***
                         await QQ_ForceReloadContactGroups();
                         await renderContactGroups();
-                        console.log('🔄 分组创建界面刷新完成');
+                        console.log('分组创建界面刷新完成');
                     } else {
-                        console.error('❌ 保存新分组到世界书失败');
-                        alert('分组保存失败，请检查世界书功能是否正常');
-                        
-                        // 回滚操作
-                        contactGroups.pop();
-                        console.log('🔄 已回滚分组创建操作');
+                        // 保存失败，撤销操作
+                        console.error('❌ 保存新分组失败，撤销创建操作');
+                        const index = contactGroups.findIndex(g => g.id === newGroup.id);
+                        if (index !== -1) {
+                            contactGroups.splice(index, 1);
+                        }
+                        alert('分组创建失败：无法保存到世界书，请检查网络连接或重试');
                     }
                     
                 } catch (error) {
-                    console.error('❌ 保存新分组过程中出现异常:', error);
-                    alert('分组创建失败，请重试');
-                    
-                    // 回滚操作
-                    contactGroups.pop();
-                    console.log('🔄 已回滚分组创建操作');
+                    console.error('❌ 保存新分组失败:', error);
+                    // 保存失败，撤销操作
+                    const index = contactGroups.findIndex(g => g.id === newGroup.id);
+                    if (index !== -1) {
+                        contactGroups.splice(index, 1);
+                    }
+                    alert('分组创建失败，请重试：' + error.message);
                 }
             }
             
@@ -21392,84 +21393,6 @@ msg_end
             window.showNewGroupModal = showNewGroupModal;
             window.handleNewGroupKeydown = handleNewGroupKeydown;
             window.openContactGroupModal = openContactGroupModal;
-            
-            /**
-             * *** 新增：分组调试工具 ***
-             * 检查分组保存状态和世界书同步情况
-             */
-            window.QQ_Debug_Groups_Sync = function() {
-                console.log('🔍 开始检查分组同步状态...');
-                
-                const currentCharId = getCurrentCharacterId();
-                console.log(`🎭 当前角色ID: "${currentCharId}"`);
-                
-                // 检查内存中的分组
-                console.log(`📝 内存中的分组数量: ${contactGroups.length}`);
-                if (contactGroups.length > 0) {
-                    console.log('📋 内存中的分组列表:');
-                    contactGroups.forEach((group, index) => {
-                        console.log(`  ${index + 1}. ${group.name} (${group.contacts.length}人) [ID: ${group.id}]`);
-                    });
-                } else {
-                    console.log('📋 内存中没有分组数据');
-                }
-                
-                // 检查世界书状态
-                if (!worldbook || !entries) {
-                    console.error('❌ 世界书功能不可用');
-                    console.log('🔍 世界书状态:', {
-                        worldbook: !!worldbook,
-                        entries: !!entries,
-                        entriesLength: entries ? entries.length : 'undefined'
-                    });
-                    return;
-                }
-                
-                // 检查世界书中的分组条目
-                const expectedComment = `QQ_分组备份_${currentCharId}`;
-                const groupEntry = entries.find(entry => entry.comment === expectedComment);
-                
-                if (groupEntry) {
-                    console.log(`✅ 找到世界书条目: "${expectedComment}"`);
-                    console.log(`📝 条目内容长度: ${groupEntry.content ? groupEntry.content.length : 0} 字符`);
-                    
-                    try {
-                        const savedGroups = JSON.parse(groupEntry.content);
-                        if (Array.isArray(savedGroups)) {
-                            console.log(`📊 世界书中保存的分组数量: ${savedGroups.length}`);
-                            console.log('📋 世界书中的分组列表:');
-                            savedGroups.forEach((group, index) => {
-                                console.log(`  ${index + 1}. ${group.name} (${group.contacts ? group.contacts.length : 0}人) [ID: ${group.id}]`);
-                            });
-                            
-                            // 比较内存和世界书数据
-                            if (contactGroups.length === savedGroups.length) {
-                                console.log('✅ 内存和世界书分组数量一致');
-                            } else {
-                                console.warn(`⚠️ 数据不一致 - 内存: ${contactGroups.length}, 世界书: ${savedGroups.length}`);
-                            }
-                        } else {
-                            console.error('❌ 世界书数据格式错误，不是数组');
-                        }
-                    } catch (parseError) {
-                        console.error('❌ 无法解析世界书数据:', parseError);
-                        console.log('📝 原始内容预览:', groupEntry.content.substring(0, 200) + '...');
-                    }
-                } else {
-                    console.error(`❌ 世界书中未找到条目: "${expectedComment}"`);
-                    console.log('🔍 世界书中包含"分组"的条目:');
-                    const groupEntries = entries.filter(e => e.comment && e.comment.includes('分组'));
-                    if (groupEntries.length > 0) {
-                        groupEntries.forEach(entry => {
-                            console.log(`  - ${entry.comment}`);
-                        });
-                    } else {
-                        console.log('  无相关条目');
-                    }
-                }
-                
-                console.log('🏁 分组同步状态检查完成');
-            };
             
             /**
              * 渲染分组界面
@@ -21671,7 +21594,7 @@ msg_end
             }
             
             /**
-             * 删除联系人分组 - 增强版本
+             * 删除联系人分组
              */
             async function deleteContactGroup(event, groupId) {
                 event.stopPropagation();
@@ -21680,29 +21603,17 @@ msg_end
                 await QQ_ForceReloadContactGroups();
                 
                 const group = contactGroups.find(g => g.id === groupId);
-                if (!group) {
-                    console.error('❌ 未找到要删除的分组:', groupId);
-                    return;
-                }
-                
-                // 获取当前角色ID用于调试
-                const currentCharId = getCurrentCharacterId();
-                console.log(`🗑️ 角色 "${currentCharId}" 请求删除分组: ${group.name} (${group.contacts.length}人)`);
+                if (!group) return;
                 
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
-                    console.log(`🗑️ 开始删除分组: ${group.name} (${group.contacts.length}人)`);
-                    console.log(`📊 删除前总分组数: ${contactGroups.length}`);
-                    
-                    // 保存原始数据用于回滚
-                    const originalGroups = [...contactGroups];
+                    console.log(`🗑️ 删除分组: ${group.name} (${group.contacts.length}人)`);
                     
                     // *** 修复：确保删除和保存操作正确完成 ***
+                    const originalGroups = [...contactGroups]; // 备份原始数据
+                    
                     try {
                         // 移除分组
                         contactGroups = contactGroups.filter(g => g.id !== groupId);
-                        console.log(`📊 删除后总分组数: ${contactGroups.length}`);
-                        
-                        console.log('💾 开始保存删除后的分组数据到世界书...');
                         const saveResult = await saveGroupsToStorage();
                         
                         if (saveResult) {
@@ -21711,23 +21622,19 @@ msg_end
                             // *** 修复：立即刷新界面显示最新状态 ***
                             await QQ_ForceReloadContactGroups();
                             await renderContactGroups();
-                            console.log('🔄 分组删除界面刷新完成');
+                            console.log('分组删除界面刷新完成');
                         } else {
-                            console.error('❌ 保存删除后的分组数据失败');
-                            alert('删除分组失败，请检查世界书功能是否正常');
-                            
-                            // 回滚操作
+                            // 保存失败，恢复原始数据
+                            console.error('❌ 保存删除后的分组数据失败，恢复原始状态');
                             contactGroups = originalGroups;
-                            console.log('🔄 已回滚分组删除操作');
+                            alert('删除分组失败：无法保存到世界书，请检查网络连接或重试');
                         }
                         
                     } catch (error) {
-                        console.error('❌ 删除分组过程中出现异常:', error);
-                        alert('删除分组失败，请重试');
-                        
-                        // 回滚操作
+                        console.error('❌ 删除分组失败:', error);
+                        // 恢复原始数据
                         contactGroups = originalGroups;
-                        console.log('🔄 已回滚分组删除操作');
+                        alert('删除分组失败，请重试：' + error.message);
                     }
                 }
             }
@@ -21880,31 +21787,51 @@ msg_end
                 console.log('开始拖拽分组:', groupId);
             }
             
-            /**
-             * 从本地存储加载分组数据
-             */
-            function loadGroupsFromStorage() {
-                try {
-                    const stored = localStorage.getItem('contact_groups');
-                    if (stored) {
-                        contactGroups = JSON.parse(stored);
-                    }
-                } catch (error) {
-                    console.error('加载分组数据失败:', error);
-                    contactGroups = [];
-                }
-            }
+            // *** 移除重复的函数定义，避免与异步版本冲突 ***
+            // 原来的同步版本已被上面的异步版本替代
             
             /**
-             * 保存分组数据到本地存储
+             * *** 新增：分组同步调试工具 ***
+             * 用于检查分组数据的同步状态
              */
-            function saveGroupsToStorage() {
-                try {
-                    localStorage.setItem('contact_groups', JSON.stringify(contactGroups));
-                } catch (error) {
-                    console.error('保存分组数据失败:', error);
+            window.QQ_Debug_Groups_Sync = function() {
+                console.log('=== 分组同步状态调试 ===');
+                
+                const charId = getCurrentCharacterId() || 'default';
+                console.log(`当前角色ID: ${charId}`);
+                console.log(`内存中的分组数据:`, contactGroups);
+                
+                if (!worldbook || !entries) {
+                    console.error('❌ 世界书未初始化');
+                    return;
                 }
-            }
+                
+                const comment = `QQ_分组备份_${charId}`;
+                const targetEntry = entries.find(entry => entry.comment === comment);
+                
+                if (targetEntry) {
+                    try {
+                        const worldbookGroups = JSON.parse(targetEntry.content);
+                        console.log(`世界书中的分组数据:`, worldbookGroups);
+                        
+                        // 检查数据一致性
+                        const memoryLength = contactGroups.length;
+                        const worldbookLength = Array.isArray(worldbookGroups) ? worldbookGroups.length : 0;
+                        
+                        if (memoryLength === worldbookLength) {
+                            console.log(`✅ 数据同步正常：内存和世界书都有 ${memoryLength} 个分组`);
+                        } else {
+                            console.warn(`⚠️ 数据不同步：内存有 ${memoryLength} 个分组，世界书有 ${worldbookLength} 个分组`);
+                        }
+                    } catch (error) {
+                        console.error('❌ 解析世界书数据失败:', error);
+                    }
+                } else {
+                    console.warn(`⚠️ 世界书中没有找到分组条目: ${comment}`);
+                }
+                
+                console.log('=== 调试结束 ===');
+            };
             
             /**
              * 处理新建分组的键盘事件
@@ -27693,58 +27620,8 @@ msg_end
                 return QQ_SafeSaveToWorldBook('互动空间数据', allSpaces, 'QQ_互动空间数据');
             }
             
-            /**
-             * *** 新增：分组数据保存函数 ***
-             * 使用统一的保存机制
-             */
-            async function QQ_SaveContactGroupsToWorldBook(characterId, groups) {
-                try {
-                    const comment = `QQ_分组备份_${characterId}`;
-                    
-                    // 使用统一的保存机制
-                    const success = await QQ_UnifiedSaveToWorldBook(
-                        '联系人分组', 
-                        groups, 
-                        comment, 
-                        '分组'
-                    );
-                    
-                    if (success) {
-                        console.log(`✅ 角色${characterId}的分组数据已保存: ${groups.length}个分组`);
-                        console.log('📊 分组详情:', groups.map(g => `${g.name}(${g.contacts.length}人)`).join(', ') || '无分组');
-                    }
-                    
-                    return success;
-                } catch (error) {
-                    console.error('保存分组数据失败:', error);
-                    return false;
-                }
-            }
-            
-            /**
-             * *** 新增：分组数据加载函数 ***
-             * 使用统一的加载机制
-             */
-            async function QQ_LoadContactGroupsFromWorldBook(characterId) {
-                try {
-                    const comment = `QQ_分组备份_${characterId}`;
-                    
-                    // 使用统一的加载机制
-                    const groups = await QQ_UnifiedLoadFromWorldBook(comment, []);
-                    
-                    if (Array.isArray(groups) && groups.length > 0) {
-                        console.log(`✅ 加载角色${characterId}的分组数据: ${groups.length}个分组`);
-                        console.log('📊 分组详情:', groups.map(g => `${g.name}(${g.contacts.length}人)`).join(', '));
-                    } else {
-                        console.log(`📋 角色${characterId}没有分组数据`);
-                    }
-                    
-                    return groups || [];
-                } catch (error) {
-                    console.error('加载分组数据失败:', error);
-                    return [];
-                }
-            }
+            // *** 移除重复的QQ_SaveContactGroupsToWorldBook和QQ_LoadContactGroupsFromWorldBook函数 ***
+            // 已经直接在saveGroupsToStorage和loadGroupsFromStorage中实现了正确的逻辑
             
             /**
              * ===== 统一的世界书数据管理系统 =====
@@ -27789,74 +27666,21 @@ msg_end
                         console.log(`✅ ${dataType}数据已保存到新世界书条目: ${comment}`);
                     }
                     
-                    // *** 修复：强制同步保存到世界书 - 智能保存机制 ***
-                    let saveResult = false;
-                    
+                    // *** 修复：强制同步保存到世界书 ***
                     if (typeof saveWorldInfo === 'function') {
-                        try {
-                            await saveWorldInfo();
-                            console.log(`🔄 世界书保存操作已执行 (saveWorldInfo)`);
-                            saveResult = true;
-                        } catch (saveError) {
-                            console.warn('⚠️ saveWorldInfo调用失败:', saveError);
-                        }
-                    } 
-                    
-                    // 尝试其他保存方法
-                    if (!saveResult) {
-                        const altSaveMethods = [
-                            'window.saveWorldInfo',
-                            'window.SillyTavern?.saveWorldInfo', 
-                            'parent.saveWorldInfo',
-                            'top.saveWorldInfo'
-                        ];
-                        
-                        for (const methodPath of altSaveMethods) {
-                            try {
-                                const method = eval(methodPath);
-                                if (typeof method === 'function') {
-                                    await method();
-                                    console.log(`🔄 世界书保存操作已执行 (${methodPath})`);
-                                    saveResult = true;
-                                    break;
-                                }
-                            } catch (error) {
-                                // 忽略错误，继续尝试下一个方法
-                            }
-                        }
-                    }
-                    
-                    if (!saveResult) {
-                        console.warn('⚠️ 所有保存方法均不可用，依赖自动保存机制');
-                        console.log('📝 数据已更新到世界书条目，等待自动保存...');
-                    }
-                    
-                    // *** 优化：验证保存是否成功 - 宽松验证 ***
-                    const verifyEntry = entries.find(entry => entry.comment === comment);
-                    if (verifyEntry) {
-                        // 验证条目存在
-                        console.log(`✅ 验证成功：${dataType}数据条目已存在于世界书`);
-                        
-                        // 验证内容不为空
-                        if (verifyEntry.content && verifyEntry.content.trim()) {
-                            console.log(`✅ 验证成功：${dataType}数据内容不为空`);
-                            
-                            // 尝试解析JSON以验证格式正确性
-                            try {
-                                const parsedData = JSON.parse(verifyEntry.content);
-                                console.log(`✅ 验证成功：${dataType}数据格式正确`);
-                                return true;
-                            } catch (parseError) {
-                                console.warn(`⚠️ 验证警告：${dataType}数据格式可能有问题，但条目已保存`);
-                                return true; // 仍然认为保存成功，只是格式可能有问题
-                            }
-                        } else {
-                            console.warn(`⚠️ 验证警告：${dataType}数据内容为空，但条目已创建`);
-                            return true; // 空内容也认为是保存成功（可能是删除了所有分组）
-                        }
+                        await saveWorldInfo();
+                        console.log(`🔄 世界书保存操作已执行`);
                     } else {
-                        console.error(`❌ 验证失败：世界书中未找到${dataType}数据条目 "${comment}"`);
-                        console.log('🔍 当前世界书条目数量:', entries.length);
+                        console.warn('⚠️ saveWorldInfo函数不存在，依赖自动保存机制');
+                    }
+                    
+                    // *** 新增：验证保存是否成功 ***
+                    const verifyEntry = entries.find(entry => entry.comment === comment);
+                    if (verifyEntry && verifyEntry.content === jsonData) {
+                        console.log(`✅ 验证成功：${dataType}数据已正确保存到世界书`);
+                        return true;
+                    } else {
+                        console.error(`❌ 验证失败：${dataType}数据保存可能有问题`);
                         return false;
                     }
                     
