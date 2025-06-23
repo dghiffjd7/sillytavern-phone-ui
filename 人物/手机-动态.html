@@ -9995,8 +9995,8 @@ MiPhone_End`,
                     
                     // *** 简化版：只在函数存在时调用，否则依赖自动保存 ***
                     if (typeof saveWorldInfo === 'function') {
-                        await saveWorldInfo();
-                        console.log(`${operation}已成功保存到世界书`);
+                    await saveWorldInfo();
+                    console.log(`${operation}已成功保存到世界书`);
                     } else {
                         console.log(`${operation}已更新到世界书，依赖自动保存机制`);
                     }
@@ -21165,14 +21165,11 @@ msg_end
                     
                     if (success) {
                         console.log(`角色 ${charId} 的分组数据已保存到世界书，共 ${contactGroups.length} 个分组`);
-                        return true;
                     } else {
                         console.error('分组数据保存到世界书失败');
-                        return false;
                     }
                 } catch (error) {
                     console.error('保存分组到世界书时出错:', error);
-                    return false;
                 }
             }
             
@@ -21270,22 +21267,13 @@ msg_end
                 };
                 
                 contactGroups.push(newGroup);
+                await saveGroupsToStorage();
+                
+                closeNewGroupModal();
                 
                 console.log('创建新分组成功:', newGroup);
                 
-                // *** 修复：确保世界书保存完成后再提示用户 ***
-                const saveSuccess = await saveGroupsToStorage();
-                if (!saveSuccess) {
-                    alert('分组创建失败：保存到世界书时出错');
-                    // 回滚分组创建
-                    const index = contactGroups.indexOf(newGroup);
-                    if (index > -1) {
-                        contactGroups.splice(index, 1);
-                    }
-                    return;
-                }
-                
-                closeNewGroupModal();
+                // *** 修复：在alert之后再刷新界面，确保用户点击确认后才看到变化 ***
                 alert('分组"' + groupName + '"创建成功！');
                 
                 // 用户点击确认后，等待一小段时间确保世界书保存完成，然后刷新界面
@@ -21299,7 +21287,7 @@ msg_end
                     }).catch(error => {
                         console.error('分组界面刷新失败:', error);
                     });
-                }, 1000); // 增加到1.5秒确保世界书保存完成
+                }, 1500); // 增加到1.5秒确保世界书保存完成
             }
             
             /**
@@ -21535,29 +21523,22 @@ msg_end
                 
                 if (confirm(`确定要删除分组"${group.name}"吗？\n分组中的联系人将移动到未分组区域。`)) {
                     console.log(`🗑️ 删除分组: ${group.name} (${group.contacts.length}人)`);
-                    
                     // 移除分组
                     contactGroups = contactGroups.filter(g => g.id !== groupId);
+                    await saveGroupsToStorage();
                     
-                    // *** 修复：确保世界书保存完成后再提示用户 ***
-                    const saveSuccess = await saveGroupsToStorage();
-                    if (!saveSuccess) {
-                        alert('分组删除失败：保存到世界书时出错');
-                        // 回滚分组删除
-                        contactGroups.push(group);
-                        return;
-                    }
-                    
-                    console.log('分组删除成功，开始刷新界面...');
-                    
-                    // 立即刷新界面，不再使用setTimeout延迟
-                    try {
-                        await QQ_ForceReloadContactGroups();
-                        await renderContactGroups();
-                        console.log('分组删除界面刷新完成');
-                    } catch (error) {
-                        console.error('分组删除界面刷新失败:', error);
-                    }
+                    // *** 修复：等待世界书保存完成后再刷新界面 ***
+                    console.log('用户确认删除后，等待世界书保存完成后重新加载数据...');
+                    setTimeout(() => {
+                        console.log('开始重新加载分组数据以更新界面显示');
+                        QQ_ForceReloadContactGroups().then(() => {
+                            return renderContactGroups();
+                        }).then(() => {
+                            console.log('分组删除界面刷新完成');
+                        }).catch(error => {
+                            console.error('分组删除界面刷新失败:', error);
+                        });
+                    }, 1500); // 增加到1.5秒确保世界书保存完成
                 }
             }
             
@@ -22540,9 +22521,8 @@ msg_end
                     let groupEntry = null;
                     const groupEntryKey = `手机-群聊-${groupData.name}`;
                     
-                    // 修复：使用正确的uniqueComment进行查找
                     groupEntry = entries.find(e => 
-                        e.comment === uniqueComment || (e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`))
+                        e.comment === "手机-群聊" && e.content && e.content.includes(`[${groupData.name}]`)
                     );
                     
                     // 构建群聊条目内容 - 智能头像混合存储方案
@@ -22628,41 +22608,40 @@ msg_end
 头像=${avatarReference}`;
                     
                     if (groupEntry) {
-                        // 更新现有条目 - 使用简化方式
+                        // 更新现有条目
                         console.log('更新现有群聊条目:', groupEntry.uid);
-                        groupEntry.content = groupContent;
+                        await setLorebookEntries(worldbook, [
+                            {
+                                uid: groupEntry.uid,
+                                content: groupContent,
+                            }
+                        ]);
                     } else {
-                        // 创建新的独立群聊条目 - 使用简化方式
+                        // 创建新的独立群聊条目
                         console.log('创建新的独立群聊条目');
                         
-                        const newEntry = {
-                            comment: uniqueComment,
-                            key: ["此世界书永不触发"],
+                        // 使用正确的createLorebookEntry函数，遵循项目标准设定
+                        console.log('准备调用createLorebookEntry，参数:', { worldbook, uniqueComment, groupContent });
+                        const createResult = await createLorebookEntry(worldbook, {
+                            comment: uniqueComment, // 使用唯一的comment标识群聊
+                            key: ["此世界书永不触发"], // 使用标准的永不触发关键词，与手机-角色保持一致
                             content: groupContent,
                             position: "at_depth_as_system",
-                            type: "selective",
-                            depth: 4,
-                            exclude_recursion: true,
-                            order: 6000,
+                            type: "selective", // 绿灯：选择性触发
+                            depth: 4, // 深度4，与其他手机格式保持一致
+                            exclude_recursion: true, // 排除递归，遵循项目标准
+                            order: 6000, // 顺序6000，高于格式条目（5560-5564）
                             enabled: true,
-                            uid: Date.now()
-                        };
+                        });
+                        console.log('createLorebookEntry调用结果:', createResult);
                         
-                        // 直接添加到entries数组
-                        entries.push(newEntry);
-                        
-                        // 如果worldbook.entries存在，也添加到那里（兼容性）
-                        if (worldbook.entries) {
-                            worldbook.entries.push(newEntry);
+                        // 尝试触发世界书保存（如果有相关函数的话）
+                        if (typeof saveWorldInfo === 'function') {
+                            console.log('触发saveWorldInfo保存...');
+                            await saveWorldInfo();
+                        } else {
+                            console.log('saveWorldInfo函数不可用，依赖SillyTavern自动保存机制');
                         }
-                    }
-                    
-                    // 使用简化的保存方式
-                    if (typeof saveWorldInfo === 'function') {
-                        console.log('触发saveWorldInfo保存...');
-                        await saveWorldInfo();
-                    } else {
-                        console.log('saveWorldInfo函数不可用，依赖SillyTavern自动保存机制');
                     }
                     
                     console.log('群聊已成功添加到独立的世界书条目');
@@ -22717,8 +22696,16 @@ msg_end
                         updatedContent += `成员=${members.join(',')}\n`;
                     }
                     
-                    // 使用简化方式直接更新条目内容
-                    groupEntry.content = updatedContent.trim();
+                    // 更新世界书
+                    await setLorebookEntries(worldbook, [
+                        {
+                            uid: groupEntry.uid,
+                            content: updatedContent.trim(),
+                        }
+                    ]);
+                    
+                    // 重新加载entries以更新本地数据
+                    entries = await getLorebookEntries(worldbook);
                     
                     // 同步更新本地数据结构
                     if (QQ_msgjson.群聊[groupName]) {
@@ -22786,7 +22773,7 @@ msg_end
 成员=${backupMembers}
 头像=${backupAvatar}`;
                     
-                    // 4. 直接在原条目上更新内容、comment和key（使用简化方式）
+                    // 4. 直接在原条目上更新内容、comment和key（避免创建新条目的复杂性）
                     const newUniqueComment = `手机-群聊-${newName}`;
                     const newGroupEntryKey = `手机-群聊-${newName}`;
                     
@@ -22795,17 +22782,20 @@ msg_end
                     console.log('新key:', [newGroupEntryKey]);
                     console.log('新内容:', newContent.substring(0, 100) + '...');
                     
-                    // 使用简化方式直接更新条目属性
-                    oldGroupEntry.comment = newUniqueComment;
-                    oldGroupEntry.key = [newGroupEntryKey];
-                    oldGroupEntry.content = newContent;
+                    // 使用setLorebookEntries更新现有条目的comment、key和content
+                    await setLorebookEntries(worldbook, [
+                        {
+                            uid: oldGroupEntry.uid,
+                            comment: newUniqueComment,
+                            key: [newGroupEntryKey],
+                            content: newContent
+                        }
+                    ]);
                     
                     console.log('群聊条目更新成功');
                     
-                    // 5. 使用简化的保存方式
-                    if (typeof saveWorldInfo === 'function') {
-                        await saveWorldInfo();
-                    }
+                    // 5. 重新加载entries以更新本地数据
+                    entries = await getLorebookEntries(worldbook);
                     
                     // 6. 同步更新所有相关的数据结构
                     console.log('开始同步更新相关数据结构...');
@@ -22907,23 +22897,12 @@ msg_end
                         return false;
                     }
                     
-                    // 使用简化方式删除世界书条目
+                    // 删除世界书条目
+                    await deleteLorebookEntry(worldbook, groupEntry.uid);
+                    
                     // 从本地entries数组中移除
                     if (groupIndex >= 0 && entries) {
                         entries.splice(groupIndex, 1);
-                    }
-                    
-                    // 如果worldbook.entries存在，也从那里移除（兼容性）
-                    if (worldbook.entries) {
-                        const wbIndex = worldbook.entries.findIndex(e => e.uid === groupEntry.uid);
-                        if (wbIndex >= 0) {
-                            worldbook.entries.splice(wbIndex, 1);
-                        }
-                    }
-                    
-                    // 使用简化的保存方式
-                    if (typeof saveWorldInfo === 'function') {
-                        await saveWorldInfo();
                     }
                     
                     console.log('群聊已从独立世界书条目中删除');
@@ -23106,8 +23085,14 @@ msg_end
                         throw new Error('添加到世界书失败');
                     }
                     
-                    // *** 修复：不再使用复杂的API调用，依赖简化保存机制 ***
-                    console.log('群聊已保存到世界书，无需手动刷新entries');
+                    // 立即刷新entries，确保新创建的群聊能被加载
+                    console.log('刷新entries以包含新创建的群聊');
+                    try {
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                    } catch (e) {
+                        console.warn('刷新entries失败，但群聊已创建:', e);
+                    }
                     
                     // 2. 确保群聊立即加入QQ_Groups数组
                     if (!QQ_Groups.includes(groupName)) {
@@ -23168,8 +23153,14 @@ msg_end
                     // 4. 删除聊天页面
                     $(`.QQ_chat_page[data-name='${groupName}']`).remove();
                     
-                    // *** 修复：不再使用复杂的API调用，依赖简化保存机制 ***
-                    console.log('群聊已从世界书删除，无需手动刷新entries');
+                    // 5. 立即刷新entries，确保删除的群聊从界面消失
+                    console.log('刷新entries以移除已删除的群聊');
+                    try {
+                        entries = await getLorebookEntries(worldbook);
+                        console.log('entries刷新成功，新的条目数量:', entries ? entries.length : 'failed');
+                    } catch (e) {
+                        console.warn('刷新entries失败，但群聊已删除:', e);
+                    }
                     
                     // 6. 立即重新加载群聊以确保已删除的群聊从界面消失
                     console.log('立即重新加载群聊数据以移除已删除的群聊');
@@ -25324,7 +25315,7 @@ msg_end
                                 }).catch(error => {
                                     console.error('群聊删除界面刷新失败:', error);
                                 });
-                            }, 1000); // 等待1.5秒确保世界书保存完成
+                            }, 1500); // 等待1.5秒确保世界书保存完成
                             
                         } catch (error) {
                             console.error('删除群聊时出错:', error);
@@ -26638,14 +26629,14 @@ msg_end
 头像=${avatarReference}`;
                     
                     if (groupEntry) {
-                        // 更新现有条目 - 使用简化方式
+                        // 更新现有条目
                         console.log('更新现有群聊条目:', groupEntry.uid);
-                        groupEntry.content = groupContent;
-                        
-                        // 使用简化的保存方式
-                        if (typeof saveWorldInfo === 'function') {
-                            await saveWorldInfo();
-                        }
+                        await setLorebookEntries(worldbook, [
+                            {
+                                uid: groupEntry.uid,
+                                content: groupContent,
+                            }
+                        ]);
                         console.log('群聊已保存到世界书');
                     } else {
                         console.error('未找到群聊条目，无法保存');
@@ -27576,23 +27567,6 @@ msg_end
              */
             async function QQ_UnifiedSaveToWorldBook(dataType, dataContent, comment, keyPrefix = 'QQ') {
                 try {
-                    // *** 修复：自动初始化worldbook和entries ***
-                    if (!worldbook || !entries) {
-                        console.log(`自动初始化世界书以保存${dataType}数据...`);
-                        try {
-                            if (!worldbook) {
-                                worldbook = await GetWorldBookName();
-                            }
-                            if (!entries && worldbook) {
-                                entries = await getLorebookEntries(worldbook);
-                            }
-                        } catch (initError) {
-                            console.error('初始化世界书失败:', initError);
-                            console.warn(`世界书功能不可用，无法保存${dataType}数据`);
-                            return false;
-                        }
-                    }
-                    
                     if (!worldbook || !entries) {
                         console.warn(`世界书功能不可用，无法保存${dataType}数据`);
                         return false;
@@ -27642,23 +27616,6 @@ msg_end
              */
             async function QQ_UnifiedLoadFromWorldBook(comment, defaultValue = null) {
                 try {
-                    // *** 修复：自动初始化worldbook和entries ***
-                    if (!worldbook || !entries) {
-                        console.log(`自动初始化世界书以加载数据...`);
-                        try {
-                            if (!worldbook) {
-                                worldbook = await GetWorldBookName();
-                            }
-                            if (!entries && worldbook) {
-                                entries = await getLorebookEntries(worldbook);
-                            }
-                        } catch (initError) {
-                            console.error('初始化世界书失败:', initError);
-                            console.warn(`世界书功能不可用，返回默认值`);
-                            return defaultValue;
-                        }
-                    }
-                    
                     if (!worldbook || !entries) {
                         console.warn(`世界书功能不可用，返回默认值`);
                         return defaultValue;
@@ -27781,107 +27738,6 @@ msg_end
              */
             window.QQ_DataManager = {
                 /**
-                 * *** 新增：测试群聊创建和分组删除功能 ***
-                 */
-                async testGroupAndChatFunctions() {
-                    console.log('=== 🧪 测试群聊创建和分组删除功能 ===');
-                    
-                    try {
-                        // 1. 测试世界书基本状态
-                        console.log('\\n1️⃣ 检查世界书基本状态...');
-                        if (!worldbook || !entries) {
-                            console.error('❌ 世界书或entries不可用');
-                            return false;
-                        }
-                        console.log(`✅ 世界书可用, entries数量: ${entries.length}`);
-                        
-                        // 2. 测试群聊创建相关函数
-                        console.log('\\n2️⃣ 测试群聊创建功能...');
-                        const testGroupData = {
-                            name: '测试群聊_' + Date.now().toString().slice(-4),
-                            members: ['测试用户1', '测试用户2'],
-                            avatar: {
-                                type: 'upload',
-                                imageData: 'http://sharkpan.xyz/f/z0WU5/mmexport1736971020657.gif'
-                            }
-                        };
-                        
-                        console.log('准备创建测试群聊:', testGroupData.name);
-                        
-                        // 测试addGroupToWorldbook函数
-                        if (typeof addGroupToWorldbook === 'function') {
-                            const createResult = await addGroupToWorldbook(testGroupData);
-                            console.log(`群聊创建结果: ${createResult ? '✅ 成功' : '❌ 失败'}`);
-                            
-                            if (createResult) {
-                                // 验证群聊是否真的保存到世界书
-                                const savedEntry = entries.find(e => 
-                                    e.comment === `手机-群聊-${testGroupData.name}` || 
-                                    (e.content && e.content.includes(`[${testGroupData.name}]`))
-                                );
-                                
-                                if (savedEntry) {
-                                    console.log('✅ 群聊已正确保存到世界书');
-                                    console.log('保存的内容:', savedEntry.content.substring(0, 100) + '...');
-                                } else {
-                                    console.error('❌ 群聊未保存到世界书');
-                                }
-                            }
-                        } else {
-                            console.error('❌ addGroupToWorldbook函数不存在');
-                        }
-                        
-                        // 3. 测试分组删除功能
-                        console.log('\\n3️⃣ 测试分组删除功能...');
-                        const characterId = getCurrentCharacterId() || 'default';
-                        console.log(`当前角色ID: ${characterId}`);
-                        
-                        // 查找现有分组数据
-                        const groupEntryComment = `QQ_分组备份_${characterId}`;
-                        const groupEntry = entries.find(e => e.comment === groupEntryComment);
-                        
-                        if (groupEntry) {
-                            console.log('✅ 找到分组数据条目');
-                            try {
-                                const groupData = JSON.parse(groupEntry.content);
-                                console.log(`当前分组数量: ${groupData.length}`);
-                                groupData.forEach((group, index) => {
-                                    console.log(`  ${index + 1}. ${group.name} (${group.contacts.length}个联系人)`);
-                                });
-                            } catch (e) {
-                                console.error('❌ 分组数据解析失败:', e);
-                            }
-                        } else {
-                            console.log('ℹ️ 当前角色没有分组数据');
-                        }
-                        
-                        // 4. 测试分组相关函数
-                        console.log('\\n4️⃣ 检查分组相关函数...');
-                        const functions = [
-                            'QQ_SaveContactGroupsToWorldBook',
-                            'QQ_LoadContactGroupsFromWorldBook', 
-                            'saveGroupsToStorage',
-                            'deleteContactGroup'
-                        ];
-                        
-                        functions.forEach(funcName => {
-                            if (typeof window[funcName] === 'function') {
-                                console.log(`✅ ${funcName} 函数可用`);
-                            } else {
-                                console.error(`❌ ${funcName} 函数不存在`);
-                            }
-                        });
-                        
-                        console.log('\\n🎯 测试完成! 检查上述结果以诊断问题。');
-                        return true;
-                        
-                    } catch (error) {
-                        console.error('❌ 测试过程中出错:', error);
-                        return false;
-                    }
-                },
-                
-                /**
                  * *** 新增：测试分组加载修复 ***
                  */
                 async testGroupLoading() {
@@ -27921,7 +27777,7 @@ msg_end
                                 if (data && typeof data === 'object' && data.content !== undefined) {
                                     console.log(`📋 检测到旧格式数据，提取content部分`);
                                     groupsData = data.content;
-                                } else {
+                    } else {
                                     console.log(`📋 检测到新格式数据，直接使用`);
                                     groupsData = data;
                                 }
@@ -27989,8 +27845,8 @@ msg_end
                         console.log(`\n🎯 互动空间: 公共${publicInteractive.length}个, 角色专属${characterInteractive.length}个`);
                         
                         console.log('\n=== 数据统计完成 ===');
-                        
-                    } catch (error) {
+                    
+                } catch (error) {
                         console.error('获取数据统计失败:', error);
                     }
                 },
@@ -28054,7 +27910,7 @@ msg_end
                         
                         console.log('\n=== 所有数据保存完成 ===');
                         
-                    } catch (error) {
+                } catch (error) {
                         console.error('保存数据失败:', error);
                     }
                 },
@@ -30359,7 +30215,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     console.error('调试分组存储失败:', error);
                 }
             };
-
+            
         </script>
     </body>
 </html>
