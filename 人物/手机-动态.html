@@ -21326,14 +21326,24 @@ msg_end
                 // 清空容器，但用jQuery的方式
                 $(contactsContainer).empty();
 
-                // 步骤1: 立即将群聊重新添加回去，确保它们总在最上方
+                // 步骤1: 基于最新的QQ_Groups数据过滤并添加群聊，确保它们总在最上方
                 if ($originalGroupChats.length > 0) {
                     const $groupChatSection = $('<div></div>');
                     $originalGroupChats.each(function() {
-                        // 使用jQuery的detach()和appendTo()来保持事件绑定
-                        $(this).appendTo($groupChatSection);
+                        const groupName = $(this).attr('data-name');
+                        // *** 关键修复：只添加仍在QQ_Groups中的群聊 ***
+                        if (groupName && QQ_Groups.includes(groupName)) {
+                            console.log('✅ 保留群聊在联系人界面:', groupName);
+                            $(this).appendTo($groupChatSection);
+                        } else {
+                            console.log('❌ 跳过已删除的群聊:', groupName);
+                        }
                     });
-                    $groupChatSection.appendTo($(contactsContainer));
+                    
+                    // 只有当有有效群聊时才添加到界面
+                    if ($groupChatSection.children().length > 0) {
+                        $groupChatSection.appendTo($(contactsContainer));
+                    }
                 }
 
                 // 步骤2: 渲染私聊的自定义分组
@@ -25335,16 +25345,6 @@ msg_end
                             if (typeof renderContactGroups === 'function') {
                                 await renderContactGroups();
                                 console.log('✅ 联系人界面重新渲染完成，群聊已从界面消失');
-                                
-                                // *** 保险措施：1.5秒后再次渲染，确保界面完全正确刷新 ***
-                                setTimeout(async () => {
-                                    console.log('🔄 执行1.5秒后的二次渲染，确保界面完全刷新');
-                                    if (typeof renderContactGroups === 'function') {
-                                        await renderContactGroups();
-                                        console.log('✅ 二次渲染完成，界面刷新确认无误');
-                                    }
-                                }, 1500);
-                                
                             } else {
                                 console.error('❌ renderContactGroups函数不可用');
                             }
