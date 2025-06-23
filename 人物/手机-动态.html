@@ -6703,6 +6703,11 @@
                 }
                 
                 result = System_TagCompletion(result);
+                
+                // *** 新增：清理AI回复中的consider注释和其他嵌套标签 ***
+                result = QQ_CleanNestedTags(result);
+                console.log(`清理后的结果:\n${result}`);
+                
                 console.log(`开始对结果进行处理:\n${result}`);
                 
                 // *** 增强格式容错：支持多种MiPhone格式变体（包括不完整格式） ***
@@ -17254,6 +17259,13 @@ ${index + 1}. ${space.name}
                         let LastTime = "";
                         let LastMsg = "";
                         for (let msg of json.私聊[str]) {
+                            // *** 新增：清理私聊消息内容 ***
+                            const parts = msg.split("--");
+                            if (parts.length >= 2) {
+                                parts[1] = QQ_CleanNestedTags(parts[1]);
+                                msg = parts.join("--");
+                            }
+                            
                             // 检查是否为新消息（不在现有消息列表中）
                             const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
                             QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
@@ -17316,6 +17328,19 @@ ${index + 1}. ${space.name}
                 }
                 for (let name in json.群聊) {
                     try {
+                        // *** 新增：清理群聊消息内容 ***
+                        if (json.群聊[name]["msgs"]) {
+                            json.群聊[name]["msgs"] = json.群聊[name]["msgs"].map(msg => {
+                                const parts = msg.split("--");
+                                if (parts.length >= 2) {
+                                    // 清理消息内容部分（第二部分）
+                                    parts[1] = QQ_CleanNestedTags(parts[1]);
+                                    return parts.join("--");
+                                }
+                                return msg;
+                            });
+                        }
+                        
                         if (!QQ_msgjson.群聊[name]) {
                             QQ_msgjson.群聊[name] = {};
                             QQ_msgjson.群聊[name]["members"] =
@@ -18225,7 +18250,10 @@ msg_end
                          console.log(`检测到 ${allMsgMatches.length} 条私聊消息，开始处理...`);
                          
                          for (const msgMatch of allMsgMatches) {
-                             const msgContent = msgMatch[1].trim();
+                             let msgContent = msgMatch[1].trim();
+                             
+                             // *** 新增：清理AI回复中的consider注释和其他标签 ***
+                             msgContent = QQ_CleanNestedTags(msgContent);
                              
                              // 创建消息唯一标识（避免重复处理）
                              let messageHash;
