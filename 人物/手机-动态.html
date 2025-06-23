@@ -5777,16 +5777,8 @@
                     }
                 }
                 
-                // 检查localStorage中的旧数据
-                const localKey = getCharacterGroupsKey();
-                const localStored = localStorage.getItem(localKey);
-                let localGroups = 0;
-                if (localStored) {
-                    try {
-                        const localData = JSON.parse(localStored);
-                        localGroups = localData.length || 0;
-                    } catch (e) {}
-                }
+                // *** 移除localStorage检查逻辑，统一使用世界书 ***
+                let localGroups = 0; // 保持为0，不再检查localStorage
                 
                 console.log(`📊 分组备份统计 (角色: ${charId})：
                 当前内存中分组: ${contactGroups.length}个
@@ -21124,12 +21116,9 @@ msg_end
             }
             
             /**
-             * 获取角色专属的分组存储key
+             * *** 已移除：getCharacterGroupsKey函数 ***
+             * 现在统一使用世界书存储，不再需要localStorage key
              */
-            function getCharacterGroupsKey() {
-                const charId = getCurrentCharacterId();
-                return `contactGroups_${charId}`;
-            }
             
             /**
              * 从世界书加载分组（按角色隔离）
@@ -21147,21 +21136,8 @@ msg_end
                         contactGroups.push(...groups); // 添加从世界书加载的数据
                         console.log(`从世界书加载了 ${groups.length} 个分组`);
                     } else {
-                        // 尝试从localStorage迁移数据
-                        console.log('世界书中没有找到分组数据，尝试从localStorage迁移...');
-                        const charGroupsKey = getCharacterGroupsKey();
-                        const localStored = localStorage.getItem(charGroupsKey);
-                        if (localStored) {
-                            const localGroups = JSON.parse(localStored);
-                            contactGroups.length = 0;
-                            contactGroups.push(...localGroups);
-                            console.log(`从localStorage迁移了 ${localGroups.length} 个分组到世界书`);
-                            // 立即保存到世界书
-                            setTimeout(() => saveGroupsToStorage(), 1000);
-                        } else {
-                            console.log('没有找到任何分组数据，使用默认空数组');
-                            contactGroups.length = 0;
-                        }
+                        console.log('世界书中没有找到分组数据，使用默认空数组');
+                        contactGroups.length = 0;
                     }
                 } catch (error) {
                     console.error('从世界书加载分组时出错:', error);
@@ -21836,30 +21812,9 @@ msg_end
             }
             
             /**
-             * 从本地存储加载分组数据
+             * *** 已移除：旧的localStorage存储函数 ***
+             * 现在统一使用世界书存储机制
              */
-            function loadGroupsFromStorage() {
-                try {
-                    const stored = localStorage.getItem('contact_groups');
-                    if (stored) {
-                        contactGroups = JSON.parse(stored);
-                    }
-                } catch (error) {
-                    console.error('加载分组数据失败:', error);
-                    contactGroups = [];
-                }
-            }
-            
-            /**
-             * 保存分组数据到本地存储
-             */
-            function saveGroupsToStorage() {
-                try {
-                    localStorage.setItem('contact_groups', JSON.stringify(contactGroups));
-                } catch (error) {
-                    console.error('保存分组数据失败:', error);
-                }
-            }
             
             /**
              * 处理新建分组的键盘事件
@@ -24540,11 +24495,10 @@ msg_end
              * 从本地存储加载群聊数据
              */
             // 此函数已被loadGroupChatsFromWorldbook替代，为了兼容性保留别名
-            // 但现在禁用自动加载，避免重复循环
-            async function loadGroupsFromStorage() {
-                console.log('loadGroupsFromStorage被调用，但已禁用自动加载');
-                return []; // 返回空数组，避免重复加载
-            }
+            /**
+             * *** 已移除：重复的loadGroupsFromStorage函数 ***
+             * 现在统一使用世界书加载机制
+             */
             
             
             /**
@@ -28127,24 +28081,10 @@ msg_end
              * ===== 修复分组保存功能 =====
              */
             
-            // 重写分组保存函数确保使用世界书
-            window.saveGroupsToStorage = async function() {
-                try {
-                    const characterId = getCurrentCharacterId() || 'default';
-                    console.log(`🔄 保存分组到世界书，角色ID: ${characterId}, 分组数量: ${contactGroups.length}`);
-                    
-                    const success = QQ_SaveContactGroupsToWorldBook(characterId, contactGroups);
-                    
-                    if (success) {
-                        console.log(`✅ 角色 ${characterId} 的分组数据已保存到世界书`);
-                        console.log('📊 分组详情:', contactGroups.map(g => `${g.name}(${g.contacts.length}人)`).join(', '));
-                    } else {
-                        console.error('❌ 分组数据保存到世界书失败');
-                    }
-                } catch (error) {
-                    console.error('💥 保存分组到世界书时出错:', error);
-                }
-            };
+            /**
+             * *** 已移除：重复的window.saveGroupsToStorage定义 ***
+             * 现在统一使用主saveGroupsToStorage函数
+             */
             
             /**
              * *** 新增：强制重新加载分组数据 ***
@@ -28175,27 +28115,10 @@ msg_end
                 }
             };
             
-            // 重写分组加载函数确保从世界书读取
-            window.loadGroupsFromStorage = async function() {
-                try {
-                    const characterId = getCurrentCharacterId() || 'default';
-                    console.log(`从世界书加载分组，角色ID: ${characterId}`);
-                    
-                    const groups = await QQ_LoadContactGroupsFromWorldBook(characterId);
-                    
-                    if (groups && Array.isArray(groups)) {
-                        contactGroups.length = 0; // 清空现有数组
-                        contactGroups.push(...groups); // 添加从世界书加载的数据
-                        console.log(`从世界书加载了 ${groups.length} 个分组`);
-                    } else {
-                        console.log('世界书中没有找到分组数据，使用默认空数组');
-                        contactGroups.length = 0;
-                    }
-                } catch (error) {
-                    console.error('从世界书加载分组时出错:', error);
-                    contactGroups.length = 0;
-                }
-            };
+            /**
+             * *** 已移除：重复的window.loadGroupsFromStorage定义 ***
+             * 现在统一使用主loadGroupsFromStorage函数
+             */
             
             /**
              * ===== 数据管理和调试工具 =====
