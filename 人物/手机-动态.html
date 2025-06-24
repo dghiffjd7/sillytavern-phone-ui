@@ -6876,31 +6876,65 @@
                     result.indexOf("msg_start") < 0 ||
                     result.indexOf("msg_end") < 0
                 ) {
-                    // 自动补全tag
+                    console.log("🔧 检测到缺少MSG标签，开始自动补全...");
+                    console.log("原始result内容:", result.substring(0, 200) + "...");
+                    
+                    // 自动补全tag - 增强版
                     if (result.indexOf("msg_start") < 0) {
-                        // 没有起始标识
+                        console.log("🔍 缺少msg_start，正在查找聊天开始标签...");
+                        
+                        // 修复：优化正则表达式以支持更多格式
                         let start = result.match(
-                            /MiPhone_start[\s\S]*?(<群聊:.+?>|<[^/]+和.+的(?:聊天|私聊)>)/,
+                            /<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/
                         );
+                        
                         if (start) {
+                            console.log(`✅ 找到聊天开始标签: ${start[0]}`);
                             result = result.replace(
-                                start[1],
-                                `msg_start\n${start[1]}`,
+                                start[0],
+                                `msg_start\n${start[0]}`,
                             );
+                        } else {
+                            console.log("❌ 未找到聊天开始标签，尝试备用模式...");
+                            // 备用模式：如果有任何聊天内容，在最前面添加msg_start
+                            if (result.includes('<') && (result.includes('聊天') || result.includes('私聊') || result.includes('群聊'))) {
+                                result = `msg_start\n${result}`;
+                                console.log("✅ 使用备用模式添加msg_start");
+                            }
                         }
                     }
+                    
                     if (result.indexOf("msg_end") < 0) {
-                        // 没有结束标识
-                        let end = result.match(
-                            /<\/群聊:.+?>|<\/.+和.+的(?:聊天|私聊)>/gm,
-                        );
-                        if (end) {
+                        console.log("🔍 缺少msg_end，正在查找聊天结束标签...");
+                        
+                        // 修复：优化正则表达式以支持更多格式
+                        let endMatches = [...result.matchAll(
+                            /<\/(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/g
+                        )];
+                        
+                        if (endMatches.length > 0) {
+                            const lastEnd = endMatches[endMatches.length - 1][0];
+                            console.log(`✅ 找到聊天结束标签: ${lastEnd}`);
                             result = result.replace(
-                                end[end.length - 1],
-                                `${end[end.length - 1]}\nmsg_end`,
+                                lastEnd,
+                                `${lastEnd}\nmsg_end`,
                             );
+                        } else {
+                            console.log("❌ 未找到聊天结束标签，尝试备用模式...");
+                            // 备用模式：如果没有moment_start，在最后添加msg_end
+                            if (!result.includes('moment_start')) {
+                                result = `${result}\nmsg_end`;
+                                console.log("✅ 使用备用模式添加msg_end");
+                            } else {
+                                // 如果有动态内容，在动态之前添加msg_end
+                                result = result.replace('moment_start', 'msg_end\nmoment_start');
+                                console.log("✅ 在动态内容前添加msg_end");
+                            }
                         }
                     }
+                    
+                    console.log("🔧 MSG标签补全完成");
+                    console.log("补全后result内容:", result.substring(0, 200) + "...");
                 }
                 const msg = result.match(/msg_start([\s\S]+?)msg_end/);
                 if (msg) {
@@ -30105,6 +30139,169 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 }
                 
                 triggerSlash('/echo ✅ 点赞功能测试完成，请查看控制台详细结果');
+            };
+
+            /**
+             * *** 新增：MSG标签缺失问题的专门诊断工具 ***
+             */
+            window.QQ_Test_MSG_Tag_Issue = function() {
+                console.log('=== 🔍 MSG标签缺失问题诊断 ===');
+                
+                // 模拟用户提供的实际内容格式
+                const testContent = `MiPhone_JSON_START
+<阿伟和可良的私聊>
+可良—指挥官，一大早就这么有精神，是晚上体息得很好吗？—09:34
+可良—不过，想要把可良"抱紧，动弹不得"呢呢，指挥官的用词还是这么直接又可爱呢。—09:34
+可良—只是，这种事情光靠是没用的呢？—09:35
+</阿伟和可良的私聊>
+<阿伟和圣路易斯的聊天>
+圣路易斯—哦呵呵！指挥官一大早就这么热情，是想约我出去吗？—09:34
+圣路易斯—暗暗，好呢！正好我知道一家新开的咖啡店，那里的甜点据说非常棒哦。—09:35
+圣路易斯—bob-微笑靠近] —09:36
+圣路易斯—是在暗示想要些更刺激的东西吗？真拿你没办法呢～—09:36
+</阿伟和圣路易斯的聊天>
+moment_start
+可良一优雅的"束缚"，才是真正的艺术。某些粗暴的方式，只会显得呆算。—09:45—已浏览 35—已点赞 10
+圣路易斯—呵呵，如如的优雅倒是无人能及呢
+琭吉尔—呢，不过是些小孩子的把戏。
+胡腾—无聊。
+moment_end
+MiPhone_JSON_END`;
+
+                console.log('\n📋 测试内容长度:', testContent.length);
+                console.log('\n🔍 第一步：检查格式匹配');
+                
+                // 检查格式匹配
+                const formatPatterns = [
+                    /MiPhone_start([\s\S]+?)MiPhone_end/g,           // 标准格式
+                    /MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/g, // JSON格式
+                    /MiPhone_JSON_start([\s\S]+?)MiPhone_JSON_end/g, // 混合格式1
+                    /MiPhone_Start([\s\S]+?)MiPhone_End/g,           // 首字母大写
+                    /MiPhone_START([\s\S]+?)MiPhone_END/g,           // 全大写
+                    // 不完整格式支持
+                    /MiPhone_JSON_START([\s\S]+?)$/g,                // 不完整JSON格式
+                    /MiPhone_start([\s\S]+?)$/g,                     // 不完整标准格式
+                    /MiPhone_Start([\s\S]+?)$/g,                     // 不完整首字母大写格式
+                    /MiPhone_START([\s\S]+?)$/g,                     // 不完整全大写格式
+                ];
+                
+                let matches = [];
+                let matchedPattern = null;
+                for (const pattern of formatPatterns) {
+                    const currentMatches = [...testContent.matchAll(pattern)];
+                    if (currentMatches.length > 0) {
+                        matches = currentMatches;
+                        matchedPattern = pattern;
+                        console.log(`✅ 找到格式匹配 (${pattern.source.substring(0, 30)}...): ${currentMatches.length} 个`);
+                        break;
+                    }
+                }
+                
+                if (matches.length === 0) {
+                    console.log('❌ 格式匹配失败');
+                    return;
+                }
+                
+                const extractedContent = matches[0][1];
+                console.log('\n📝 提取的内容长度:', extractedContent.length);
+                console.log('📝 提取的内容预览:', extractedContent.substring(0, 200) + '...');
+                
+                console.log('\n🔍 第二步：检查MSG标签');
+                const hasMsgStart = extractedContent.indexOf("msg_start") >= 0;
+                const hasMsgEnd = extractedContent.indexOf("msg_end") >= 0;
+                console.log(`msg_start 存在: ${hasMsgStart}`);
+                console.log(`msg_end 存在: ${hasMsgEnd}`);
+                
+                if (!hasMsgStart || !hasMsgEnd) {
+                    console.log('\n⚠️ 发现问题：缺少MSG标签');
+                    
+                    console.log('\n🔧 第三步：尝试自动补全MSG标签');
+                    let fixedContent = extractedContent;
+                    
+                    if (!hasMsgStart) {
+                        // 寻找聊天开始标签（优化正则表达式）
+                        const start = fixedContent.match(
+                            /<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/
+                        );
+                        if (start) {
+                            console.log(`找到聊天开始标签: ${start[0]}`);
+                            fixedContent = fixedContent.replace(
+                                start[0],
+                                `msg_start\n${start[0]}`
+                            );
+                        } else {
+                            console.log('❌ 未找到合适的聊天开始标签');
+                        }
+                    }
+                    
+                    if (!hasMsgEnd) {
+                        // 寻找聊天结束标签（优化正则表达式）
+                        const endMatches = [...fixedContent.matchAll(
+                            /<\/(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/g
+                        )];
+                        if (endMatches.length > 0) {
+                            const lastEnd = endMatches[endMatches.length - 1][0];
+                            console.log(`找到聊天结束标签: ${lastEnd}`);
+                            fixedContent = fixedContent.replace(
+                                lastEnd,
+                                `${lastEnd}\nmsg_end`
+                            );
+                        } else {
+                            console.log('❌ 未找到合适的聊天结束标签');
+                        }
+                    }
+                    
+                    console.log('\n✅ 修复后的内容预览:');
+                    console.log(fixedContent.substring(0, 300) + '...');
+                    
+                    console.log('\n🔍 第四步：验证修复后的MSG解析');
+                    const msgMatch = fixedContent.match(/msg_start([\s\S]+?)msg_end/);
+                    if (msgMatch) {
+                        console.log('✅ MSG解析成功');
+                        console.log('MSG内容长度:', msgMatch[1].length);
+                        console.log('MSG内容预览:', msgMatch[1].substring(0, 200) + '...');
+                        
+                        // 尝试解析YAML/JSON
+                        try {
+                            const parsed = JsonYamlParse(msgMatch[1]);
+                            if (parsed) {
+                                console.log('✅ YAML/JSON解析成功');
+                                console.log('解析结果类型:', Array.isArray(parsed) ? 'Array' : typeof parsed);
+                                if (Array.isArray(parsed)) {
+                                    console.log('消息数量:', parsed.length);
+                                }
+                            } else {
+                                console.log('❌ YAML/JSON解析失败：返回null');
+                            }
+                        } catch (error) {
+                            console.log('❌ YAML/JSON解析异常:', error.message);
+                        }
+                    } else {
+                        console.log('❌ MSG解析仍然失败');
+                    }
+                }
+                
+                console.log('\n🔍 第五步：测试智能提取备用方案');
+                const extractedInfo = QQ_ExtractValidInfo(extractedContent);
+                console.log('智能提取结果:', extractedInfo);
+                
+                console.log('\n🔍 第六步：测试动态提取');
+                const momentMatches = extractedContent.match(/moment_start([\s\S]*?)moment_end/g);
+                console.log(`动态匹配结果: ${momentMatches ? momentMatches.length : 0} 个`);
+                if (momentMatches) {
+                    momentMatches.forEach((match, index) => {
+                        console.log(`动态${index + 1}: ${match.substring(0, 100)}...`);
+                    });
+                }
+                
+                return {
+                    description: 'MSG标签缺失问题诊断完成',
+                    formatMatched: matches.length > 0,
+                    msgTagsPresent: hasMsgStart && hasMsgEnd,
+                    extractedContentLength: extractedContent.length,
+                    intelligentExtractionResult: extractedInfo.hasValidInfo,
+                    momentCount: momentMatches ? momentMatches.length : 0
+                };
             };
             
             // *** 消息清理功能 ***
