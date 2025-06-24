@@ -17758,11 +17758,20 @@ ${index + 1}. ${space.name}
                 }
                 return count;
             }
+            
+            // *** 新增：动态评论生成状态跟踪 ***
+            let QQ_MomentGenerating = false;
+            
             /**
              * *** 增强版动态评论功能 ***
-             * 支持8条评论上限、智能折叠、AI回复引导
+             * 支持8条评论上限、智能折叠、AI回复引导、防重复发送
              */
             async function QQ_Moment_Comment(event) {
+                // *** 新增：防重复发送检查 ***
+                if (QQ_MomentGenerating) {
+                    triggerSlash("/echo 生成中，请勿重复发送");
+                    return;
+                }
                 const $closest = $(event.currentTarget).closest(`.user_moment`);
                 const message = $closest.find(".moment_message").text();
                 const input = $closest.find("input[type='text']");
@@ -18047,44 +18056,57 @@ msg_end
                 sendvalue += `${timeContext}\n${finalRequest}`;
                 
                 console.log('发送给AI的内容:', sendvalue);
-                const result = await QQ_Gen(sendvalue);
                 
-                // *** 新增：保存消息数据 ***
-                await QQ_Save_Msg();
+                // *** 新增：设置生成状态为true，防止重复发送 ***
+                QQ_MomentGenerating = true;
                 
-                // *** 新增：智能处理AI回复（评论和私聊） ***
-                if (result) {
-                    // *** 新增：过滤thinking和content标签 ***
-                    let cleanedResult = result;
+                try {
+                    const result = await QQ_Gen(sendvalue);
                     
-                    // 移除thinking标签及其内容
-                    cleanedResult = cleanedResult.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                    // *** 新增：保存消息数据 ***
+                    await QQ_Save_Msg();
                     
-                    // 移除consider标签及其内容
-                    cleanedResult = cleanedResult.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
-                    
-                    // 移除其他可能的内部标签
-                    cleanedResult = cleanedResult.replace(/<reflection>[\s\S]*?<\/reflection>/gi, '');
-                    
-                    const hasMomentFormat = cleanedResult.includes('moment_start') && cleanedResult.includes('moment_end');
-                    const hasMsgFormat = cleanedResult.includes('msg_start') && cleanedResult.includes('msg_end');
-                    
-                    if (hasMomentFormat || hasMsgFormat) {
-                        // 处理动态评论和私聊消息
-                        await QQ_Handle_AI_Comments(cleanedResult, $closest);
+                    // *** 新增：智能处理AI回复（评论和私聊） ***
+                    if (result) {
+                        // *** 新增：过滤thinking和content标签 ***
+                        let cleanedResult = result;
                         
-                        // *** 使用强制保存函数确保所有数据都被保存 ***
-                        await QQ_Force_Save_All_Data();
+                        // 移除thinking标签及其内容
+                        cleanedResult = cleanedResult.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                        
+                        // 移除consider标签及其内容
+                        cleanedResult = cleanedResult.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
+                        
+                        // 移除其他可能的内部标签
+                        cleanedResult = cleanedResult.replace(/<reflection>[\s\S]*?<\/reflection>/gi, '');
+                        
+                        const hasMomentFormat = cleanedResult.includes('moment_start') && cleanedResult.includes('moment_end');
+                        const hasMsgFormat = cleanedResult.includes('msg_start') && cleanedResult.includes('msg_end');
+                        
+                        if (hasMomentFormat || hasMsgFormat) {
+                            // 处理动态评论和私聊消息
+                            await QQ_Handle_AI_Comments(cleanedResult, $closest);
+                            
+                            // *** 使用强制保存函数确保所有数据都被保存 ***
+                            await QQ_Force_Save_All_Data();
+                        } else {
+                            // 如果不是特定格式，使用原有的处理方式
+                            await ResultHandle(cleanedResult);
+                            
+                            // *** 使用强制保存函数确保所有数据都被保存 ***
+                            await QQ_Force_Save_All_Data();
+                        }
                     } else {
-                        // 如果不是特定格式，使用原有的处理方式
-                        await ResultHandle(cleanedResult);
-                        
-                        // *** 使用强制保存函数确保所有数据都被保存 ***
+                        // *** 即使AI没有回复，也要保存用户的评论 ***
                         await QQ_Force_Save_All_Data();
                     }
-                } else {
-                    // *** 即使AI没有回复，也要保存用户的评论 ***
+                } catch (error) {
+                    console.error('动态评论AI生成过程中出错:', error);
+                    // *** 即使出错也要保存用户的评论 ***
                     await QQ_Force_Save_All_Data();
+                } finally {
+                    // *** 新增：无论成功失败都要重置生成状态 ***
+                    QQ_MomentGenerating = false;
                 }
             }
             
