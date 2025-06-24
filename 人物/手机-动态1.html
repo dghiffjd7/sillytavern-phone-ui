@@ -28718,14 +28718,9 @@ msg_end
             
             /**
              * *** 修复：互动内容保存函数 ***
-             * 使用与动态、群聊相同的SillyTavern世界书API
+             * 使用项目统一的QQ_SafeSaveToWorldBook机制，保持与其他功能一致性
              */
             async function QQ_SaveInteractiveContentToWorldBook(content, characterName = null) {
-                if (!worldbook || !entries) {
-                    console.warn('世界书功能不可用，无法保存互动内容');
-                    return null;
-                }
-                
                 try {
                     const interactiveData = {
                         content: content,
@@ -28735,24 +28730,20 @@ msg_end
                         type: characterName ? 'character_specific' : 'public'
                     };
                     
-                    // 确定保存的条目名称
-                    const comment = characterName ? 
-                        `QQ_互动空间备份_${characterName}` : 
-                        'QQ_互动空间备份';
-                    
-                    // 查找现有条目
-                    let interactiveEntry = entries.find(entry => entry.comment === comment);
+                    // 确定保存的键值（世界书条目comment）
+                    const worldbookKey = characterName ? 
+                        `QQ_互动内容备份_${characterName}` : 
+                        'QQ_互动内容备份';
                     
                     // 加载现有数据
+                    const existingData = await QQ_GetFromWorldBook(worldbookKey);
                     let dataArray = [];
-                    if (interactiveEntry && interactiveEntry.content) {
-                        try {
-                            const existingData = JSON.parse(interactiveEntry.content);
-                            dataArray = Array.isArray(existingData) ? existingData : [];
-                        } catch (parseError) {
-                            console.warn(`解析现有互动数据失败: ${parseError.message}`);
-                            dataArray = [];
-                        }
+                    
+                    if (existingData && Array.isArray(existingData)) {
+                        dataArray = existingData;
+                    } else if (existingData && existingData.interactiveContent && Array.isArray(existingData.interactiveContent)) {
+                        // 兼容旧格式
+                        dataArray = existingData.interactiveContent;
                     }
                     
                     // 添加新数据到数组开头
@@ -28763,37 +28754,22 @@ msg_end
                         dataArray.splice(30);
                     }
                     
-                    const jsonData = JSON.stringify(dataArray, null, 2);
-                    console.log(`准备保存互动内容到世界书: ${comment}, 内容数量: ${dataArray.length}`);
+                    console.log(`准备保存互动内容到世界书: ${worldbookKey}, 内容数量: ${dataArray.length}`);
                     
-                    if (interactiveEntry) {
-                        // 更新现有条目
-                        await setLorebookEntries(worldbook, [{
-                            uid: interactiveEntry.uid,
-                            content: jsonData,
-                        }]);
-                        console.log(`✅ 互动内容已更新到现有世界书条目: ${comment}`);
+                    // 使用统一的保存机制
+                    const success = await QQ_SafeSaveToWorldBook(
+                        `互动内容_${characterName || '公共'}`, 
+                        dataArray, 
+                        worldbookKey
+                    );
+                    
+                    if (success) {
+                        console.log(`🎯 互动内容保存成功: ${characterName || '公共'}, ID: ${interactiveData.id}`);
+                        return interactiveData.id;
                     } else {
-                        // 创建新条目
-                        await createLorebookEntry(worldbook, {
-                            comment: comment,
-                            key: [`此世界书永不触发_互动_${characterName || '公共'}`],
-                            content: jsonData,
-                            position: "at_depth_as_system",
-                            type: "selective",
-                            depth: 0,
-                            exclude_recursion: true,
-                            order: 9996,
-                            enabled: true,
-                        });
-                        console.log(`✅ 互动内容已保存到新世界书条目: ${comment}`);
-                        
-                        // 重新获取entries以包含新创建的条目
-                        entries = await getLorebookEntries(worldbook);
+                        console.error('互动内容保存失败：QQ_SafeSaveToWorldBook返回false');
+                        return null;
                     }
-                    
-                    console.log(`🎯 互动内容保存成功: ${characterName || '公共'}, ID: ${interactiveData.id}`);
-                    return interactiveData.id;
                     
                 } catch (error) {
                     console.error('保存互动内容失败:', error);
@@ -28803,39 +28779,27 @@ msg_end
             
             /**
              * *** 修复：互动内容加载函数 ***
-             * 使用与动态、群聊相同的简单机制
+             * 使用项目统一的QQ_GetFromWorldBook机制，保持与其他功能一致性
              */
             async function QQ_LoadInteractiveContentFromWorldBook(characterName = null) {
-                if (!worldbook || !entries) {
-                    console.warn('世界书功能不可用，无法加载互动内容');
-                    return [];
-                }
-                
                 try {
-                    const comment = characterName ? 
-                        `QQ_互动空间备份_${characterName}` : 
-                        'QQ_互动空间备份';
+                    // 确定世界书键值（与保存时一致）
+                    const worldbookKey = characterName ? 
+                        `QQ_互动内容备份_${characterName}` : 
+                        'QQ_互动内容备份';
                     
-                    // 直接从entries中查找条目
-                    const targetEntry = entries.find(entry => entry.comment === comment);
+                    // 使用统一的加载机制
+                    const data = await QQ_GetFromWorldBook(worldbookKey);
                     
-                    if (targetEntry && targetEntry.content) {
-                        try {
-                            const data = JSON.parse(targetEntry.content);
-                            
-                            if (Array.isArray(data) && data.length > 0) {
-                                console.log(`✅ 加载${characterName || '公共'}互动内容: ${data.length}个项目`);
-                                return data;
-                            } else {
-                                console.log(`📋 ${characterName || '公共'}互动内容为空数组`);
-                                return [];
-                            }
-                        } catch (parseError) {
-                            console.error(`解析${characterName || '公共'}互动内容失败:`, parseError);
-                            return [];
-                        }
+                    if (data && Array.isArray(data)) {
+                        console.log(`✅ 加载${characterName || '公共'}互动内容: ${data.length}个项目`);
+                        return data;
+                    } else if (data && data.interactiveContent && Array.isArray(data.interactiveContent)) {
+                        // 兼容旧格式
+                        console.log(`✅ 加载${characterName || '公共'}互动内容(旧格式): ${data.interactiveContent.length}个项目`);
+                        return data.interactiveContent;
                     } else {
-                        console.log(`📋 ${characterName || '公共'}没有互动内容条目`);
+                        console.log(`📋 ${characterName || '公共'}没有互动内容`);
                         return [];
                     }
                 } catch (error) {
@@ -29044,36 +29008,27 @@ msg_end
                         
                         // 4. 验证世界书条目
                         console.log('\n4️⃣ 验证世界书条目...');
-                        const comment = `QQ_互动空间备份_${characterId}`;
-                        const targetEntry = entries.find(entry => entry.comment === comment);
+                        const worldbookKey = `QQ_互动内容备份_${characterId}`;
                         
-                        if (targetEntry) {
-                            console.log(`✅ 世界书条目存在: ${comment}`);
-                            console.log(`📄 条目内容长度: ${targetEntry.content?.length || 0}`);
+                        // 使用统一的QQ_GetFromWorldBook验证
+                        const verifyData = await QQ_GetFromWorldBook(worldbookKey);
+                        
+                        if (verifyData && Array.isArray(verifyData)) {
+                            console.log(`✅ 世界书条目验证成功: ${worldbookKey}`);
+                            console.log(`📄 条目数据包含: ${verifyData.length}个项目`);
                             
-                            try {
-                                const entryData = JSON.parse(targetEntry.content);
-                                if (Array.isArray(entryData)) {
-                                    console.log(`✅ 条目数据格式正确: ${entryData.length}个项目`);
-                                    
-                                    // 检查最新项目是否匹配
-                                    if (entryData.length > 0 && entryData[0].id === interactiveId) {
-                                        console.log(`✅ 最新项目ID匹配: ${interactiveId}`);
-                                        return true;
-                                    } else {
-                                        console.error(`❌ 最新项目ID不匹配: 期望${interactiveId}, 实际${entryData[0]?.id}`);
-                                        return false;
-                                    }
-                                } else {
-                                    console.error(`❌ 条目数据格式错误: ${typeof entryData}`);
-                                    return false;
-                                }
-                            } catch (parseError) {
-                                console.error(`❌ 条目数据解析失败:`, parseError);
+                            // 检查最新项目是否匹配
+                            if (verifyData.length > 0 && verifyData[0].id === interactiveId) {
+                                console.log(`✅ 最新项目ID匹配: ${interactiveId}`);
+                                console.log(`📝 项目内容预览: ${verifyData[0].content.substring(0, 50)}...`);
+                                return true;
+                            } else {
+                                console.error(`❌ 最新项目ID不匹配: 期望${interactiveId}, 实际${verifyData[0]?.id}`);
                                 return false;
                             }
                         } else {
-                            console.error(`❌ 世界书条目不存在: ${comment}`);
+                            console.error(`❌ 世界书条目验证失败: ${worldbookKey}`);
+                            console.log(`💡 提示: 检查QQ_SafeSaveToWorldBook是否正常工作`);
                             return false;
                         }
                         
