@@ -6919,11 +6919,11 @@
                                  }, 100); // 短暂延迟确保状态更新
                                  return; // 提前返回，等待重试结果
                         }
-                    } else {
-                            // 最终输出到新楼层
-                            triggerSlash("/echo AI没有回复线上格式,原文直接输出到新楼层");
-                            triggerSlash(`/sendas name={{char}} ${result}`);
-                        QQ_ResetRetry();
+                                            } else {
+                            // *** 修复：绝对不输出到新楼层，改为重试或放弃 ***
+                            console.log('❌ 所有验证都失败，既不是互动内容也无法处理');
+                            triggerSlash("/echo AI回复内容无法识别，已放弃处理");
+                            QQ_ResetRetry();
                     }
                     }, 1500); // 1.5秒延迟，让用户先看到"失败"消息
                     
@@ -6953,8 +6953,13 @@
                             // 在手机界面显示互动内容
                             QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         } else {
-                            triggerSlash("/echo AI回复了多个线上格式,直接输出到新楼层");
-                            triggerSlash(`/sendas name={{char}} ${result}`);
+                            // *** 修复：多个格式时也不输出到新楼层，而是根据是否为互动内容决定处理方式 ***
+                            if (QQ_IsInteractiveContent(result, true)) {
+                                // 在手机界面显示互动内容
+                                QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                            } else {
+                                triggerSlash("/echo AI回复了多个线上格式且非互动内容，已放弃处理");
+                            }
                         }
                         QQ_ResetRetry();
                     }
@@ -7107,16 +7112,13 @@
                 }
                 if (!ok) {
                     // 最后的格式检查失败 - 判断是否为互动内容
-                    if (QQ_IsInteractiveContent(result)) {
+                    if (QQ_IsInteractiveContent(result, true)) {
                         // 在手机界面显示互动内容
                         QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                     } else {
-                        triggerSlash("/echo 回复不为空但不存在手机格式,输出到新楼层");
-                        triggerSlash(
-                            `/sendas name={{char}} ${result
-                                .replace("MiPhone_start", "")
-                                .replace("MiPhone_end", "")}`,
-                        );
+                        // *** 修复：绝对不输出到新楼层，改为重试或放弃处理 ***
+                        console.log('❌ 格式检查失败且非互动内容，已放弃处理');
+                        triggerSlash("/echo 回复内容格式错误且非互动内容，已放弃处理");
                     }
                     QQ_ResetRetry();
                     return;
@@ -7186,7 +7188,8 @@
                 
                 if (!isValidInteractive.isValid) {
                     console.log('❌ 互动机制验证失败:', isValidInteractive.reason);
-                    processResult.shouldRetry = true; // 内容不符合标准，重试
+                    // *** 修复：根据重试状态决定是否继续重试 ***
+                    processResult.shouldRetry = !isRetry; // 如果不是重试状态才允许重试
                     return processResult;
                 }
                 
@@ -7342,6 +7345,24 @@
                 
                 console.log(`✅ 内容验证通过：${featureCount}个互动特征，${paragraphs.length}个段落，${trimmedContent.length}个字符`);
                 return { isValid: true, reason: '符合互动内容标准' };
+            }
+
+            /**
+             * *** 新增：提取并清理content标签包裹的内容 ***
+             * @param {string} content - 包含content标签的文本
+             * @returns {string} content标签内的清理后内容
+             */
+            function QQ_CleanContentTags(content) {
+                if (!content || typeof content !== 'string') return '';
+                
+                // 提取content标签内容
+                const contentMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
+                if (!contentMatch) {
+                    console.log('❌ 没有找到content标签');
+                    return '';
+                }
+                
+                return contentMatch[1].trim();
             }
 
             /**
@@ -7878,10 +7899,50 @@ MiPhone_End`,
              * @returns {boolean} 是否为互动内容
              */
             function QQ_IsInteractiveContent(content, isNoFormatResponse = false) {
-                // *** 惊喜机制：AI没有回复线上格式时，如果有content标签则直接认为是互动内容 ***
+                // *** 关键修复：确保只有在content标签中没有找到任何私聊、群聊、动态标签时，才当作互动内容 ***
                 if (isNoFormatResponse && QQ_HasContentTag(content)) {
-                    console.log('🎉 AI没有回复线上格式且有content标签，机制触发互动内容');
-                    return true;
+                    console.log('🔍 AI没有回复线上格式，正在检查content标签中是否包含有效的聊天标签...');
+                    
+                    // *** 新增：严格检查content标签内是否有任何有效的聊天格式标签 ***
+                    const contentText = QQ_CleanContentTags(content);
+                    if (!contentText) {
+                        console.log('❌ content标签为空，不符合互动内容标准');
+                        return false;
+                    }
+                    
+                    // 检查是否包含任何聊天相关的标签
+                    const chatTagPatterns = [
+                        // 群聊标签
+                        /<群聊[：:][^>]+>/g,
+                        /<群聊[^>]*>/g,
+                        // 私聊标签  
+                        /<[^>]*和[^>]*的?(?:私聊|聊天)[^>]*>/g,
+                        /<[^>]*和[^>]*(?:私聊|聊天)[^>]*>/g,
+                        // 动态标签
+                        /moment_start|moment_end/g,
+                        // 其他消息格式标签
+                        /msg_start|msg_end/g,
+                        // QQ空间相关标签
+                        /<QQ空间[^>]*>/g,
+                        // 使用者相关标签
+                        /<使用者[^>]*>/g
+                    ];
+                    
+                    let hasAnyFormatTag = false;
+                    for (const pattern of chatTagPatterns) {
+                        if (pattern.test(contentText)) {
+                            hasAnyFormatTag = true;
+                            console.log(`✅ 在content中发现聊天格式标签: ${pattern.source}`);
+                            break;
+                        }
+                    }
+                    
+                    if (hasAnyFormatTag) {
+                        console.log('❌ content中包含聊天标签，应通过格式提取处理，不是互动内容');
+                        return false;
+                    }
+                    
+                    console.log('🎉 content中没有聊天标签，可能是互动内容，继续验证...');
                 }
                 
                 // *** 用户主动触发：只有在用户主动触发互动的情况下，才检查content标签 ***
@@ -29364,6 +29425,91 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_ProcessSurpriseMechanism = QQ_ProcessSurpriseMechanism;
             window.QQ_ValidateInteractiveContent = QQ_ValidateInteractiveContent;
             window.QQ_CleanNestedTags = QQ_CleanNestedTags;
+            window.QQ_CleanContentTags = QQ_CleanContentTags;
+
+            /**
+             * *** 新增：测试新的格式处理和重试逻辑 ***
+             * 验证修复后的逻辑是否正确工作
+             */
+            window.QQ_Test_New_Format_Processing = function() {
+                console.log('=== 测试新的格式处理和重试逻辑 ===');
+                
+                // 测试用例1：包含content标签但内容包含聊天标签
+                const testCase1 = `
+                    <content>
+                        <群聊：测试群>
+                            用户--12:30--这是一条测试消息
+                            AI角色--12:31--这是AI的回复
+                        </群聊：测试群>
+                    </content>
+                `;
+                
+                console.log('测试用例1: content包含聊天标签');
+                const result1 = QQ_IsInteractiveContent(testCase1, true);
+                console.log('结果:', result1 ? '❌ 错误识别为互动内容' : '✅ 正确识别为非互动内容');
+                
+                // 测试用例2：包含content标签但内容只是纯文本互动
+                const testCase2 = `
+                    <content>
+                        *轻轻走向你，眼神中充满了温柔*
+                        
+                        我慢慢靠近，感觉到周围的氛围变得温馨。看到你的表情，我内心感到一阵暖流。
+                        
+                        *伸出手，想要触摸你的脸颊*
+                    </content>
+                `;
+                
+                console.log('测试用例2: content包含纯互动内容');
+                const result2 = QQ_IsInteractiveContent(testCase2, true);
+                console.log('结果:', result2 ? '✅ 正确识别为互动内容' : '❌ 错误识别为非互动内容');
+                
+                // 测试用例3：包含content标签但内容包含私聊标签
+                const testCase3 = `
+                    <content>
+                        <用户和AI角色的私聊>
+                            用户: 你好
+                            AI角色: 你好，很高兴见到你
+                        </用户和AI角色的私聊>
+                    </content>
+                `;
+                
+                console.log('测试用例3: content包含私聊标签');
+                const result3 = QQ_IsInteractiveContent(testCase3, true);
+                console.log('结果:', result3 ? '❌ 错误识别为互动内容' : '✅ 正确识别为非互动内容');
+                
+                // 测试用例4：包含content标签但内容是错误信息
+                const testCase4 = `
+                    <content>
+                        错误：无法处理您的请求
+                        系统出现了异常，请稍后重试
+                    </content>
+                `;
+                
+                console.log('测试用例4: content包含错误信息');
+                const result4 = QQ_IsInteractiveContent(testCase4, true);
+                console.log('结果:', result4 ? '❌ 错误识别为互动内容' : '✅ 正确识别为非互动内容');
+                
+                // 测试 QQ_CleanContentTags 函数
+                console.log('\n=== 测试 QQ_CleanContentTags 函数 ===');
+                const contentTest = QQ_CleanContentTags(testCase1);
+                console.log('提取的content内容:', contentTest ? '✅ 成功提取' : '❌ 提取失败');
+                
+                console.log('\n=== 新格式处理逻辑测试完成 ===');
+                console.log('✅ 修复要点:');
+                console.log('   - AI没有回复线上格式时，会检查content中是否包含聊天标签');
+                console.log('   - 只有content中没有任何聊天标签的纯互动内容才会被识别为互动内容');
+                console.log('   - 包含聊天标签的content会通过格式提取处理，不会输出到新楼层');
+                console.log('   - 既没有格式也没有互动内容时会重试，最多3次，不会输出到新楼层');
+                
+                triggerSlash('/echo ✅ 新格式处理逻辑测试完成，请查看控制台详细结果');
+                
+                return {
+                    hasFormatTags: !result1 && !result3,
+                    pureInteractive: result2,
+                    errorHandling: !result4,
+                    contentExtraction: !!contentTest
+                };
+            };
             
             /**
              * ===== 错误修复验证工具 =====
