@@ -7283,9 +7283,13 @@
                 
                 // 1. 提取群聊信息 - 增强版：支持多种群聊格式
                 const groupPatterns = [
-                    // 标准格式：<群聊:群名>...</群聊:群名>
+                    // 中文冒号格式：<群聊：群名>...</群聊：群名>
+                    /<群聊：([^>]+)>([\s\S]*?)<\/群聊：[^>]*>/g,
+                    // 英文冒号格式：<群聊:群名>...</群聊:群名>
                     /<群聊:([^>]+)>([\s\S]*?)<\/群聊:[^>]*>/g,
-                    // 简化格式：<群聊:群名>内容（可能没有结束标签）
+                    // 简化中文冒号格式：<群聊：群名>内容（可能没有结束标签）
+                    /<群聊：([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    // 简化英文冒号格式：<群聊:群名>内容（可能没有结束标签）
                     /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
                     // 更宽松的格式：检测群聊内容
                     /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
@@ -7323,6 +7327,10 @@
                     /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)<\/[^>]*和[^>]*的(?:私聊|聊天)>/g,
                     // 简化格式：<xxx和yyy的私聊>内容（可能没有结束标签）
                     /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    // 修复：支持截图中的格式 <阿伟和可畏的私聊>（没有"的"字）
+                    /<([^>]*和[^>]*私聊)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    // 修复：支持更简化的格式 <用户和角色聊天>
+                    /<([^>]*和[^>]*聊天)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
                     // 更宽松的格式：捕获任何包含"和"的标签
                     /<([^>]*和[^>]*(?:私聊|聊天)[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
                 ];
@@ -7365,6 +7373,21 @@
                         }
                     }
                     console.log(`提取到 ${extractedInfo.dynamics.length} 条动态`);
+                }
+                
+                // 4. 合并所有消息到主messages数组，便于转换函数使用
+                if (extractedInfo.privateMessages.length > 0) {
+                    extractedInfo.messages = extractedInfo.messages.concat(extractedInfo.privateMessages);
+                    console.log(`合并私聊消息后，总消息数: ${extractedInfo.messages.length}`);
+                }
+                
+                // 5. 如果chatInfo为空，根据提取的信息设置
+                if (!extractedInfo.chatInfo && extractedInfo.hasValidInfo) {
+                    if (extractedInfo.chatType === 'group' && extractedInfo.chatName) {
+                        extractedInfo.chatInfo = `群聊：${extractedInfo.chatName}`;
+                    } else if (extractedInfo.chatType === 'private' && extractedInfo.chatName) {
+                        extractedInfo.chatInfo = extractedInfo.chatName;
+                    }
                 }
                 
                 console.log("提取结果:", extractedInfo);
@@ -30195,14 +30218,22 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         let chatType = 'private'; // 默认私聊
                         let chatName = '';
                         
-                        // 检查是否为群聊
+                        // 检查是否为群聊（支持中文和英文冒号）
                         if (extractedInfo.chatInfo && extractedInfo.chatInfo.includes('群聊')) {
                             chatType = 'group';
-                            const groupMatch = extractedInfo.chatInfo.match(/群聊:(.+)/);
+                            const groupMatch = extractedInfo.chatInfo.match(/群聊[：:]\s*(.+)/);
                             chatName = groupMatch ? groupMatch[1].trim() : '未知群聊';
+                        } else if (extractedInfo.chatType === 'group') {
+                            // 直接从chatType判断
+                            chatType = 'group';
+                            chatName = extractedInfo.chatName || '未知群聊';
+                        } else if (extractedInfo.chatType === 'private') {
+                            // 直接从chatType判断
+                            chatType = 'private';
+                            chatName = extractedInfo.chatName || '未知角色';
                         } else if (extractedInfo.chatInfo) {
                             // 私聊格式: "用户名和角色名的私聊/聊天"
-                            const privateMatch = extractedInfo.chatInfo.match(/(.+?)和(.+?)的(?:聊天|私聊)/);
+                            const privateMatch = extractedInfo.chatInfo.match(/(.+?)和(.+?)的?(?:聊天|私聊)/);
                             if (privateMatch) {
                                 // 判断哪个是用户名，哪个是角色名
                                 const user1 = privateMatch[1].trim();
@@ -30217,6 +30248,20 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                                 } else {
                                     chatName = user2; // 默认取第二个为角色名
                                 }
+                            } else {
+                                // 尝试更简单的格式匹配 "用户名和角色名私聊"
+                                const simpleMatch = extractedInfo.chatInfo.match(/(.+?)和(.+?)私聊/);
+                                if (simpleMatch) {
+                                    const user1 = simpleMatch[1].trim();
+                                    const user2 = simpleMatch[2].trim();
+                                    if (window.UserName && user1 === window.UserName) {
+                                        chatName = user2;
+                                    } else if (window.UserName && user2 === window.UserName) {
+                                        chatName = user1;
+                                    } else {
+                                        chatName = user2;
+                                    }
+                                }
                             }
                         }
                         
@@ -30227,23 +30272,35 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                             result.type = 'group';
                             result.groupName = chatName;
                             result.messages = extractedInfo.messages.map(msg => {
-                                // 解析消息格式：角色名—内容—时间 或 角色名：内容
-                                const dashMatch = msg.match(/^(.+?)—(.+?)—(.+)$/);
-                                if (dashMatch) {
+                                // 如果消息已经是对象格式（从QQ_ExtractMessagesFromContent返回）
+                                if (typeof msg === 'object' && msg.name && msg.msg) {
                                     return {
-                                        sender: dashMatch[1].trim(),
-                                        content: dashMatch[2].trim(),
-                                        time: dashMatch[3].trim()
+                                        sender: msg.name,
+                                        content: msg.msg,
+                                        time: msg.time || new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
                                     };
                                 }
                                 
-                                const colonMatch = msg.match(/^(.+?)：(.+)$/);
-                                if (colonMatch) {
-                                    return {
-                                        sender: colonMatch[1].trim(),
-                                        content: colonMatch[2].trim(),
-                                        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
-                                    };
+                                // 如果消息是字符串格式，尝试解析
+                                if (typeof msg === 'string') {
+                                    // 解析消息格式：角色名—内容—时间 或 角色名：内容
+                                    const dashMatch = msg.match(/^(.+?)—(.+?)—(.+)$/);
+                                    if (dashMatch) {
+                                        return {
+                                            sender: dashMatch[1].trim(),
+                                            content: dashMatch[2].trim(),
+                                            time: dashMatch[3].trim()
+                                        };
+                                    }
+                                    
+                                    const colonMatch = msg.match(/^(.+?)：(.+)$/);
+                                    if (colonMatch) {
+                                        return {
+                                            sender: colonMatch[1].trim(),
+                                            content: colonMatch[2].trim(),
+                                            time: new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
+                                        };
+                                    }
                                 }
                                 
                                 return null;
@@ -30252,23 +30309,35 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                             result.type = 'private';
                             result.chatWith = chatName;
                             result.messages = extractedInfo.messages.map(msg => {
-                                // 解析消息格式：角色名—内容—时间 或 角色名：内容
-                                const dashMatch = msg.match(/^(.+?)—(.+?)—(.+)$/);
-                                if (dashMatch) {
+                                // 如果消息已经是对象格式（从QQ_ExtractMessagesFromContent返回）
+                                if (typeof msg === 'object' && msg.name && msg.msg) {
                                     return {
-                                        sender: dashMatch[1].trim(),
-                                        content: dashMatch[2].trim(),
-                                        time: dashMatch[3].trim()
+                                        sender: msg.name,
+                                        content: msg.msg,
+                                        time: msg.time || new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
                                     };
                                 }
                                 
-                                const colonMatch = msg.match(/^(.+?)：(.+)$/);
-                                if (colonMatch) {
-                                    return {
-                                        sender: colonMatch[1].trim(),
-                                        content: colonMatch[2].trim(),
-                                        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
-                                    };
+                                // 如果消息是字符串格式，尝试解析
+                                if (typeof msg === 'string') {
+                                    // 解析消息格式：角色名—内容—时间 或 角色名：内容
+                                    const dashMatch = msg.match(/^(.+?)—(.+?)—(.+)$/);
+                                    if (dashMatch) {
+                                        return {
+                                            sender: dashMatch[1].trim(),
+                                            content: dashMatch[2].trim(),
+                                            time: dashMatch[3].trim()
+                                        };
+                                    }
+                                    
+                                    const colonMatch = msg.match(/^(.+?)：(.+)$/);
+                                    if (colonMatch) {
+                                        return {
+                                            sender: colonMatch[1].trim(),
+                                            content: colonMatch[2].trim(),
+                                            time: new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
+                                        };
+                                    }
                                 }
                                 
                                 return null;
@@ -30291,24 +30360,36 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_Test_MSG_Tag_Issue = function() {
                 console.log('=== 🔍 MSG标签缺失问题诊断 ===');
                 
-                // 模拟用户提供的实际内容格式
+                // 模拟用户提供的实际内容格式（基于截图）
                 const testContent = `MiPhone_JSON_START
-<阿伟和可良的私聊>
-可良—指挥官，一大早就这么有精神，是晚上体息得很好吗？—09:34
-可良—不过，想要把可良"抱紧，动弹不得"呢呢，指挥官的用词还是这么直接又可爱呢。—09:34
-可良—只是，这种事情光靠是没用的呢？—09:35
-</阿伟和可良的私聊>
-<阿伟和圣路易斯的聊天>
-圣路易斯—哦呵呵！指挥官一大早就这么热情，是想约我出去吗？—09:34
-圣路易斯—暗暗，好呢！正好我知道一家新开的咖啡店，那里的甜点据说非常棒哦。—09:35
-圣路易斯—bob-微笑靠近] —09:36
-圣路易斯—是在暗示想要些更刺激的东西吗？真拿你没办法呢～—09:36
-</阿伟和圣路易斯的聊天>
+<阿伟和可畏的私聊>
+可畏—你，你这个笨蛋！准备你抱了！—11:21
+可畏—Gab—气呼呼！—11:21  
+可畏—我才没有期待！只是觉得你的说法很，很不知道呢！—11:22
+可畏—当然了，不过虽然我们现在外面也这么私密说话，我觉得你的想想亲！—11:22
+可畏—tyy—不过......如果你真的那么想的话，也不是......不可以考虑一下。!—11:23
+</阿伟和可畏的私聊>
+<阿伟和圣路易斯的私聊>
+圣路易斯—呜呜，想抱紧我，让我动弹不得？—11:21
+圣路易斯—有意思的挑战。不过，你确定你有这个能力吗，我的指挥官？—11:21
+圣路易斯—别告诉你先动弹不得的，是你自己。—11:22
+圣路易斯—图片<img src="https://files.catbox.moe/viewm.jpg" alt="光辉" title="光辉" style="width: 100%; height: auto;">！—11:22
+圣路易斯—不过如果你的表现的，今晚，关我的房间，让我去身"检验"一下你的决心和力量吧。呵呵......—11:23
+</阿伟和圣路易斯的私聊>
+<群聊：港区>
+可畏—喂，圣路易斯说。—11:21
+可畏—别以为指挥官发了什么照片？—11:21
+可畏—别以为没有看到，那么嚣张的呢礼服，简直不知廉耻！—11:22
+圣路易斯—呜呜，可畏妹妹，是在重复提问自己最美的一面。这可不是"不知廉耻"，而是成熟女性的魅力。—11:23
+圣路易斯—呯呯，指挥官似乎得各喜欢呢。不像某些人，只会用呻吟的音乐来吸引注意力。—11:23
+可畏—你！你明说！抽落是这个！是灵魂的呐喊！才不是呻吟！—11:24
+可畏—而且，我才没有嫉妒！我只是觉得，你不应该用这种方式来"勾引"指挥官！—11:25
+圣路易斯—呜呜，是不是勾引，得由指挥官来判断呢。—11:25
+圣路易斯—不过既然你这么有你的反应，有关我的方法权有效呢，亲爱的小可畏关心了，可畏姑娘。—11:26
+可畏—呸！—11:26
+</群聊：港区>
 moment_start
-可良一优雅的"束缚"，才是真正的艺术。某些粗暴的方式，只会显得呆算。—09:45—已浏览 35—已点赞 10
-圣路易斯—呵呵，如如的优雅倒是无人能及呢
-琭吉尔—呢，不过是些小孩子的把戏。
-胡腾—无聊。
+可畏发了一条动态，表示感慨，请浏览 35—已点赞 10
 moment_end
 MiPhone_JSON_END`;
 
