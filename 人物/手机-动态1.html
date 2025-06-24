@@ -7841,51 +7841,194 @@ MiPhone_End`,
             }
 
             /**
-             * 清理content标签和其他标签（支持不完整的content标签）
-             * @param {string} content - 原始内容
+             * *** 增强版：智能提取和清理content标签内容 ***
+             * 能够处理嵌套在其他标签中的content内容，确保不会误删有效信息
+             * @param {string} content - 输入内容
              * @returns {string} 清理后的内容
              */
             function QQ_CleanContentTags(content) {
-                let cleanContent;
+                if (!content || typeof content !== 'string') {
+                    return content;
+                }
                 
-                // 处理完整的content标签
-                const completeMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
-                if (completeMatch) {
-                    cleanContent = completeMatch[1];
-                    console.log('处理完整的content标签');
-                } else {
-                    // 处理不完整的content标签（以<content>开头到结尾）
-                    const incompleteMatch = content.match(/<content>([\s\S]*?)$/i);
-                    if (incompleteMatch) {
-                        cleanContent = incompleteMatch[1];
-                        console.log('处理不完整的content标签，提取<content>之后的所有内容');
-                    } else {
-                        // 没有content标签，返回原内容
-                        return content;
+                console.log('🔍 开始智能提取content内容，原始内容长度:', content.length);
+                
+                // *** 第一步：智能提取content内容（包括嵌套情况） ***
+                let extractedContent = QQ_ExtractNestedContentTags(content);
+                
+                if (!extractedContent) {
+                    console.log('❌ 没有找到content标签，返回原内容');
+                    return content;
+                }
+                
+                console.log('✅ 成功提取content内容，长度:', extractedContent.length);
+                
+                // *** 第二步：清理提取出来的内容中的系统标签 ***
+                let cleanContent = QQ_CleanSystemTags(extractedContent);
+                
+                // *** 第三步：最终清理多余的空白和换行 ***
+                cleanContent = cleanContent.replace(/\n\s*\n/g, '\n').trim();
+                
+                console.log('🎉 content标签清理完成，最终内容长度:', cleanContent.length);
+                console.log('最终内容:', cleanContent);
+                
+                return cleanContent;
+            }
+
+            /**
+             * *** 新增：智能提取嵌套的content标签内容 ***
+             * 能够处理被其他标签包裹的content标签
+             * @param {string} content - 输入内容
+             * @returns {string|null} 提取的content内容，如果没有找到返回null
+             */
+            function QQ_ExtractNestedContentTags(content) {
+                // 方法1：直接匹配完整的content标签（优先级最高）
+                let match = content.match(/<content>([\s\S]*?)<\/content>/i);
+                if (match) {
+                    console.log('📝 找到完整的content标签');
+                    return match[1];
+                }
+                
+                // 方法2：处理不完整的content标签（以<content>开头到结尾）
+                match = content.match(/<content>([\s\S]*?)$/i);
+                if (match) {
+                    console.log('📝 找到不完整的content标签，提取到结尾');
+                    return match[1];
+                }
+                
+                // 方法3：在其他标签内查找content标签（处理嵌套情况）
+                const nestedPatterns = [
+                    // 在table相关标签内查找
+                    /<table[^>]*>([\s\S]*?)<\/table>/gi,
+                    /<tableEdit[^>]*>([\s\S]*?)<\/tableEdit>/gi,
+                    /<tableThink[^>]*>([\s\S]*?)<\/tableThink>/gi,
+                    // 在div等其他标签内查找
+                    /<div[^>]*>([\s\S]*?)<\/div>/gi,
+                    /<section[^>]*>([\s\S]*?)<\/section>/gi,
+                    // 在thinking等标签内查找（虽然不常见）
+                    /<thinking[^>]*>([\s\S]*?)<\/thinking>/gi,
+                ];
+                
+                for (const pattern of nestedPatterns) {
+                    const matches = [...content.matchAll(pattern)];
+                    for (const nestedMatch of matches) {
+                        const nestedContent = nestedMatch[1];
+                        // 在嵌套内容中查找content标签
+                        const contentInNested = nestedContent.match(/<content>([\s\S]*?)<\/content>/i);
+                        if (contentInNested) {
+                            console.log(`📝 在${pattern.source}标签内找到content标签`);
+                            return contentInNested[1];
+                        }
+                        
+                        // 也检查不完整的content标签
+                        const incompleteInNested = nestedContent.match(/<content>([\s\S]*?)$/i);
+                        if (incompleteInNested) {
+                            console.log(`📝 在${pattern.source}标签内找到不完整的content标签`);
+                            return incompleteInNested[1];
+                        }
                     }
                 }
                 
-                // 移除其他系统标签及其内容
-                cleanContent = cleanContent.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
-                cleanContent = cleanContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
-                cleanContent = cleanContent.replace(/<tableThink>[\s\S]*?<\/tableThink>/gi, '');
-                cleanContent = cleanContent.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, '');
-                cleanContent = cleanContent.replace(/<disclaimer>[\s\S]*?<\/disclaimer>/gi, '');
+                console.log('❌ 没有找到任何content标签（包括嵌套情况）');
+                return null;
+            }
+
+            /**
+             * *** 新增：清理系统标签但保留有效内容 ***
+             * @param {string} content - 输入内容
+             * @returns {string} 清理后的内容
+             */
+            function QQ_CleanSystemTags(content) {
+                let cleanContent = content;
                 
-                // 移除HTML注释格式的consider标签（新增）
-                cleanContent = cleanContent.replace(/<!--\s*consider:\s*[\s\S]*?-->/gi, '');
-                cleanContent = cleanContent.replace(/<!--\s*thinking:\s*[\s\S]*?-->/gi, '');
-                cleanContent = cleanContent.replace(/<!--[\s\S]*?-->/gi, '');
+                // 清理各种系统标签及其内容
+                const systemTagPatterns = [
+                    // 思考和考虑标签
+                    /<consider>[\s\S]*?<\/consider>/gi,
+                    /<thinking>[\s\S]*?<\/thinking>/gi,
+                    // table相关标签（但要小心，不要误删有效的table内容）
+                    /<tableThink>[\s\S]*?<\/tableThink>/gi,
+                    /<disclaimer>[\s\S]*?<\/disclaimer>/gi,
+                    // HTML注释格式的consider标签
+                    /<!--\s*consider:\s*[\s\S]*?-->/gi,
+                    /<!--\s*thinking:\s*[\s\S]*?-->/gi,
+                    /<!--[\s\S]*?-->/gi,
+                ];
                 
-                // 移除未闭合的系统标签
-                cleanContent = cleanContent.replace(/<(?:consider|thinking|tableThink|tableEdit|disclaimer)>[\s\S]*$/gi, '');
+                // 逐个清理系统标签
+                for (const pattern of systemTagPatterns) {
+                    const before = cleanContent.length;
+                    cleanContent = cleanContent.replace(pattern, '');
+                    const after = cleanContent.length;
+                    if (before !== after) {
+                        console.log(`🧹 清理了${pattern.source}标签，减少了${before - after}个字符`);
+                    }
+                }
                 
-                // 清理多余的空白和换行
-                cleanContent = cleanContent.replace(/\n\s*\n/g, '\n').trim();
+                // 清理未闭合的系统标签
+                const unclosedPatterns = [
+                    /<(?:consider|thinking|tableThink|tableEdit|disclaimer)>[\s\S]*$/gi,
+                ];
                 
-                console.log('content标签清理完成，提取的内容:', cleanContent);
+                for (const pattern of unclosedPatterns) {
+                    const before = cleanContent.length;
+                    cleanContent = cleanContent.replace(pattern, '');
+                    const after = cleanContent.length;
+                    if (before !== after) {
+                        console.log(`🧹 清理了未闭合的系统标签，减少了${before - after}个字符`);
+                    }
+                }
                 
                 return cleanContent;
+            }
+
+            /**
+             * *** 测试智能content提取功能 ***
+             * 用于验证嵌套content标签的提取能力
+             */
+            function QQ_Test_Smart_Content_Extraction() {
+                console.log('=== 开始测试智能content提取功能 ===');
+                
+                // 测试用例1：正常的content标签
+                const test1 = '<content>这是正常的content内容</content>';
+                console.log('测试1 - 正常content标签:');
+                console.log('结果:', QQ_CleanContentTags(test1));
+                
+                // 测试用例2：嵌套在tableEdit中的content标签
+                const test2 = `<tableEdit>
+                    <content>这是嵌套在tableEdit中的有效内容
+                    这里包含了重要的互动描述
+                    不应该被清理掉</content>
+                </tableEdit>`;
+                console.log('测试2 - tableEdit嵌套content:');
+                console.log('结果:', QQ_CleanContentTags(test2));
+                
+                // 测试用例3：嵌套在table中的content标签
+                const test3 = `<table>
+                    <content>表格中的重要内容
+                    包含用户需要的信息</content>
+                </table>`;
+                console.log('测试3 - table嵌套content:');
+                console.log('结果:', QQ_CleanContentTags(test3));
+                
+                // 测试用例4：复杂嵌套情况
+                const test4 = `<tableEdit>
+                    <thinking>这是思考内容，应该被清理</thinking>
+                    <content>这是有效内容，应该被保留
+                    即使周围有其他标签</content>
+                    <consider>这是考虑内容，应该被清理</consider>
+                </tableEdit>`;
+                console.log('测试4 - 复杂嵌套情况:');
+                console.log('结果:', QQ_CleanContentTags(test4));
+                
+                // 测试用例5：不完整的content标签
+                const test5 = `<tableEdit>
+                    <content>这是不完整的content标签内容
+                    一直到结尾都是有效的`;
+                console.log('测试5 - 不完整content标签:');
+                console.log('结果:', QQ_CleanContentTags(test5));
+                
+                console.log('=== 智能content提取功能测试完成 ===');
             }
 
             /**
@@ -30642,6 +30785,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_CleanContentTags = QQ_CleanContentTags;
             window.QQ_HandleCharacterChat = QQ_HandleCharacterChat;
             window.QQ_SaveCharacterChatToWorldbook = QQ_SaveCharacterChatToWorldbook;
+            window.QQ_Test_Smart_Content_Extraction = QQ_Test_Smart_Content_Extraction;
 
             /**
              * *** 新增：测试新的格式处理和重试逻辑 ***
