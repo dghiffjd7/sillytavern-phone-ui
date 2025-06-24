@@ -11886,7 +11886,7 @@ moment_end
                 try {
                     if (!worldbook || !entries) {
                         console.warn('世界书功能不可用，无法保存互动空间');
-                        return;
+                        return false;
                     }
                     
                     const spaceData = {
@@ -11895,33 +11895,26 @@ moment_end
                         version: "1.0"
                     };
                     
-                    // 创建或更新世界书条目
-                    let entry = entries.find(e => e.comment === QQ_INTERACTIVE_BACKUP_KEY);
-                    if (!entry) {
-                        entry = {
-                            comment: QQ_INTERACTIVE_BACKUP_KEY,
-                            content: JSON.stringify(spaceData),
-                            key: ["此世界书永不触发_互动空间"],
-                            keysecondary: [],
-                            order: 1000,
-                            enabled: true,
-                            uid: Date.now()
-                        };
-                        // 添加到worldbook.entries（如果存在）
-                        if (worldbook.entries) {
-                            worldbook.entries.push(entry);
-                        }
+                    console.log(`准备保存互动空间到世界书: ${QQ_INTERACTIVE_BACKUP_KEY}, 空间数量: ${Object.keys(QQ_InteractiveSpaces).length}`);
+                    
+                    // 使用统一的保存机制，与分组、动态保持一致
+                    const success = await QQ_SafeSaveToWorldBook(
+                        "互动空间数据", 
+                        spaceData, 
+                        QQ_INTERACTIVE_BACKUP_KEY
+                    );
+                    
+                    if (success) {
+                        console.log(`🎯 互动空间保存成功: ${Object.keys(QQ_InteractiveSpaces).length}个空间`);
+                        return true;
                     } else {
-                        entry.content = JSON.stringify(spaceData);
+                        console.error('互动空间保存失败：QQ_SafeSaveToWorldBook返回false');
+                        return false;
                     }
                     
-                    // 保存到世界书
-                    const success = await QQ_SafeSaveWorldInfo("互动空间数据");
-                    if (success) {
-                        console.log('互动空间数据保存完成:', Object.keys(QQ_InteractiveSpaces).length, '个空间');
-                    }
                 } catch (error) {
                     console.error('保存互动空间时发生错误:', error);
+                    return false;
                 }
             }
             
@@ -11936,14 +11929,15 @@ moment_end
                         return;
                     }
                     
-                    const entry = entries.find(e => e.comment === QQ_INTERACTIVE_BACKUP_KEY);
-                    if (entry && entry.content) {
-                        const data = JSON.parse(entry.content);
-                        QQ_InteractiveSpaces = data.spaces || {};
-                        console.log('从世界书加载互动空间:', Object.keys(QQ_InteractiveSpaces).length, '个空间');
+                    // 使用统一的加载机制，与分组、动态保持一致
+                    const data = await QQ_GetFromWorldBook(QQ_INTERACTIVE_BACKUP_KEY);
+                    
+                    if (data && data.spaces) {
+                        QQ_InteractiveSpaces = data.spaces;
+                        console.log(`✅ 从世界书加载互动空间: ${Object.keys(QQ_InteractiveSpaces).length}个空间`);
                     } else {
                         QQ_InteractiveSpaces = {};
-                        console.log('世界书中没有互动空间数据，初始化为空');
+                        console.log('📋 世界书中没有互动空间数据，初始化为空');
                     }
                 } catch (error) {
                     console.error('从世界书加载互动空间失败:', error);
@@ -12215,15 +12209,13 @@ moment_end
                 // 设置当前活动空间
                 QQ_ActiveSpaceId = spaceId;
                 
-                // *** 立即保存单个互动内容到世界书 ***
-                QQ_SaveInteractiveContentToWorldBook(cleanContent, charName).then(interactiveId => {
-                    console.log(`🎯 互动内容已立即保存到世界书，ID: ${interactiveId}, 角色: ${charName}`);
+                // *** 立即保存互动空间到世界书 ***
+                // 使用统一的互动空间保存机制，确保UI显示的数据能正确保存
+                QQ_SaveInteractiveSpaces().then(() => {
+                    console.log(`🎯 互动空间已保存到世界书: ${spaceId}, 角色: ${charName}`);
                 }).catch(error => {
-                    console.error('保存互动内容失败:', error);
+                    console.error('保存互动空间失败:', error);
                 });
-                
-                // 同时保存到旧的互动空间存储（兼容性）
-                QQ_SaveInteractiveSpaces();
                 
                 // 移除现有的互动空间
                 $('.QQ_interactive_space').remove();
@@ -29034,6 +29026,106 @@ msg_end
                         
                     } catch (error) {
                         console.error('❌ 测试互动内容失败:', error);
+                        return false;
+                    }
+                },
+                
+                /**
+                 * *** 新增：测试互动空间保存和加载 ***
+                 */
+                async testInteractiveSpaces() {
+                    console.log('=== 🎯 测试互动空间保存和加载 ===');
+                   
+                    try {
+                        // 1. 检查世界书基本状态
+                        console.log('\n1️⃣ 检查世界书基本状态...');
+                        if (!worldbook || !entries) {
+                            console.error('❌ 世界书或entries不可用');
+                            return false;
+                        }
+                        console.log(`✅ 世界书可用, entries数量: ${entries.length}`);
+                        
+                        // 2. 检查当前互动空间数据
+                        console.log('\n2️⃣ 检查当前互动空间数据...');
+                        const currentSpaceCount = Object.keys(QQ_InteractiveSpaces || {}).length;
+                        console.log(`📊 当前内存中的互动空间数量: ${currentSpaceCount}`);
+                        
+                        if (currentSpaceCount > 0) {
+                            console.log('📋 当前互动空间列表:');
+                            Object.keys(QQ_InteractiveSpaces).forEach(spaceId => {
+                                const space = QQ_InteractiveSpaces[spaceId];
+                                console.log(`  - ${spaceId}: ${space.name} (${space.characterName})`);
+                            });
+                        }
+                        
+                        // 3. 测试保存功能
+                        console.log('\n3️⃣ 测试保存功能...');
+                        const saveResult = await QQ_SaveInteractiveSpaces();
+                        if (saveResult) {
+                            console.log('✅ 互动空间保存成功');
+                        } else {
+                            console.error('❌ 互动空间保存失败');
+                            return false;
+                        }
+                        
+                        // 4. 验证世界书条目
+                        console.log('\n4️⃣ 验证世界书条目...');
+                        const targetEntry = entries.find(entry => entry.comment === QQ_INTERACTIVE_BACKUP_KEY);
+                        
+                        if (targetEntry) {
+                            console.log(`✅ 世界书条目存在: ${QQ_INTERACTIVE_BACKUP_KEY}`);
+                            console.log(`📄 条目内容长度: ${targetEntry.content?.length || 0}`);
+                            
+                            try {
+                                const entryData = JSON.parse(targetEntry.content);
+                                if (entryData.spaces && typeof entryData.spaces === 'object') {
+                                    const savedSpaceCount = Object.keys(entryData.spaces).length;
+                                    console.log(`✅ 条目数据格式正确: ${savedSpaceCount}个空间`);
+                                    
+                                    if (savedSpaceCount === currentSpaceCount) {
+                                        console.log('✅ 保存的空间数量与内存数量一致');
+                                    } else {
+                                        console.warn(`⚠️ 数量不一致: 内存${currentSpaceCount} vs 保存${savedSpaceCount}`);
+                                    }
+                                } else {
+                                    console.error('❌ 条目数据格式错误，没有spaces对象');
+                                    return false;
+                                }
+                            } catch (parseError) {
+                                console.error('❌ 条目内容JSON解析失败:', parseError);
+                                return false;
+                            }
+                        } else {
+                            console.error(`❌ 世界书条目不存在: ${QQ_INTERACTIVE_BACKUP_KEY}`);
+                            return false;
+                        }
+                        
+                        // 5. 测试加载功能
+                        console.log('\n5️⃣ 测试加载功能...');
+                        const originalSpaces = { ...QQ_InteractiveSpaces };
+                        QQ_InteractiveSpaces = {}; // 清空内存
+                        
+                        await QQ_LoadInteractiveSpaces();
+                        const loadedSpaceCount = Object.keys(QQ_InteractiveSpaces).length;
+                        
+                        if (loadedSpaceCount === currentSpaceCount) {
+                            console.log('✅ 加载测试成功，数据完整恢复');
+                            QQ_InteractiveSpaces = originalSpaces; // 恢复原数据
+                        } else {
+                            console.error(`❌ 加载测试失败: 期望${currentSpaceCount}个，实际${loadedSpaceCount}个`);
+                            QQ_InteractiveSpaces = originalSpaces; // 恢复原数据
+                            return false;
+                        }
+                        
+                        console.log('\n✅ 互动空间保存加载测试完成');
+                        console.log('🎯 互动空间功能正常，数据能正确保存到世界书并重新加载');
+                        
+                        toastr.success('互动空间保存加载测试通过', '测试成功');
+                        return true;
+                        
+                    } catch (error) {
+                        console.error('❌ 测试互动空间时出错:', error);
+                        toastr.error('测试过程中出现错误，请查看控制台', '测试失败');
                         return false;
                     }
                 },
