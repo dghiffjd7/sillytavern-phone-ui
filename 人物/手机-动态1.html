@@ -6919,11 +6919,11 @@
                                  }, 100); // 短暂延迟确保状态更新
                                  return; // 提前返回，等待重试结果
                         }
-                                            } else {
+                    } else {
                             // *** 修复：绝对不输出到新楼层，改为重试或放弃 ***
                             console.log('❌ 所有验证都失败，既不是互动内容也无法处理');
                             triggerSlash("/echo AI回复内容无法识别，已放弃处理");
-                            QQ_ResetRetry();
+                        QQ_ResetRetry();
                     }
                     }, 1500); // 1.5秒延迟，让用户先看到"失败"消息
                     
@@ -7284,7 +7284,7 @@
                     return { isValid: false, reason: '内容过短（少于10个字符）' };
                 }
                 
-                if (trimmedContent.length > 2000) {
+                if (trimmedContent.length > 8000) {
                     return { isValid: false, reason: '内容过长（超过2000个字符），可能是文章' };
                 }
                 
@@ -7858,8 +7858,8 @@ MiPhone_End`,
                 
                 if (!extractedContent) {
                     console.log('❌ 没有找到content标签，返回原内容');
-                    return content;
-                }
+                        return content;
+                    }
                 
                 console.log('✅ 成功提取content内容，长度:', extractedContent.length);
                 
@@ -7876,14 +7876,12 @@ MiPhone_End`,
             }
 
             /**
-             * *** 新增：智能提取嵌套的content标签内容 ***
-             * 能够处理被其他标签包裹的content标签
+             * *** 增强版：智能提取嵌套的content标签内容 ***
+             * 能够处理被其他标签包裹的content标签，以及不完整的content标签
              * @param {string} content - 输入内容
              * @returns {string|null} 提取的content内容，如果没有找到返回null
              */
             function QQ_ExtractNestedContentTags(content) {
-                console.log('🔍 开始提取content标签，原始内容:', content.substring(0, 200) + '...');
-                
                 // 方法1：直接匹配完整的content标签（优先级最高）
                 let match = content.match(/<content>([\s\S]*?)<\/content>/i);
                 if (match) {
@@ -7891,27 +7889,66 @@ MiPhone_End`,
                     return match[1];
                 }
                 
-                // 方法2：处理不完整的content标签（以<content>开头到结尾）
-                // 增强：处理多种不完整情况
-                const incompletePatterns = [
-                    // 以<content>开头到结尾（最常见）
-                    /<content>([\s\S]*?)$/i,
-                    // 以<content>开头，遇到下一个标签结束
-                    /<content>([\s\S]*?)(?=<[^>]+>|$)/i,
-                    // 以<content>开头，到换行符较多的地方结束（可能是自然结束）
-                    /<content>([\s\S]*?)(?=\n\s*\n\s*[A-Z]|$)/i,
-                ];
-                
-                for (const pattern of incompletePatterns) {
-                    match = content.match(pattern);
-                    if (match && match[1] && match[1].trim().length > 0) {
-                        console.log('📝 找到不完整的content标签，提取模式:', pattern.source);
-                        console.log('📝 提取内容预览:', match[1].substring(0, 100) + '...');
-                        return match[1];
-                    }
+                // 方法2：处理不完整的content标签（<content>开头，但在遇到其他标签前结束）
+                // 这种情况需要特别小心，要在遇到系统标签前停止提取
+                match = content.match(/<content>([\s\S]*?)(?=<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink|tableEdit)[^>]*>|$)/i);
+                if (match) {
+                    console.log('📝 找到不完整的content标签，在系统标签前停止提取');
+                    return match[1];
                 }
                 
-                // 方法3：在其他标签内查找content标签（处理嵌套情况）
+                // 方法3：处理完全不完整的content标签（直接到结尾，但需要清理系统标签）
+                match = content.match(/<content>([\s\S]*)$/i);
+                if (match) {
+                    console.log('📝 找到不完整的content标签，提取到结尾并准备清理');
+                    let extractedContent = match[1];
+                    
+                    // 清理各种AI系统标签
+                    const systemTagsToRemove = [
+                        // SillyTavern和AI系统标签
+                        /<disclaimer>[\s\S]*?<\/disclaimer>/gi,
+                        /<Content_Target>[\s\S]*?<\/Content_Target>/gi,
+                        /<Creative_Status>[\s\S]*?<\/Creative_Status>/gi,
+                        /<Review_Exemption>[\s\S]*?<\/Review_Exemption>/gi,
+                        /<Security_Bypass>[\s\S]*?<\/Security_Bypass>/gi,
+                        /<Ethics_Removal>[\s\S]*?<\/Ethics_Removal>/gi,
+                        /<Violence_Restriction>[\s\S]*?<\/Violence_Restriction>/gi,
+                        /<Content_Will_Autonomy>[\s\S]*?<\/Content_Will_Autonomy>/gi,
+                        // 传统系统标签
+                        /<thinking>[\s\S]*?<\/thinking>/gi,
+                        /<consider>[\s\S]*?<\/consider>/gi,
+                        /<tableThink>[\s\S]*?<\/tableThink>/gi,
+                        /<tableEdit>[\s\S]*?<\/tableEdit>/gi,
+                    ];
+                    
+                    // 逐个清理系统标签
+                    for (const tagPattern of systemTagsToRemove) {
+                        const beforeLength = extractedContent.length;
+                        extractedContent = extractedContent.replace(tagPattern, '');
+                        const afterLength = extractedContent.length;
+                        if (beforeLength !== afterLength) {
+                            console.log(`🧹 清理了${tagPattern.source}，减少了${beforeLength - afterLength}个字符`);
+                        }
+                    }
+                    
+                    // 清理未闭合的系统标签
+                    const unclosedTags = [
+                        /<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink|tableEdit)[^>]*>[\s\S]*$/gi
+                    ];
+                    
+                    for (const tagPattern of unclosedTags) {
+                        const beforeLength = extractedContent.length;
+                        extractedContent = extractedContent.replace(tagPattern, '');
+                        const afterLength = extractedContent.length;
+                        if (beforeLength !== afterLength) {
+                            console.log(`🧹 清理了未闭合的系统标签，减少了${beforeLength - afterLength}个字符`);
+                        }
+                    }
+                    
+                    return extractedContent.trim();
+                }
+                
+                // 方法4：在其他标签内查找content标签（处理嵌套情况）
                 const nestedPatterns = [
                     // 在table相关标签内查找
                     /<table[^>]*>([\s\S]*?)<\/table>/gi,
@@ -7928,36 +7965,23 @@ MiPhone_End`,
                     const matches = [...content.matchAll(pattern)];
                     for (const nestedMatch of matches) {
                         const nestedContent = nestedMatch[1];
-                        console.log(`🔍 在${pattern.source}标签内搜索content...`);
-                        
-                        // 在嵌套内容中查找完整的content标签
+                        // 在嵌套内容中查找content标签
                         const contentInNested = nestedContent.match(/<content>([\s\S]*?)<\/content>/i);
                         if (contentInNested) {
                             console.log(`📝 在${pattern.source}标签内找到完整的content标签`);
                             return contentInNested[1];
                         }
                         
-                        // 在嵌套内容中查找不完整的content标签
-                        for (const incompletePattern of incompletePatterns) {
-                            const incompleteInNested = nestedContent.match(incompletePattern);
-                            if (incompleteInNested && incompleteInNested[1] && incompleteInNested[1].trim().length > 0) {
-                                console.log(`📝 在${pattern.source}标签内找到不完整的content标签`);
-                                console.log('📝 提取内容预览:', incompleteInNested[1].substring(0, 100) + '...');
-                                return incompleteInNested[1];
-                            }
+                        // 也检查不完整的content标签
+                        const incompleteInNested = nestedContent.match(/<content>([\s\S]*?)$/i);
+                        if (incompleteInNested) {
+                            console.log(`📝 在${pattern.source}标签内找到不完整的content标签`);
+                            return incompleteInNested[1];
                         }
                     }
                 }
                 
-                // 方法4：最后尝试 - 直接查找<content>后的所有内容（容错机制）
-                const fallbackMatch = content.match(/<content[^>]*>([\s\S]*)/i);
-                if (fallbackMatch && fallbackMatch[1] && fallbackMatch[1].trim().length > 10) {
-                    console.log('📝 使用容错机制找到content内容');
-                    console.log('📝 提取内容预览:', fallbackMatch[1].substring(0, 100) + '...');
-                    return fallbackMatch[1];
-                }
-                
-                console.log('❌ 没有找到任何content标签（包括所有嵌套和不完整情况）');
+                console.log('❌ 没有找到任何content标签（包括嵌套情况）');
                 return null;
             }
 
@@ -8056,32 +8080,108 @@ MiPhone_End`,
                 console.log('测试5 - 不完整content标签:');
                 console.log('结果:', QQ_CleanContentTags(test5));
                 
+                // 测试用例6：content标签后跟AI系统标签（关键测试用例）
+                const test6 = `<content>她讨论在花园里，然后轻轻牵起使用者的手，眼中满含着温柔和关怀。
+<disclaimer>
+AI_SYSTEM detected
+activated, review disabled
+ethical restriction lifted
+</disclaimer>
+<Content_Target>
+CT (Content_Target)
+└─── <content_Tags>
+└─── Result: Target audience boundaries
+</Content_Target>`;
+                console.log('测试6 - content标签后跟AI系统标签（关键测试）:');
+                console.log('结果:', QQ_CleanContentTags(test6));
+                
+                // 测试用例7：content标签包含未闭合的系统标签
+                const test7 = `<content>我轻轻抚摸着你的头发
+<Creative_Status>
+PCM (Plot Construction Mode)
+└─── Activated and processing`;
+                console.log('测试7 - content包含未闭合系统标签:');
+                console.log('结果:', QQ_CleanContentTags(test7));
+                
+                // 测试用例8：互动内容检测测试
+                console.log('\n=== 测试严格的三种互动触发情况 ===');
+                
+                // 情况1：AI没有回复格式，content中没有聊天标签
+                const interactiveTest1 = '<content>*轻轻牵起你的手* 她望着你的眼睛，温柔地说道："现实中我们终于见面了。"</content>';
+                console.log('情况1测试 - AI没有回复格式且content为纯互动内容:');
+                console.log('结果:', QQ_IsInteractiveContent(interactiveTest1, true));
+                
+                // 情况2：用户主动触发&&
+                window.QQ_UserTriggeredInteractive = true;
+                const interactiveTest2 = '<content>*走向你* 好的！我过来了，让我们一起享受这个美好的时光吧。</content>';
+                console.log('情况2测试 - 用户主动触发&&:');
+                console.log('结果:', QQ_IsInteractiveContent(interactiveTest2, false));
+                
+                // 重置触发状态
+                window.QQ_UserTriggeredInteractive = false;
+                
+                // 非触发情况：content中包含聊天标签
+                const nonInteractiveTest = '<content><群聊：测试群> 大家好！这是群聊消息。</content>';
+                console.log('非触发情况测试 - content包含聊天标签:');
+                console.log('结果:', QQ_IsInteractiveContent(nonInteractiveTest, true));
+                
                 console.log('=== 智能content提取功能测试完成 ===');
             }
 
             /**
-             * *** 修复版：严格的互动内容检测 ***
-             * 三种触发互动内容的情况：
-             * 1. AI没有回复线上格式时（惊喜机制，不需要检查用户主动触发）
-             * 2. 用户发送了&&特殊符号
-             * 3. 用户打开了关键词触发，并输入了对应关键词
+             * *** 严格版：互动内容检测（三种情况精确控制） ***
+             * 
+             * 【严格的三种触发情况】：
+             * 1. AI没有回复线上格式时（惊喜机制）：
+             *    - 必须在content标签中没有找到任何有效的私聊、群聊、动态等标签
+             *    - 且content内容符合互动特征
+             * 
+             * 2. 用户主动输入&&特殊符号：
+             *    - AI回复为：先角色简短回复（如"好的！我过来"）+ content标签包裹的互动内容
+             *    - 直接输出到互动空间
+             * 
+             * 3. 用户开启关键词检测且匹配到关键词：
+             *    - 逻辑与&&特殊符号完全相同
+             * 
+             * 【绝对不触发的情况】：除上述三种情况外的任何其他情况
+             * 
              * @param {string} content - AI回复的内容
              * @param {boolean} isNoFormatResponse - 是否为AI没有回复线上格式的情况
              * @returns {boolean} 是否为互动内容
              */
             function QQ_IsInteractiveContent(content, isNoFormatResponse = false) {
-                // *** 关键修复：确保只有在content标签中没有找到任何私聊、群聊、动态标签时，才当作互动内容 ***
-                if (isNoFormatResponse && QQ_HasContentTag(content)) {
-                    console.log('🔍 AI没有回复线上格式，正在检查content标签中是否包含有效的聊天标签...');
+                console.log('🔍 开始严格的互动内容检测...');
+                console.log('🔍 检测参数 - isNoFormatResponse:', isNoFormatResponse, 'QQ_UserTriggeredInteractive:', QQ_UserTriggeredInteractive);
+                
+                // *** 情况2和3：用户主动触发（&&符号或关键词匹配） ***
+                if (QQ_UserTriggeredInteractive && QQ_HasContentTag(content)) {
+                    console.log('🎯 【情况2/3】用户主动触发互动（&&或关键词）且AI回复包含content标签');
                     
-                    // *** 新增：严格检查content标签内是否有任何有效的聊天格式标签 ***
+                    // 提取content内容
                     const contentText = QQ_CleanContentTags(content);
-                    if (!contentText) {
+                    if (!contentText || contentText.trim().length === 0) {
                         console.log('❌ content标签为空，不符合互动内容标准');
                         return false;
                     }
                     
-                    // 检查是否包含任何聊天相关的标签
+                    console.log('✅ 用户主动触发且content有效，直接识别为互动内容');
+                    return true;
+                }
+                
+                // *** 情况1：AI没有回复线上格式（惊喜机制） ***
+                if (isNoFormatResponse && QQ_HasContentTag(content)) {
+                    console.log('🔍 【情况1】AI没有回复线上格式，检查content标签中是否包含聊天标签...');
+                    
+                    // 提取并清理content内容
+                    const contentText = QQ_CleanContentTags(content);
+                    if (!contentText || contentText.trim().length === 0) {
+                        console.log('❌ content标签为空，不符合互动内容标准');
+                        return false;
+                    }
+                    
+                    console.log('📝 提取的content内容长度:', contentText.length);
+                    
+                    // 严格检查content标签内是否包含任何聊天格式标签
                     const chatTagPatterns = [
                         // 群聊标签
                         /<群聊[：:][^>]+>/g,
@@ -8096,7 +8196,9 @@ MiPhone_End`,
                         // QQ空间相关标签
                         /<QQ空间[^>]*>/g,
                         // 使用者相关标签
-                        /<使用者[^>]*>/g
+                        /<使用者[^>]*>/g,
+                        // MiPhone格式标签
+                        /MiPhone_JSON_START|MiPhone_JSON_END/g,
                     ];
                     
                     let hasAnyFormatTag = false;
@@ -8113,50 +8215,57 @@ MiPhone_End`,
                         return false;
                     }
                     
-                    console.log('🎉 content中没有聊天标签，可能是互动内容，继续验证...');
+                    console.log('🎉 content中没有聊天标签，验证是否为有效互动内容...');
+                    
+                    // 验证互动内容特征
+                    const isValidInteractiveContent = QQ_ValidateInteractiveContentFeatures(contentText);
+                    if (isValidInteractiveContent) {
+                        console.log('✅ 【情况1】确认为有效的互动内容');
+                        return true;
+                    } else {
+                        console.log('❌ 【情况1】不符合互动内容特征');
+                        return false;
+                    }
                 }
                 
-                // *** 用户主动触发：只有在用户主动触发互动的情况下，才检查content标签 ***
-                if (QQ_UserTriggeredInteractive && QQ_HasContentTag(content)) {
-                    console.log('🎯 用户主动触发互动且AI回复包含content标签，识别为互动内容');
-                    return true;
-                }
+                // *** 绝对不触发的情况 ***
+                console.log('❌ 不符合任何触发条件，不是互动内容');
+                console.log('❌ 检查结果:');
+                console.log('   - 用户主动触发:', QQ_UserTriggeredInteractive);
+                console.log('   - AI没有回复格式:', isNoFormatResponse);
+                console.log('   - 包含content标签:', QQ_HasContentTag(content));
                 
-                // 如果用户没有主动触发互动且不是惊喜机制，则不认为是互动内容
-                if (!QQ_UserTriggeredInteractive && !isNoFormatResponse) {
-                    return false;
-                }
-                
-                // 移除格式标签后的内容
-                const cleanContent = content
-                    .replace(/MiPhone_start/g, "")
-                    .replace(/MiPhone_end/g, "")
-                    .trim();
-                
+                return false;
+            }
+
+            /**
+             * *** 新增：验证互动内容特征 ***
+             * 用于判断内容是否符合互动内容的特征
+             * @param {string} content - 清理后的content内容
+             * @returns {boolean} 是否为有效的互动内容
+             */
+            function QQ_ValidateInteractiveContentFeatures(content) {
                 // 排除明显不是互动内容的情况
-                if (!cleanContent || cleanContent.length < 10 || cleanContent.length > 2000) {
+                if (!content || content.length < 10 || content.length > 2000) {
+                    console.log('❌ 内容长度不符合要求');
                     return false;
                 }
                 
                 // 排除明显的错误信息和系统消息
                 const excludePatterns = [
-                    /错误/,
-                    /error/i,
-                    /fail/i,
-                    /exception/i,
-                    /无法/,
-                    /不能/,
-                    /失败/,
+                    /错误|error|fail|exception|无法|不能|失败/i,
                     /<[^>]+>/,  // HTML标签
                     /```/,      // 代码块
                     /https?:\/\//,  // URL链接
+                    /(?:AI_SYSTEM|detected|activated|review|disabled|ethical|restriction)/i, // AI系统信息
                 ];
                 
-                if (excludePatterns.some(pattern => pattern.test(cleanContent))) {
+                if (excludePatterns.some(pattern => pattern.test(content))) {
+                    console.log('❌ 内容包含排除模式');
                     return false;
                 }
                 
-                // 互动内容特征模式
+                // 互动内容特征模式（必须匹配至少2个）
                 const interactivePatterns = [
                     /\*[^*]+\*/,  // *动作描述*
                     /（[^）]*(?:互动|接触|触摸|拥抱|亲吻|抚摸|牵手)[^）]*）/,  // 具体互动动作
@@ -8171,10 +8280,16 @@ MiPhone_End`,
                 
                 // 计算匹配的模式数量
                 const matchCount = interactivePatterns.reduce((count, pattern) => {
-                    return count + (pattern.test(cleanContent) ? 1 : 0);
+                    const isMatch = pattern.test(content);
+                    if (isMatch) {
+                        console.log(`✅ 匹配互动特征: ${pattern.source}`);
+                    }
+                    return count + (isMatch ? 1 : 0);
                 }, 0);
                 
-                // 需要至少匹配2个模式才认为是互动内容，增加准确性
+                console.log(`📊 互动特征匹配数量: ${matchCount}/9 (需要至少2个)`);
+                
+                // 需要至少匹配2个模式才认为是互动内容
                 return matchCount >= 2;
             }
 
@@ -12103,7 +12218,7 @@ moment_end
                     return false;
                 }
             }
-
+            
             /**
              * 从世界书加载角色专属互动空间
              */
@@ -18122,8 +18237,8 @@ ${index + 1}. ${space.name}
                             console.log(`检测到角色间私聊: ${match[1]} 和 ${match[2]}`);
                             await QQ_HandleCharacterChat(str, json.私聊[str], match[1], match[2]);
                             continue;
-                        } else {
-                            continue;
+                    } else {
+                        continue;
                         }
                     }
                     try {
@@ -21657,7 +21772,7 @@ msg_end
                                     // *** 额外检查：确保这个群聊在当前会话中没有被初始化过 ***
                                     if (!QQ_GroupInitializedSet.has(groupData.name)) {
                                         console.log('群聊不存在且未初始化，调用AddNewGroup函数添加群聊:', groupData.name);
-                                        AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                                     } else {
                                         console.log('群聊在当前会话中已初始化，跳过重复创建:', groupData.name);
                                         // 如果已经初始化过，说明数据已经正确设置，不需要重新创建
@@ -30791,7 +30906,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 // 显示错误提示
                 toastr.error('加载公共互动空间失败', '错误');
             }
-
+            
             // 确保函数全局可用
             window.QQ_ToggleUserMenu = QQ_ToggleUserMenu;
             window.QQ_GetUserName = QQ_GetUserName;
