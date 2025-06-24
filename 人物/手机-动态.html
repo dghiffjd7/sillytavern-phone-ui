@@ -6876,14 +6876,50 @@
                     result.indexOf("msg_start") < 0 ||
                     result.indexOf("msg_end") < 0
                 ) {
-                    console.log("🔧 检测到缺少MSG标签，开始自动补全...");
+                    console.log("🔧 检测到缺少MSG标签，启用智能提取模式...");
                     console.log("原始result内容:", result.substring(0, 200) + "...");
                     
-                    // 自动补全tag - 增强版
+                    // *** 新策略：直接使用智能提取，不依赖MSG标签自动补全 ***
+                    console.log("🎯 直接从聊天标签中提取内容...");
+                    const extractedInfo = QQ_ExtractValidInfo(result);
+                    
+                    if (extractedInfo.hasValidInfo) {
+                        console.log("✅ 智能提取成功，跳过MSG标签处理");
+                        console.log("提取的信息:", extractedInfo);
+                        
+                        // 将提取的信息转换为标准格式进行处理
+                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                        if (convertedResult) {
+                            console.log("✅ 转换为标准格式成功，直接处理聊天内容");
+                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                            
+                            // 处理动态内容（如果存在）
+                            const momentes = result.matchAll(/moment_start([\s\S]+?)moment_end/g);
+                            if (momentes) {
+                                for (const moment of momentes) {
+                                    const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                                    QQ_Moment_Parse(moment[1], isInCommentContext);
+                                }
+                            }
+                            
+                            // 成功处理，重置重试状态并返回
+                            QQ_ResetRetry();
+                            QQ_UpdateNewTips();
+                            QQ_Save_Msg();
+                            return;
+                        } else {
+                            console.log("❌ 智能提取内容转换失败，尝试MSG标签自动补全...");
+                        }
+                    } else {
+                        console.log("❌ 智能提取没有找到有效内容，尝试MSG标签自动补全...");
+                    }
+                    
+                    // *** 如果智能提取失败，回退到原有的自动补全逻辑 ***
+                    console.log("🔧 智能提取失败，开始MSG标签自动补全...");
+                    
                     if (result.indexOf("msg_start") < 0) {
                         console.log("🔍 缺少msg_start，正在查找聊天开始标签...");
                         
-                        // 修复：优化正则表达式以支持更多格式
                         let start = result.match(
                             /<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/
                         );
@@ -6896,7 +6932,6 @@
                             );
                         } else {
                             console.log("❌ 未找到聊天开始标签，尝试备用模式...");
-                            // 备用模式：如果有任何聊天内容，在最前面添加msg_start
                             if (result.includes('<') && (result.includes('聊天') || result.includes('私聊') || result.includes('群聊'))) {
                                 result = `msg_start\n${result}`;
                                 console.log("✅ 使用备用模式添加msg_start");
@@ -6907,7 +6942,6 @@
                     if (result.indexOf("msg_end") < 0) {
                         console.log("🔍 缺少msg_end，正在查找聊天结束标签...");
                         
-                        // 修复：优化正则表达式以支持更多格式
                         let endMatches = [...result.matchAll(
                             /<\/(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/g
                         )];
@@ -6921,12 +6955,10 @@
                             );
                         } else {
                             console.log("❌ 未找到聊天结束标签，尝试备用模式...");
-                            // 备用模式：如果没有moment_start，在最后添加msg_end
                             if (!result.includes('moment_start')) {
                                 result = `${result}\nmsg_end`;
                                 console.log("✅ 使用备用模式添加msg_end");
                             } else {
-                                // 如果有动态内容，在动态之前添加msg_end
                                 result = result.replace('moment_start', 'msg_end\nmoment_start');
                                 console.log("✅ 在动态内容前添加msg_end");
                             }
@@ -30142,6 +30174,118 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             };
 
             /**
+             * *** 新增：智能提取内容转换为标准格式函数 ***
+             */
+            window.QQ_ConvertExtractedToStandard = function(extractedInfo) {
+                console.log('🔄 开始转换智能提取内容为标准格式...');
+                
+                if (!extractedInfo || !extractedInfo.hasValidInfo) {
+                    console.log('❌ 提取信息无效，无法转换');
+                    return null;
+                }
+                
+                try {
+                    const result = {};
+                    
+                    // 处理聊天消息
+                    if (extractedInfo.messages && extractedInfo.messages.length > 0) {
+                        console.log(`📝 处理 ${extractedInfo.messages.length} 条聊天消息`);
+                        
+                        // 分析聊天类型
+                        let chatType = 'private'; // 默认私聊
+                        let chatName = '';
+                        
+                        // 检查是否为群聊
+                        if (extractedInfo.chatInfo && extractedInfo.chatInfo.includes('群聊')) {
+                            chatType = 'group';
+                            const groupMatch = extractedInfo.chatInfo.match(/群聊:(.+)/);
+                            chatName = groupMatch ? groupMatch[1].trim() : '未知群聊';
+                        } else if (extractedInfo.chatInfo) {
+                            // 私聊格式: "用户名和角色名的私聊/聊天"
+                            const privateMatch = extractedInfo.chatInfo.match(/(.+?)和(.+?)的(?:聊天|私聊)/);
+                            if (privateMatch) {
+                                // 判断哪个是用户名，哪个是角色名
+                                const user1 = privateMatch[1].trim();
+                                const user2 = privateMatch[2].trim();
+                                
+                                // 假设用户名包含在第一个位置，角色名在第二个位置
+                                // 或者根据当前用户名判断
+                                if (window.UserName && user1 === window.UserName) {
+                                    chatName = user2; // 对方角色名
+                                } else if (window.UserName && user2 === window.UserName) {
+                                    chatName = user1; // 对方角色名
+                                } else {
+                                    chatName = user2; // 默认取第二个为角色名
+                                }
+                            }
+                        }
+                        
+                        console.log(`💬 聊天类型: ${chatType}, 聊天对象: ${chatName}`);
+                        
+                        // 构建标准格式
+                        if (chatType === 'group') {
+                            result.type = 'group';
+                            result.groupName = chatName;
+                            result.messages = extractedInfo.messages.map(msg => {
+                                // 解析消息格式：角色名—内容—时间 或 角色名：内容
+                                const dashMatch = msg.match(/^(.+?)—(.+?)—(.+)$/);
+                                if (dashMatch) {
+                                    return {
+                                        sender: dashMatch[1].trim(),
+                                        content: dashMatch[2].trim(),
+                                        time: dashMatch[3].trim()
+                                    };
+                                }
+                                
+                                const colonMatch = msg.match(/^(.+?)：(.+)$/);
+                                if (colonMatch) {
+                                    return {
+                                        sender: colonMatch[1].trim(),
+                                        content: colonMatch[2].trim(),
+                                        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
+                                    };
+                                }
+                                
+                                return null;
+                            }).filter(msg => msg !== null);
+                        } else {
+                            result.type = 'private';
+                            result.chatWith = chatName;
+                            result.messages = extractedInfo.messages.map(msg => {
+                                // 解析消息格式：角色名—内容—时间 或 角色名：内容
+                                const dashMatch = msg.match(/^(.+?)—(.+?)—(.+)$/);
+                                if (dashMatch) {
+                                    return {
+                                        sender: dashMatch[1].trim(),
+                                        content: dashMatch[2].trim(),
+                                        time: dashMatch[3].trim()
+                                    };
+                                }
+                                
+                                const colonMatch = msg.match(/^(.+?)：(.+)$/);
+                                if (colonMatch) {
+                                    return {
+                                        sender: colonMatch[1].trim(),
+                                        content: colonMatch[2].trim(),
+                                        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }).substring(0, 5)
+                                    };
+                                }
+                                
+                                return null;
+                            }).filter(msg => msg !== null);
+                        }
+                    }
+                    
+                    console.log('✅ 转换完成，结果:', result);
+                    return result;
+                    
+                } catch (error) {
+                    console.error('❌ 转换过程出错:', error);
+                    return null;
+                }
+            };
+
+            /**
              * *** 新增：MSG标签缺失问题的专门诊断工具 ***
              */
             window.QQ_Test_MSG_Tag_Issue = function() {
@@ -30285,7 +30429,24 @@ MiPhone_JSON_END`;
                 const extractedInfo = QQ_ExtractValidInfo(extractedContent);
                 console.log('智能提取结果:', extractedInfo);
                 
-                console.log('\n🔍 第六步：测试动态提取');
+                if (extractedInfo.hasValidInfo) {
+                    console.log('\n🔄 第六步：测试智能提取内容转换');
+                    const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                    if (convertedResult) {
+                        console.log('✅ 转换成功，可以直接处理');
+                        console.log('转换结果预览:', JSON.stringify(convertedResult, null, 2).substring(0, 500) + '...');
+                        
+                        console.log('\n🎯 第七步：模拟直接处理流程');
+                        console.log('如果实际运行，将直接调用 QQ_Msg_Parse 处理转换后的内容');
+                        console.log('跳过MSG标签处理，避免自动补全失败问题');
+                    } else {
+                        console.log('❌ 智能提取内容转换失败');
+                    }
+                } else {
+                    console.log('❌ 智能提取未发现有效内容');
+                }
+                
+                console.log('\n🔍 第八步：测试动态提取');
                 const momentMatches = extractedContent.match(/moment_start([\s\S]*?)moment_end/g);
                 console.log(`动态匹配结果: ${momentMatches ? momentMatches.length : 0} 个`);
                 if (momentMatches) {
