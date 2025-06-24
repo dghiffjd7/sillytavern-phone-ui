@@ -7882,6 +7882,8 @@ MiPhone_End`,
              * @returns {string|null} 提取的content内容，如果没有找到返回null
              */
             function QQ_ExtractNestedContentTags(content) {
+                console.log('🔍 开始提取content标签，原始内容:', content.substring(0, 200) + '...');
+                
                 // 方法1：直接匹配完整的content标签（优先级最高）
                 let match = content.match(/<content>([\s\S]*?)<\/content>/i);
                 if (match) {
@@ -7890,10 +7892,23 @@ MiPhone_End`,
                 }
                 
                 // 方法2：处理不完整的content标签（以<content>开头到结尾）
-                match = content.match(/<content>([\s\S]*?)$/i);
-                if (match) {
-                    console.log('📝 找到不完整的content标签，提取到结尾');
-                    return match[1];
+                // 增强：处理多种不完整情况
+                const incompletePatterns = [
+                    // 以<content>开头到结尾（最常见）
+                    /<content>([\s\S]*?)$/i,
+                    // 以<content>开头，遇到下一个标签结束
+                    /<content>([\s\S]*?)(?=<[^>]+>|$)/i,
+                    // 以<content>开头，到换行符较多的地方结束（可能是自然结束）
+                    /<content>([\s\S]*?)(?=\n\s*\n\s*[A-Z]|$)/i,
+                ];
+                
+                for (const pattern of incompletePatterns) {
+                    match = content.match(pattern);
+                    if (match && match[1] && match[1].trim().length > 0) {
+                        console.log('📝 找到不完整的content标签，提取模式:', pattern.source);
+                        console.log('📝 提取内容预览:', match[1].substring(0, 100) + '...');
+                        return match[1];
+                    }
                 }
                 
                 // 方法3：在其他标签内查找content标签（处理嵌套情况）
@@ -7913,23 +7928,36 @@ MiPhone_End`,
                     const matches = [...content.matchAll(pattern)];
                     for (const nestedMatch of matches) {
                         const nestedContent = nestedMatch[1];
-                        // 在嵌套内容中查找content标签
+                        console.log(`🔍 在${pattern.source}标签内搜索content...`);
+                        
+                        // 在嵌套内容中查找完整的content标签
                         const contentInNested = nestedContent.match(/<content>([\s\S]*?)<\/content>/i);
                         if (contentInNested) {
-                            console.log(`📝 在${pattern.source}标签内找到content标签`);
+                            console.log(`📝 在${pattern.source}标签内找到完整的content标签`);
                             return contentInNested[1];
                         }
                         
-                        // 也检查不完整的content标签
-                        const incompleteInNested = nestedContent.match(/<content>([\s\S]*?)$/i);
-                        if (incompleteInNested) {
-                            console.log(`📝 在${pattern.source}标签内找到不完整的content标签`);
-                            return incompleteInNested[1];
+                        // 在嵌套内容中查找不完整的content标签
+                        for (const incompletePattern of incompletePatterns) {
+                            const incompleteInNested = nestedContent.match(incompletePattern);
+                            if (incompleteInNested && incompleteInNested[1] && incompleteInNested[1].trim().length > 0) {
+                                console.log(`📝 在${pattern.source}标签内找到不完整的content标签`);
+                                console.log('📝 提取内容预览:', incompleteInNested[1].substring(0, 100) + '...');
+                                return incompleteInNested[1];
+                            }
                         }
                     }
                 }
                 
-                console.log('❌ 没有找到任何content标签（包括嵌套情况）');
+                // 方法4：最后尝试 - 直接查找<content>后的所有内容（容错机制）
+                const fallbackMatch = content.match(/<content[^>]*>([\s\S]*)/i);
+                if (fallbackMatch && fallbackMatch[1] && fallbackMatch[1].trim().length > 10) {
+                    console.log('📝 使用容错机制找到content内容');
+                    console.log('📝 提取内容预览:', fallbackMatch[1].substring(0, 100) + '...');
+                    return fallbackMatch[1];
+                }
+                
+                console.log('❌ 没有找到任何content标签（包括所有嵌套和不完整情况）');
                 return null;
             }
 
