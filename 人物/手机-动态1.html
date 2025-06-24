@@ -16954,6 +16954,262 @@ ${index + 1}. ${space.name}
                 }
             }
             /**
+             * *** 新增：处理角色之间的私聊（不包含用户的角色间互动） ***
+             * @param {string} chatKey - 聊天标识，如"角色A和角色B的聊天"
+             * @param {Array} messages - 消息列表
+             * @param {string} char1 - 角色1名称
+             * @param {string} char2 - 角色2名称
+             */
+            async function QQ_HandleCharacterChat(chatKey, messages, char1, char2) {
+                console.log(`处理角色间私聊: ${char1} 和 ${char2}`);
+                
+                if (!messages || messages.length === 0) {
+                    console.log('角色间私聊消息为空，跳过处理');
+                    return;
+                }
+                
+                // 创建角色间私聊的标识
+                const chatId = `char_chat_${char1}_${char2}`;
+                const chatTitle = `${char1}和${char2}的私聊`;
+                
+                // 存储到专门的角色间私聊数据结构
+                if (!window.QQ_CharacterChats) {
+                    window.QQ_CharacterChats = {};
+                }
+                
+                if (!window.QQ_CharacterChats[chatKey]) {
+                    window.QQ_CharacterChats[chatKey] = {
+                        id: chatId,
+                        title: chatTitle,
+                        char1: char1,
+                        char2: char2,
+                        messages: [],
+                        lastTime: '',
+                        lastMessage: ''
+                    };
+                }
+                
+                // 处理消息
+                let lastTime = '';
+                let lastMessage = '';
+                for (let msg of messages) {
+                    // 清理消息内容
+                    const parts = msg.split("--");
+                    if (parts.length >= 2) {
+                        parts[1] = QQ_CleanNestedTags(parts[1]);
+                        msg = parts.join("--");
+                    }
+                    
+                    // 检查是否为新消息
+                    if (!window.QQ_CharacterChats[chatKey].messages.includes(msg)) {
+                        window.QQ_CharacterChats[chatKey].messages.push(msg);
+                        console.log(`角色间私聊新增消息: ${msg}`);
+                    }
+                    
+                    // 更新最后消息信息
+                    const sp = msg.split("--");
+                    if (sp.length >= 2) {
+                        lastMessage = sp[1];
+                    }
+                    if (sp.length >= 3) {
+                        lastTime = sp[2];
+                    }
+                }
+                
+                window.QQ_CharacterChats[chatKey].lastTime = lastTime;
+                window.QQ_CharacterChats[chatKey].lastMessage = lastMessage;
+                
+                // 在联系人列表中显示角色间私聊
+                QQ_CreateCharacterChatInterface(window.QQ_CharacterChats[chatKey]);
+                
+                // 保存到世界书
+                await QQ_SaveCharacterChatToWorldbook(window.QQ_CharacterChats[chatKey]);
+            }
+            
+            /**
+             * *** 新增：创建角色间私聊的联系人界面（只读） ***
+             * @param {Object} chatData - 角色间私聊数据
+             */
+            function QQ_CreateCharacterChatInterface(chatData) {
+                const contactsContainer = $('#QQ_home_chars');
+                if (!contactsContainer.length) {
+                    console.error('找不到联系人容器');
+                    return;
+                }
+                
+                // 检查是否已存在
+                const existingElement = contactsContainer.find(`[data-char-chat-id="${chatData.id}"]`);
+                if (existingElement.length > 0) {
+                    // 更新现有元素
+                    existingElement.find('.QQ_home_lastmsg').text(chatData.lastMessage);
+                    existingElement.find('.QQ_home_lasttime').text(chatData.lastTime);
+                    return;
+                }
+                
+                // 创建新的角色间私聊元素
+                const chatElement = $(`
+                    <div class="QQ_home_char" data-char-chat-id="${chatData.id}" data-char-chat="true">
+                        <div class="QQ_home_head">
+                            <div class="QQ_home_avatar" style="background: linear-gradient(135deg, #9C27B0, #673AB7); border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
+                                💬
+                            </div>
+                        </div>
+                        <div class="QQ_home_info">
+                            <div class="QQ_home_name" style="color: #9C27B0; font-weight: bold;">${chatData.title}</div>
+                            <div class="QQ_home_lastmsg">${chatData.lastMessage}</div>
+                        </div>
+                        <div class="QQ_home_time">
+                            <div class="QQ_home_lasttime">${chatData.lastTime}</div>
+                            <div class="QQ_readonly_badge" style="background: #9C27B0; color: white; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-top: 5px;">只读</div>
+                        </div>
+                    </div>
+                `);
+                
+                // 添加点击事件（只读查看）
+                chatElement.on('click', function() {
+                    QQ_ShowCharacterChatDialog(chatData);
+                });
+                
+                // 添加到联系人列表
+                contactsContainer.append(chatElement);
+                console.log(`角色间私聊界面已创建: ${chatData.title}`);
+            }
+            
+            /**
+             * *** 新增：显示角色间私聊的只读对话框 ***
+             * @param {Object} chatData - 角色间私聊数据
+             */
+            function QQ_ShowCharacterChatDialog(chatData) {
+                // 创建只读对话框
+                const dialogHtml = `
+                    <div id="char-chat-dialog" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+                        <div style="background: white; border-radius: 15px; width: 90%; max-width: 400px; max-height: 80%; display: flex; flex-direction: column; overflow: hidden;">
+                            <div style="padding: 15px; background: linear-gradient(135deg, #9C27B0, #673AB7); color: white; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="width: 30px; height: 30px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center;">💬</div>
+                                    <div>
+                                        <div style="font-weight: bold; font-size: 16px;">${chatData.title}</div>
+                                        <div style="font-size: 12px; opacity: 0.8;">角色间私聊（只读）</div>
+                                    </div>
+                                </div>
+                                <button id="close-char-chat" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 5px;">×</button>
+                            </div>
+                            <div style="flex: 1; overflow-y: auto; padding: 15px; background: #f5f5f5;">
+                                <div id="char-chat-messages"></div>
+                            </div>
+                            <div style="padding: 10px; background: #e0e0e0; text-align: center; color: #666; font-size: 12px;">
+                                📖 这是角色之间的私聊，您只能查看不能回复
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 移除现有对话框
+                $('#char-chat-dialog').remove();
+                
+                // 添加新对话框
+                $('body').append(dialogHtml);
+                
+                // 渲染消息
+                const messagesContainer = $('#char-chat-messages');
+                chatData.messages.forEach(msg => {
+                    const parts = msg.split('--');
+                    if (parts.length >= 2) {
+                        const sender = parts[0];
+                        const content = parts[1];
+                        const time = parts.length >= 3 ? parts[2] : '';
+                        
+                        const messageHtml = `
+                            <div style="margin-bottom: 15px;">
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                                    <div style="font-weight: bold; color: #9C27B0;">${sender}</div>
+                                    <div style="font-size: 11px; color: #999;">${time}</div>
+                                </div>
+                                <div style="background: white; padding: 10px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                    ${content}
+                                </div>
+                            </div>
+                        `;
+                        messagesContainer.append(messageHtml);
+                    }
+                });
+                
+                // 滚动到底部
+                messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
+                
+                // 绑定关闭事件
+                $('#close-char-chat, #char-chat-dialog').on('click', function(e) {
+                    if (e.target === this) {
+                        $('#char-chat-dialog').remove();
+                    }
+                });
+            }
+            
+            /**
+             * *** 新增：保存角色间私聊到世界书 ***
+             * @param {Object} chatData - 角色间私聊数据
+             */
+            async function QQ_SaveCharacterChatToWorldbook(chatData) {
+                try {
+                    // 使用简单的世界书检查
+                    if (!worldbook || !entries) {
+                        console.warn('世界书功能不可用，无法保存角色间私聊');
+                        return false;
+                    }
+                    
+                    const entryKey = `QQ_角色间私聊_${chatData.char1}_${chatData.char2}`;
+                    const uniqueComment = `手机-角色间私聊-${chatData.char1}和${chatData.char2}`;
+                    
+                    // 查找现有条目
+                    let existingEntry = entries.find(e => e.comment === uniqueComment);
+                    
+                    // 构建保存内容
+                    const saveContent = JSON.stringify({
+                        id: chatData.id,
+                        title: chatData.title,
+                        char1: chatData.char1,
+                        char2: chatData.char2,
+                        messages: chatData.messages,
+                        lastTime: chatData.lastTime,
+                        lastMessage: chatData.lastMessage,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    if (existingEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: existingEntry.uid,
+                            content: saveContent
+                        }]);
+                        console.log(`角色间私聊已更新到世界书: ${chatData.title}`);
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: uniqueComment,
+                            key: [entryKey],
+                            content: saveContent,
+                            position: 0,
+                            disable: false,
+                            addMemo: false,
+                            order: 1000,
+                            depth: 4,
+                            selectiveLogic: 0,
+                            excludeRecursion: false,
+                            delayUntilRecursion: false,
+                            probability: 100,
+                            useProbability: false
+                        });
+                        console.log(`角色间私聊已保存到世界书: ${chatData.title}`);
+                    }
+                    
+                    return true;
+                } catch (error) {
+                    console.error('保存角色间私聊到世界书失败:', error);
+                    return false;
+                }
+            }
+
+            /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
              */
@@ -16989,7 +17245,14 @@ ${index + 1}. ${space.name}
                     } else if (match[2] != `${UserName}`) {
                         name = match[2];
                     } else {
-                        continue;
+                        // *** 新增：处理角色之间的私聊（不包含用户） ***
+                        if (match[1] !== `${UserName}` && match[2] !== `${UserName}`) {
+                            console.log(`检测到角色间私聊: ${match[1]} 和 ${match[2]}`);
+                            await QQ_HandleCharacterChat(str, json.私聊[str], match[1], match[2]);
+                            continue;
+                        } else {
+                            continue;
+                        }
                     }
                     try {
                         if (!QQ_msgjson.私聊[str]) {
@@ -17261,6 +17524,18 @@ ${index + 1}. ${space.name}
                                 
                                 // 调用AddNewGroup函数（类似AddNewChar）
                                 AddNewGroup(newGroupData.name, newGroupData.avatar, newGroupData.members, newGroupData.lastMessage);
+                                
+                                // *** 新增：将AI创建的新群聊保存到世界书 ***
+                                try {
+                                    console.log(`保存AI创建的新群聊到世界书: ${newGroupData.name}`);
+                                    await saveGroupToWorldbook(newGroupData);
+                                    console.log(`AI创建的群聊 ${newGroupData.name} 已成功保存到世界书`);
+                                    toastr.success(`新群聊 "${newGroupData.name}" 已创建并保存`, '群聊创建成功');
+                                } catch (error) {
+                                    console.error('保存AI创建的群聊到世界书失败:', error);
+                                    toastr.warning(`群聊 "${newGroupData.name}" 已创建，但保存到世界书失败`, '部分成功');
+                                }
+                                
                                 isExistingGroup = true;
                             }
                         }
@@ -29426,6 +29701,8 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_ValidateInteractiveContent = QQ_ValidateInteractiveContent;
             window.QQ_CleanNestedTags = QQ_CleanNestedTags;
             window.QQ_CleanContentTags = QQ_CleanContentTags;
+            window.QQ_HandleCharacterChat = QQ_HandleCharacterChat;
+            window.QQ_SaveCharacterChatToWorldbook = QQ_SaveCharacterChatToWorldbook;
 
             /**
              * *** 新增：测试新的格式处理和重试逻辑 ***
@@ -30638,6 +30915,194 @@ MiPhone_JSON_END`;
                 } catch (error) {
                     console.error('调试分组存储失败:', error);
                 }
+            };
+            
+            /**
+             * *** 新增：测试角色间私聊和AI群聊保存功能 ***
+             * 验证新功能是否正常工作
+             */
+            window.QQ_Test_Character_Chat_And_AI_Groups = function() {
+                console.log('=== 测试角色间私聊和AI群聊保存功能 ===');
+                
+                // 测试1：角色间私聊功能
+                console.log('\n1. 测试角色间私聊功能:');
+                const testChatData = {
+                    id: 'char_chat_test_Alice_Bob',
+                    title: 'Alice和Bob的私聊',
+                    char1: 'Alice',
+                    char2: 'Bob',
+                    messages: [
+                        'Alice--你好Bob！--14:30',
+                        'Bob--嗨Alice，最近怎么样？--14:31',
+                        'Alice--还不错，你呢？--14:32'
+                    ],
+                    lastTime: '14:32',
+                    lastMessage: '还不错，你呢？'
+                };
+                
+                try {
+                    QQ_CreateCharacterChatInterface(testChatData);
+                    console.log('✅ 角色间私聊界面创建成功');
+                    
+                    // 添加测试数据到全局变量
+                    if (!window.QQ_CharacterChats) {
+                        window.QQ_CharacterChats = {};
+                    }
+                    window.QQ_CharacterChats['Alice和Bob的聊天'] = testChatData;
+                    
+                } catch (error) {
+                    console.error('❌ 角色间私聊界面创建失败:', error);
+                }
+                
+                // 测试2：角色间私聊保存到世界书
+                console.log('\n2. 测试角色间私聊保存功能:');
+                QQ_SaveCharacterChatToWorldbook(testChatData).then(result => {
+                    if (result) {
+                        console.log('✅ 角色间私聊保存到世界书成功');
+                    } else {
+                        console.log('❌ 角色间私聊保存到世界书失败');
+                    }
+                }).catch(error => {
+                    console.error('❌ 角色间私聊保存到世界书出错:', error);
+                });
+                
+                // 测试3：AI群聊数据结构验证
+                console.log('\n3. 测试AI群聊数据结构:');
+                const testGroupData = {
+                    id: `group_test_${Date.now()}`,
+                    name: '测试AI创建群聊',
+                    members: ['Alice', 'Bob', 'Charlie'],
+                    avatar: {
+                        type: 'preset',
+                        gradient: {
+                            start: '#199AFF',
+                            end: '#0066CC'
+                        },
+                        text: '群'
+                    },
+                    lastMessage: '群聊已创建',
+                    lastTime: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
+                    timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)
+                };
+                
+                if (typeof saveGroupToWorldbook === 'function') {
+                    console.log('✅ saveGroupToWorldbook 函数存在');
+                    console.log('测试群聊数据:', testGroupData);
+                    
+                    // 测试保存功能（如果世界书可用）
+                    if (worldbook && entries) {
+                        saveGroupToWorldbook(testGroupData).then(result => {
+                            if (result) {
+                                console.log('✅ AI群聊保存测试成功');
+                            } else {
+                                console.log('❌ AI群聊保存测试失败');
+                            }
+                        }).catch(error => {
+                            console.error('❌ AI群聊保存测试出错:', error);
+                        });
+                    } else {
+                        console.log('⚠️ 世界书不可用，跳过保存测试');
+                    }
+                } else {
+                    console.error('❌ saveGroupToWorldbook 函数不存在');
+                }
+                
+                // 测试4：数据结构检查
+                console.log('\n4. 检查全局数据结构:');
+                console.log('window.QQ_CharacterChats:', window.QQ_CharacterChats || '未初始化');
+                
+                // 测试5：功能可用性检查
+                console.log('\n5. 功能可用性检查:');
+                const functions = [
+                    'QQ_HandleCharacterChat',
+                    'QQ_CreateCharacterChatInterface', 
+                    'QQ_ShowCharacterChatDialog',
+                    'QQ_SaveCharacterChatToWorldbook'
+                ];
+                
+                functions.forEach(funcName => {
+                    if (typeof window[funcName] === 'function') {
+                        console.log(`✅ ${funcName} 函数可用`);
+                    } else {
+                        console.log(`❌ ${funcName} 函数不可用`);
+                    }
+                });
+                
+                // 测试6：模拟AI输出的角色间私聊
+                console.log('\n6. 测试模拟AI输出处理:');
+                const mockAIOutput = `
+                {
+                    "私聊": {
+                        "可畏和圣路易斯的聊天": [
+                            "可畏--你这个笨蛋！--14:30",
+                            "圣路易斯--呵呵，可畏真可爱呢--14:31"
+                        ]
+                    },
+                    "群聊": {}
+                }
+                `;
+                
+                try {
+                    const testData = JSON.parse(mockAIOutput);
+                    console.log('✅ 模拟AI输出解析成功');
+                    
+                    // 检查是否会触发角色间私聊处理
+                    for (let str in testData.私聊) {
+                        const match = str.match(/(.+?)和(.+?)的聊天/);
+                        if (match) {
+                            const char1 = match[1];
+                            const char2 = match[2];
+                            if (char1 !== '${UserName}' && char2 !== '${UserName}') {
+                                console.log(`✅ 检测到角色间私聊: ${char1} 和 ${char2}`);
+                                console.log('  消息数量:', testData.私聊[str].length);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ 模拟AI输出解析失败:', error);
+                }
+                
+                console.log('\n=== 测试完成 ===');
+                console.log('📖 使用说明:');
+                console.log('- 角色间私聊会显示在联系人列表中，带有紫色💬图标和"只读"标签');
+                console.log('- 点击角色间私聊可查看完整对话历史');
+                console.log('- AI创建的新群聊会自动保存到世界书');
+                console.log('- 所有数据都会持久化存储');
+                console.log('- 使用 window.QQ_CharacterChats 查看当前角色间私聊数据');
+                
+                return {
+                    success: true,
+                    testCount: 6,
+                    features: [
+                        '角色间私聊界面创建',
+                        '角色间私聊数据保存',
+                        'AI群聊自动保存',
+                        '数据结构管理',
+                        '功能可用性验证',
+                        'AI输出处理测试'
+                    ]
+                };
+            };
+            
+            /**
+             * *** 新增：快速创建测试角色间私聊 ***
+             * 用于快速测试界面效果
+             */
+            window.QQ_Create_Test_Character_Chat = function(char1 = 'Alice', char2 = 'Bob') {
+                console.log(`创建测试角色间私聊: ${char1} 和 ${char2}`);
+                
+                const testMessages = [
+                    `${char1}--你好${char2}！--${new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)}`,
+                    `${char2}--嗨${char1}，最近怎么样？--${new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)}`,
+                    `${char1}--还不错，你呢？--${new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)}`
+                ];
+                
+                return QQ_HandleCharacterChat(
+                    `${char1}和${char2}的聊天`,
+                    testMessages,
+                    char1,
+                    char2
+                );
             };
             
         </script>
