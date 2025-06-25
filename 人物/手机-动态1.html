@@ -7419,11 +7419,8 @@
                     console.log(`提取到 ${extractedInfo.dynamics.length} 条动态`);
                 }
                 
-                // 4. 合并所有消息到主messages数组，便于转换函数使用
-                if (extractedInfo.privateMessages.length > 0) {
-                    extractedInfo.messages = extractedInfo.messages.concat(extractedInfo.privateMessages);
-                    console.log(`合并私聊消息后，总消息数: ${extractedInfo.messages.length}`);
-                }
+                // 4. 不再合并私聊和群聊消息，保持分离以便正确处理
+                console.log(`群聊消息数: ${extractedInfo.messages.length}, 私聊消息数: ${extractedInfo.privateMessages.length}`);
                 
                 // 5. 如果chatInfo为空，根据提取的信息设置
                 if (!extractedInfo.chatInfo && extractedInfo.hasValidInfo) {
@@ -7516,13 +7513,11 @@
                                 msg = match[1].trim();
                             }
                             
-                            // 验证提取的内容
+                            // 验证提取的内容并转换为QQ_Msg_Parse期待的字符串格式
                             if (name && msg && msg.length > 0 && msg.length < 1000) {
-                                messages.push({
-                                    name: name,
-                                    time: time,
-                                    msg: msg
-                                });
+                                // 转换为标准的消息字符串格式: 角色名--时间--消息内容
+                                const messageString = `${name}--${time}--${msg}`;
+                                messages.push(messageString);
                                 console.log(`提取消息 - ${name}: ${msg.substring(0, 50)}${msg.length > 50 ? '...' : ''}`);
                             }
                         }
@@ -7547,32 +7542,35 @@
                 
                 const standardData = { 私聊: {}, 群聊: {} };
                 
-                // 判断聊天类型并转换
-                if (extractedInfo.chatName) {
-                    // 根据聊天名称判断是私聊还是群聊
-                    const isPrivateChat = extractedInfo.chatName.includes('私聊') || 
-                                         extractedInfo.chatName.includes('和') && extractedInfo.chatName.includes('的');
-                    
-                    if (isPrivateChat && extractedInfo.messages.length > 0) {
-                        // 转换私聊消息 - 统一格式为 "XX和YY的聊天"
-                        let privateChatKey = extractedInfo.chatName;
+                // 根据聊天类型分别处理群聊和私聊消息 - 兼容单一类型和混合类型
+                if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
+                    // 转换群聊消息
+                    const groupChatKey = extractedInfo.chatName;
+                    standardData.群聊[groupChatKey] = {
+                        msgs: extractedInfo.messages,
+                        members: extractedInfo.members || []
+                    };
+                    console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                }
+                
+                // 处理私聊消息（无论主类型是什么，都要检查私聊消息）
+                if (extractedInfo.privateMessages.length > 0) {
+                    // 转换私聊消息 - 统一格式为 "XX和YY的聊天"
+                    let privateChatKey = extractedInfo.chatName;
+                    if (extractedInfo.chatType === 'private') {
+                        // 如果主类型是私聊，使用chatName
                         if (privateChatKey.includes('私聊')) {
                             privateChatKey = privateChatKey.replace('私聊', '聊天');
                         } else if (!privateChatKey.includes('聊天')) {
                             privateChatKey = privateChatKey + '的聊天';
                         }
-                        
-                        standardData.私聊[privateChatKey] = extractedInfo.messages;
-                        console.log(`✅ 转换私聊消息: ${privateChatKey} (${extractedInfo.messages.length}条)`);
-                    } else if (extractedInfo.messages.length > 0) {
-                        // 转换群聊消息
-                        const groupChatKey = extractedInfo.chatName;
-                        standardData.群聊[groupChatKey] = {
-                            msgs: extractedInfo.messages,
-                            members: extractedInfo.members || []
-                        };
-                        console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                    } else {
+                        // 如果是混合类型，生成默认私聊键名
+                        privateChatKey = 'private_chat';
                     }
+                    
+                    standardData.私聊[privateChatKey] = extractedInfo.privateMessages;
+                    console.log(`✅ 转换私聊消息: ${privateChatKey} (${extractedInfo.privateMessages.length}条)`);
                 }
                 
                 // 处理单独的私聊消息
