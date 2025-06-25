@@ -8715,13 +8715,138 @@ PCM (Plot Construction Mode)
             }
             
             /**
-             * *** 新增：显示互动设置界面 ***
+             * *** 新增：获取全屏设置 ***
+             */
+            function QQ_GetFullscreenSettings() {
+                try {
+                    const savedSettings = QQ_GetFromWorldBook('QQ_全屏设置');
+                    return savedSettings || {
+                        enableFullscreen: false,
+                        lastUpdated: null
+                    };
+                } catch (error) {
+                    console.error('获取全屏设置失败:', error);
+                    return {
+                        enableFullscreen: false,
+                        lastUpdated: null
+                    };
+                }
+            }
+            
+            /**
+             * *** 新增：保存全屏设置 ***
+             */
+            function QQ_SaveFullscreenSettings(settings) {
+                try {
+                    settings.lastUpdated = new Date().toISOString();
+                    QQ_SafeSaveToWorldBook('QQ_全屏设置', settings, 'QQ_全屏设置');
+                    console.log('🖥️ 全屏设置已保存:', settings);
+                    return true;
+                } catch (error) {
+                    console.error('保存全屏设置失败:', error);
+                    return false;
+                }
+            }
+            
+            /**
+             * *** 新增：应用全屏样式 ***
+             */
+            function QQ_ApplyFullscreenMode(enable) {
+                // 移除现有的全屏样式
+                $('#QQ_fullscreen_style').remove();
+                
+                if (enable) {
+                    const fullscreenCSS = `
+                        <style id="QQ_fullscreen_style" type="text/css">
+                            /* === 全屏模式样式 === */
+                            
+                            /* 基础全屏设置，对所有设备生效 */
+                            .card {
+                                width: 100% !important;
+                                height: 100vh !important;
+                                max-width: none !important;
+                                margin: 0 !important;
+                                padding: 0 !important;
+                                border: none !important;
+                                border-radius: 0 !important;
+                                box-shadow: none !important;
+                                overflow: hidden !important;
+                            }
+
+                            .card-int {
+                                border-radius: 0 !important;
+                            }
+
+                            /* 隐藏模拟的物理按键 */
+                            .btn1, .btn2, .btn3, .btn4 {
+                                display: none !important;
+                            }
+
+                            /* 媒体查询：仅在屏幕宽度大于等于768px（通常是平板或电脑）时应用以下样式 */
+                            @media (min-width: 768px) {
+                                /* 限制主要内容区域的最大宽度，避免在宽屏上过度拉伸 */
+                                #QQ_home_page,
+                                #QQ_space_page,
+                                .QQ_chat_page,
+                                #App_discord .discord-homepage {
+                                    max-width: 600px !important;
+                                    margin: 0 auto !important;
+                                    border-left: 1px solid #e0e0e0 !important;
+                                    border-right: 1px solid #e0e0e0 !important;
+                                }
+
+                                /* 针对聊天页面的输入框进行优化 */
+                                .QQ_chat_page .input-container {
+                                    max-width: 600px !important;
+                                    left: 50% !important;
+                                    transform: translateX(-50%) !important;
+                                    border-left: 1px solid #e0e0e0 !important;
+                                    border-right: 1px solid #e0e0e0 !important;
+                                }
+                                
+                                /* Discord帖子页面的输入框优化 */
+                                .discord-thread-input {
+                                    max-width: 600px !important;
+                                    left: 50% !important;
+                                    transform: translateX(-50%) !important;
+                                }
+                            }
+                        </style>
+                    `;
+                    
+                    $('head').append(fullscreenCSS);
+                    console.log('✅ 全屏模式已启用');
+                    toastr.success('全屏模式已启用', '显示设置');
+                } else {
+                    console.log('✅ 全屏模式已禁用');
+                    toastr.info('全屏模式已禁用', '显示设置');
+                }
+            }
+            
+            /**
+             * *** 新增：初始化全屏设置 ***
+             */
+            function QQ_InitializeFullscreenSettings() {
+                try {
+                    const settings = QQ_GetFullscreenSettings();
+                    if (settings.enableFullscreen) {
+                        QQ_ApplyFullscreenMode(true);
+                    }
+                    console.log('🖥️ 全屏设置已初始化:', settings);
+                } catch (error) {
+                    console.error('初始化全屏设置失败:', error);
+                }
+            }
+            
+            /**
+             * *** 修改：显示用户设置界面（包含全屏设置） ***
              */
             function QQ_ShowInteractiveSettings() {
                 // 移除现有设置界面
                 $('.QQ_interactive_settings_panel').remove();
                 
-                const currentSettings = QQ_GetInteractiveSettings();
+                const currentInteractiveSettings = QQ_GetInteractiveSettings();
+                const currentFullscreenSettings = QQ_GetFullscreenSettings();
                 
                 const panelHtml = `
                     <div class="QQ_interactive_settings_panel" style="
@@ -8736,8 +8861,9 @@ PCM (Plot Construction Mode)
                         overflow: hidden;
                         animation: settingsPanelSlideIn 0.3s ease;
                         max-width: 90%;
-                        max-height: 80%;
-                        width: 400px;
+                        max-height: 85%;
+                        width: 420px;
+                        overflow-y: auto;
                     ">
                         <div class="panel-header" style="
                             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -8748,40 +8874,83 @@ PCM (Plot Construction Mode)
                         ">
                             <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
                                 <span style="font-size: 20px;">⚙️</span>
-                                <span style="font-size: 16px;">互动内容触发设置</span>
+                                <span style="font-size: 16px;">界面设置</span>
                             </div>
                         </div>
                         
                         <div class="panel-content" style="padding: 20px;">
-                            <!-- 特殊符号说明 -->
+                            <!-- 全屏设置区域 -->
                             <div style="
                                 background: linear-gradient(135deg, #E8F5E8 0%, #F0F8FF 100%);
                                 padding: 15px;
                                 border-radius: 8px;
-                                margin-bottom: 20px;
+                                margin-bottom: 25px;
                                 border-left: 4px solid #4CAF50;
                             ">
-                                <div style="font-weight: 600; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-                                    <span>✅</span>
-                                    <span>特殊符号触发（永久启用）</span>
+                                <div style="font-weight: 600; color: #4CAF50; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                                    <span>🖥️</span>
+                                    <span>全屏显示设置</span>
                                 </div>
-                                <div style="font-size: 13px; color: #666; line-height: 1.4;">
-                                    使用 <code style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 3px; font-weight: 600;">&&</code> 符号可以随时触发互动内容，例如：<br>
-                                    <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px; margin-top: 4px; display: inline-block;">&&想要拥抱你</code>
-                                </div>
-                            </div>
-                            
-                            <!-- 关键词触发设置 -->
-                            <div style="margin-bottom: 20px;">
+                                
                                 <label style="
                                     display: flex;
                                     align-items: center;
                                     gap: 10px;
                                     cursor: pointer;
-                                    font-weight: 600;
+                                    margin-bottom: 10px;
+                                ">
+                                    <input type="checkbox" id="enableFullscreen" ${currentFullscreenSettings.enableFullscreen ? 'checked' : ''} style="
+                                        width: 18px;
+                                        height: 18px;
+                                        accent-color: #4CAF50;
+                                    ">
+                                    <span style="font-weight: 500;">启用全屏模式</span>
+                                </label>
+                                
+                                <div style="font-size: 13px; color: #666; line-height: 1.4; margin-left: 28px;">
+                                    <div>📱 <strong>手机设备：</strong>界面将占满整个屏幕，提供沉浸式体验</div>
+                                    <div style="margin-top: 4px;">💻 <strong>电脑设备：</strong>核心界面居中显示，避免过度拉伸</div>
+                                    <div style="margin-top: 4px; color: #888;">✨ 自动适配不同屏幕尺寸，无需额外配置</div>
+                                </div>
+                            </div>
+                            
+                            <hr style="border: none; border-top: 1px solid #e9ecef; margin: 25px 0;">
+                            
+                            <!-- 互动内容触发设置 -->
+                            <div style="margin-bottom: 20px;">
+                                <div style="font-weight: 600; color: #667eea; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
+                                    <span>💫</span>
+                                    <span>互动内容触发设置</span>
+                                </div>
+                                
+                                <!-- 特殊符号说明 -->
+                                <div style="
+                                    background: #f8f9fa;
+                                    padding: 12px;
+                                    border-radius: 6px;
+                                    margin-bottom: 15px;
+                                    border-left: 3px solid #667eea;
+                                ">
+                                    <div style="font-weight: 500; color: #667eea; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                        <span>✅</span>
+                                        <span>特殊符号触发（永久启用）</span>
+                                    </div>
+                                    <div style="font-size: 12px; color: #666; line-height: 1.4;">
+                                        使用 <code style="background: #667eea; color: white; padding: 2px 6px; border-radius: 3px; font-weight: 600;">&&</code> 符号可以随时触发互动内容<br>
+                                        <span style="color: #888;">例如：</span><code style="background: #f1f3f4; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">&&想要拥抱你</code>
+                                    </div>
+                                </div>
+                                
+                                <!-- 关键词触发设置 -->
+                                <label style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 10px;
+                                    cursor: pointer;
+                                    font-weight: 500;
                                     margin-bottom: 15px;
                                 ">
-                                    <input type="checkbox" id="enableKeywordTrigger" ${currentSettings.enableKeywordTrigger ? 'checked' : ''} style="
+                                    <input type="checkbox" id="enableKeywordTrigger" ${currentInteractiveSettings.enableKeywordTrigger ? 'checked' : ''} style="
                                         width: 18px;
                                         height: 18px;
                                         accent-color: #667eea;
@@ -8791,7 +8960,7 @@ PCM (Plot Construction Mode)
                                 
                                 <div id="keywordSettings" style="
                                     margin-left: 28px;
-                                    ${currentSettings.enableKeywordTrigger ? '' : 'opacity: 0.5; pointer-events: none;'}
+                                    ${currentInteractiveSettings.enableKeywordTrigger ? '' : 'opacity: 0.5; pointer-events: none;'}
                                 ">
                                     <!-- 默认关键词设置 -->
                                     <label style="
@@ -8799,9 +8968,9 @@ PCM (Plot Construction Mode)
                                         align-items: center;
                                         gap: 10px;
                                         cursor: pointer;
-                                        margin-bottom: 15px;
+                                        margin-bottom: 12px;
                                     ">
-                                        <input type="checkbox" id="enableDefaultKeywords" ${currentSettings.enableDefaultKeywords ? 'checked' : ''} style="
+                                        <input type="checkbox" id="enableDefaultKeywords" ${currentInteractiveSettings.enableDefaultKeywords ? 'checked' : ''} style="
                                             width: 16px;
                                             height: 16px;
                                             accent-color: #667eea;
@@ -8810,23 +8979,23 @@ PCM (Plot Construction Mode)
                                     </label>
                                     
                                     <!-- 自定义关键词设置 -->
-                                    <div style="margin-bottom: 15px;">
-                                        <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px; color: #333;">
+                                    <div style="margin-bottom: 12px;">
+                                        <div style="font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #333;">
                                             自定义关键词
                                         </div>
-                                        <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+                                        <div style="font-size: 12px; color: #666; margin-bottom: 6px;">
                                             输入您想要触发互动内容的关键词，用英文逗号分隔：
                                         </div>
                                         <textarea id="customKeywords" placeholder="例如：想你了,抱抱,一起玩" style="
                                             width: 100%;
-                                            height: 60px;
+                                            height: 50px;
                                             padding: 8px;
                                             border: 1px solid #ddd;
                                             border-radius: 6px;
                                             font-size: 13px;
                                             resize: none;
                                             box-sizing: border-box;
-                                        ">${currentSettings.customKeywords.join(',')}</textarea>
+                                        ">${currentInteractiveSettings.customKeywords.join(',')}</textarea>
                                     </div>
                                 </div>
                             </div>
@@ -8929,9 +9098,16 @@ PCM (Plot Construction Mode)
                     }
                 });
                 
+                // 绑定全屏设置实时预览
+                $('#enableFullscreen').on('change', function() {
+                    const isEnabled = this.checked;
+                    QQ_ApplyFullscreenMode(isEnabled);
+                });
+                
                 // 绑定保存按钮事件
                 $('.save-settings-btn').on('click', function() {
-                    const newSettings = {
+                    // 保存互动设置
+                    const newInteractiveSettings = {
                         enableKeywordTrigger: $('#enableKeywordTrigger').prop('checked'),
                         enableDefaultKeywords: $('#enableDefaultKeywords').prop('checked'),
                         customKeywords: $('#customKeywords').val()
@@ -8940,36 +9116,62 @@ PCM (Plot Construction Mode)
                             .filter(k => k.length > 0)
                     };
                     
-                    if (QQ_SaveInteractiveSettings(newSettings)) {
+                    // 保存全屏设置
+                    const newFullscreenSettings = {
+                        enableFullscreen: $('#enableFullscreen').prop('checked')
+                    };
+                    
+                    let saveSuccess = true;
+                    
+                    if (!QQ_SaveInteractiveSettings(newInteractiveSettings)) {
+                        saveSuccess = false;
+                    }
+                    
+                    if (!QQ_SaveFullscreenSettings(newFullscreenSettings)) {
+                        saveSuccess = false;
+                    }
+                    
+                    if (saveSuccess) {
                         $('.QQ_interactive_settings_panel').remove();
                         
+                        // 应用全屏设置
+                        QQ_ApplyFullscreenMode(newFullscreenSettings.enableFullscreen);
+                        
                         // 显示保存成功提示
+                        const fullscreenStatus = newFullscreenSettings.enableFullscreen ? '已启用' : '已禁用';
+                        const keywordStatus = newInteractiveSettings.enableKeywordTrigger ? '已启用' : '已禁用';
+                        
                         const message = `✅ 设置已保存！
                         
+🖥️ 全屏模式：${fullscreenStatus}
 🎯 特殊符号触发：永久启用 (&&)
-🔍 关键词触发：${newSettings.enableKeywordTrigger ? '已启用' : '已禁用'}
-📝 默认关键词：${newSettings.enableDefaultKeywords ? '已启用' : '已禁用'}
-🏷️ 自定义关键词：${newSettings.customKeywords.length}个`;
+💫 关键词触发：${keywordStatus}`;
                         
-                        alert(message);
+                        toastr.success(message, '设置保存成功', {
+                            timeOut: 4000,
+                            extendedTimeOut: 2000
+                        });
                     } else {
-                        alert('❌ 保存设置失败，请重试');
+                        toastr.error('保存设置时出现错误，请重试', '设置保存失败');
                     }
                 });
                 
                 // 绑定取消按钮事件
                 $('.cancel-settings-btn').on('click', function() {
+                    // 恢复原有设置
+                    QQ_ApplyFullscreenMode(currentFullscreenSettings.enableFullscreen);
                     $('.QQ_interactive_settings_panel').remove();
+                    toastr.info('已取消设置修改', '设置');
                 });
                 
                 // 点击外部关闭面板
-                $(document).one('click', function(e) {
-                    if (!$(e.target).closest('.QQ_interactive_settings_panel').length) {
-                        $('.QQ_interactive_settings_panel').remove();
-                    }
+                $(document).one('click', function() {
+                    // 恢复原有设置
+                    QQ_ApplyFullscreenMode(currentFullscreenSettings.enableFullscreen);
+                    $('.QQ_interactive_settings_panel').remove();
                 });
                 
-                // 阻止面板内部点击事件冒泡
+                // 阻止面板内部点击冒泡
                 $('.QQ_interactive_settings_panel').on('click', function(e) {
                     e.stopPropagation();
                 });
