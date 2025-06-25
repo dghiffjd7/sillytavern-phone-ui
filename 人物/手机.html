@@ -6442,19 +6442,65 @@
             }
 
             async function ResultHandle(result, isRetry = false) {
-                console.log(`[优先级处理] 开始处理AI回复，isRetry: ${isRetry}`);
-                
-                // *** 优先级0: 空回复处理（立即return） ***
                 if (!result) {
-                    console.log(`[优先级0] 空回复处理`);
+                    // 空回复处理 - 使用重试机制
                     if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                         QQ_RetryCount++;
-                        console.log(`[优先级0] AI空回复，开始第${QQ_RetryCount}次重试`);
+                        console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
                         triggerSlash(`/echo AI空回复，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
+                        // 使用保存的最后请求重新生成
                         if (QQ_LastRequest) {
+                            // 确保重试时设置gening状态
                             gening = true;
                             try {
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
+                        }
+                    } else {
+                        // 重试次数用完或其他情况
+                        if (QQ_RetryCount >= QQ_MAX_RETRY) {
+                            triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
+                        } else {
+                            triggerSlash("/echo 空回复了");
+                        }
+                        QQ_ResetRetry();
+                    }
+                    return;
+                }
+                
+                result = System_TagCompletion(result);
+                console.log(`开始对结果进行处理:\n${result}`);
+                const matches = [
+                    ...result.matchAll(/MiPhone_start([\s\S]+?)MiPhone_end/g),
+                ];
+                
+                if (matches.length == 0) {
+                    // 没有回复线上格式 - 先检查是否有content标签的互动内容
+                    if (QQ_HasContentTag(result)) {
+                        // 有content标签，直接显示互动空间
+                        console.log("检测到content标签包裹的互动内容，显示互动空间");
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                        QQ_ResetRetry();
+                        return;
+                    }
+                    
+                    // 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI没有回复线上格式，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                        
+                        if (QQ_LastRequest) {
+                            // 重要：设置gening状态和异步执行重试
+                            gening = true;
+                            try {
+                                // 添加延迟避免过快重试（防止缓存问题）
                                 await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
                                 const retryResult = await QQ_Gen(QQ_LastRequest);
                                 return await ResultHandle(retryResult, true);
@@ -6463,340 +6509,132 @@
                             }
                         }
                     } else {
-                        if (QQ_RetryCount >= QQ_MAX_RETRY) {
-                            triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
+                        // 重试用完，判断是否为互动内容
+                        if (QQ_IsInteractiveContent(result)) {
+                            // 在手机界面显示互动内容
+                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         } else {
-                            triggerSlash("/echo 空回复了");
+                            triggerSlash("/echo AI没有回复线上格式,原文直接输出到新楼层");
+                            triggerSlash(`/sendas name={{char}} ${result}`);
                         }
                         QQ_ResetRetry();
                     }
-                    return; // 优先级0成功/失败后立即返回
-                }
-                
-                // 清理AI回复中的嵌套标签
-                result = QQ_CleanNestedTags(result);
-                result = System_TagCompletion(result);
-                console.log(`[优先级处理] 清理后的结果:\n${result}`);
-                
-                // *** 优先级1: 标准线上格式检查（最高优先级，成功后立即return） ***
-                console.log(`[优先级1] 标准线上格式检查`);
-                const standardFormatResult = await QQ_ProcessStandardFormat(result, isRetry);
-                if (standardFormatResult.success) {
-                    console.log(`[优先级1] 标准格式处理成功，立即返回`);
-                    QQ_ResetRetry();
-                    QQ_UpdateNewTips();
-                    QQ_Save_Msg();
-                    return; // 优先级1成功后立即返回
-                }
-                
-                // *** 优先级2: 互动内容检测（成功后立即return） ***
-                console.log(`[优先级2] 互动内容检测`);
-                const interactiveResult = await QQ_ProcessInteractiveContent(result, isRetry);
-                if (interactiveResult.success) {
-                    console.log(`[优先级2] 互动内容处理成功，立即返回`);
-                    QQ_ResetRetry();
-                    return; // 优先级2成功后立即返回
-                }
-                
-                // *** 优先级3: 智能提取有效信息（成功后立即return） ***
-                console.log(`[优先级3] 智能提取有效信息`);
-                const smartExtractionResult = await QQ_ProcessSmartExtraction(result, isRetry);
-                if (smartExtractionResult.success) {
-                    console.log(`[优先级3] 智能提取成功，立即返回`);
-                    QQ_ResetRetry();
-                    return; // 优先级3成功后立即返回
-                }
-                
-                // *** 优先级4: content标签检查（成功后立即return） ***
-                console.log(`[优先级4] content标签检查`);
-                const contentTagResult = await QQ_ProcessContentTag(result, isRetry);
-                if (contentTagResult.success) {
-                    console.log(`[优先级4] content标签处理成功，立即返回`);
-                    QQ_ResetRetry();
-                    return; // 优先级4成功后立即返回
-                }
-                
-                // *** 优先级5: 重传机制（最后手段） ***
-                console.log(`[优先级5] 重传机制`);
-                if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
-                    QQ_RetryCount++;
-                    console.log(`[优先级5] 所有处理失败，开始第${QQ_RetryCount}次重试`);
-                    triggerSlash(`/echo AI回复格式异常，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
-                    
-                    if (QQ_LastRequest) {
-                        gening = true;
-                        try {
-                            await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
-                        } finally {
-                            gening = false;
+                    return;
+                } else if (matches.length > 1) {
+                    // 回复了多个线上格式 - 使用重试机制
+                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                        QQ_RetryCount++;
+                        console.log(`AI回复了多个线上格式，开始第${QQ_RetryCount}次重试`);
+                        triggerSlash(`/echo AI回复多个格式，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                        
+                        if (QQ_LastRequest) {
+                            // 重要：设置gening状态和异步执行重试
+                            gening = true;
+                            try {
+                                // 添加延迟避免过快重试（防止缓存问题）
+                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
+                            } finally {
+                                gening = false;
+                            }
                         }
+                    } else {
+                        // 重试用完，判断是否为互动内容
+                        if (QQ_IsInteractiveContent(result)) {
+                            // 在手机界面显示互动内容
+                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                        } else {
+                            triggerSlash("/echo AI回复了多个线上格式,直接输出到新楼层");
+                            triggerSlash(`/sendas name={{char}} ${result}`);
+                        }
+                        QQ_ResetRetry();
                     }
+                    return;
                 } else {
-                    // 重试次数用完，输出到新楼层
-                    console.log(`[优先级5] 重试次数用完，输出到新楼层`);
-                    triggerSlash("/echo AI回复格式异常且重试失败，原文输出到新楼层");
-                    triggerSlash(`/sendas name={{char}} ${result.replace(/MiPhone_start|MiPhone_end/g, "")}`);
-                    QQ_ResetRetry();
+                    result = matches[0][1];
                 }
-            }
-
-            /**
-             * *** 优先级1: 标准线上格式处理 ***
-             */
-            async function QQ_ProcessStandardFormat(result, isRetry) {
-                const matches = [...result.matchAll(/MiPhone_start([\s\S]+?)MiPhone_end/g)];
-                
-                if (matches.length === 0) {
-                    console.log(`[优先级1] 未找到MiPhone格式`);
-                    return { success: false, reason: "无MiPhone格式" };
-                }
-                
-                if (matches.length > 1) {
-                    console.log(`[优先级1] 检测到多个MiPhone格式`);
-                    return { success: false, reason: "多个MiPhone格式" };
-                }
-                
-                let content = matches[0][1];
-                
-                // 自动补全标签
-                if (content.indexOf("msg_start") < 0 || content.indexOf("msg_end") < 0) {
-                    if (content.indexOf("msg_start") < 0) {
-                        let start = content.match(/(<群聊:.+?>|<[^/]+和.+的(?:聊天|私聊)>)/);
-                        if (start) {
-                            content = content.replace(start[1], `msg_start\n${start[1]}`);
-                        }
-                    }
-                    if (content.indexOf("msg_end") < 0) {
-                        let end = content.match(/<\/群聊:.+?>|<\/.+和.+的(?:聊天|私聊)>/gm);
-                        if (end) {
-                            content = content.replace(end[end.length - 1], `${end[end.length - 1]}\nmsg_end`);
-                        }
-                    }
-                }
-                
                 let ok = false;
-                
-                // 处理消息格式
-                const msg = content.match(/msg_start([\s\S]+?)msg_end/);
+                if (
+                    result.indexOf("msg_start") < 0 ||
+                    result.indexOf("msg_end") < 0
+                ) {
+                    // 自动补全tag
+                    if (result.indexOf("msg_start") < 0) {
+                        // 没有起始标识
+                        let start = result.match(
+                            /MiPhone_start[\s\S]*?(<群聊:.+?>|<[^/]+和.+的(?:聊天|私聊)>)/,
+                        );
+                        if (start) {
+                            result = result.replace(
+                                start[1],
+                                `msg_start\n${start[1]}`,
+                            );
+                        }
+                    }
+                    if (result.indexOf("msg_end") < 0) {
+                        // 没有结束标识
+                        let end = result.match(
+                            /<\/群聊:.+?>|<\/.+和.+的(?:聊天|私聊)>/gm,
+                        );
+                        if (end) {
+                            result = result.replace(
+                                end[end.length - 1],
+                                `${end[end.length - 1]}\nmsg_end`,
+                            );
+                        }
+                    }
+                }
+                const msg = result.match(/msg_start([\s\S]+?)msg_end/);
                 if (msg) {
+                    ok = true;
                     let json = JsonYamlParse(msg[1]);
                     if (!json) {
-                        console.log(`[优先级1] JSON解析失败`);
-                        return { success: false, reason: "JSON解析失败" };
+                        QQ_Error("AI输出的格式不正确，双击自己头像重Roll");
+                        return;
                     }
-                    
+                    // triggerSlash(`/echo 生成结果${msg[1]}`);
                     json = QQ_Msg_DeletOld(json);
                     await QQ_Msg_Parse(JSON.stringify(json));
-                    console.log(`[优先级1] 消息格式处理成功`);
-                    ok = true;
                 }
-                
-                // 处理动态格式
-                const momentes = content.matchAll(/moment_start([\s\S]+?)moment_end/g);
+                const momentes = result.matchAll(
+                    /moment_start([\s\S]+?)moment_end/g,
+                );
                 if (momentes) {
+                    ok = true;
                     for (const moment of momentes) {
+                        // *** 修复：检查是否在动态评论上下文中 ***
                         const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
                         QQ_Moment_Parse(moment[1], isInCommentContext);
                     }
-                    console.log(`[优先级1] 动态格式处理成功`);
-                    ok = true;
                 }
                 
-                return { success: ok };
-            }
-
-            /**
-             * *** 新增：互动内容处理函数 - 替换QQ_ProcessSurpriseMechanism ***
-             * 优先级2: 互动内容检测和处理
-             */
-            async function QQ_ProcessInteractiveContent(result, isRetry) {
-                console.log(`[优先级2] 开始互动内容检测`);
-                
-                // A. 寻找content标签
-                if (QQ_HasContentTag(result)) {
-                    console.log(`[优先级2] 2.A - 找到content标签，开始处理`);
-                    const contentTagContent = QQ_CleanContentTags(result);
-                    
-                    if (contentTagContent && contentTagContent.trim().length > 10) {
-                        // 清理并输出到互动空间
-                        const cleanedContent = QQ_CleanNestedTags(contentTagContent);
-                        console.log(`[优先级2] 2.A - content标签内容清理完成，输出互动空间`);
-                        QQ_ShowInteractiveSpace(cleanedContent, QQ_LastRequestName || "角色");
-                        return { success: true, type: "content_tag_complete" };
+                // 成功处理后重置重试状态
+                if (ok) {
+                    QQ_ResetRetry();
+                }
+                if (!ok) {
+                    // 最后的格式检查失败 - 判断是否为互动内容
+                    if (QQ_IsInteractiveContent(result)) {
+                        // 在手机界面显示互动内容
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                    } else {
+                        triggerSlash("/echo 回复不为空但不存在手机格式,输出到新楼层");
+                        triggerSlash(
+                            `/sendas name={{char}} ${result
+                                .replace("MiPhone_start", "")
+                                .replace("MiPhone_end", "")}`,
+                        );
                     }
+                    QQ_ResetRetry();
+                    return;
                 }
                 
-                // B. content标签不完全，尝试修补
-                const incompleteContentMatch = result.match(/<content>([\s\S]*?)$/i);
-                if (incompleteContentMatch) {
-                    console.log(`[优先级2] 2.B - 检测到不完全content标签，尝试修补`);
-                    const repairedContent = incompleteContentMatch[1];
-                    if (repairedContent && repairedContent.trim().length > 10) {
-                        const cleanedContent = QQ_CleanNestedTags(repairedContent);
-                        console.log(`[优先级2] 2.B - 不完全content修补成功，输出互动空间`);
-                        QQ_ShowInteractiveSpace(cleanedContent, QQ_LastRequestName || "角色");
-                        return { success: true, type: "content_tag_repaired" };
-                    }
-                }
-                
-                // C. 无content但有大量文本，判断是否为互动内容
-                const cleanText = result.replace(/MiPhone_start|MiPhone_end/g, "").trim();
-                if (cleanText.length > 50 && QQ_IsInteractiveContent(result)) {
-                    console.log(`[优先级2] 2.C - 无content标签但检测到互动特征`);
-                    const cleanedContent = QQ_CleanNestedTags(cleanText);
-                    console.log(`[优先级2] 2.C - 互动内容清理完成，输出互动空间`);
-                    QQ_ShowInteractiveSpace(cleanedContent, QQ_LastRequestName || "角色");
-                    return { success: true, type: "interactive_detected" };
-                }
-                
-                // D. 都不符合，返回失败
-                console.log(`[优先级2] 2.D - 未检测到有效互动内容`);
-                return { success: false, reason: "非互动内容" };
+                // 成功处理，重置重试计数
+                QQ_ResetRetry();
+                QQ_UpdateNewTips();
+                QQ_Save_Msg();
             }
-
-            /**
-             * *** 优先级3: 智能提取有效信息 ***
-             */
-            async function QQ_ProcessSmartExtraction(result, isRetry) {
-                console.log(`[优先级3] 开始智能提取有效信息`);
-                
-                // 模糊匹配可能的格式
-                const fuzzyPatterns = [
-                    /(<群聊:[^>]*>[\s\S]*?<\/群聊:[^>]*>)/,
-                    /(<[^/]+和[^>]+的(?:聊天|私聊)>[\s\S]*?<\/[^>]+>)/,
-                    /(moment_start[\s\S]*?moment_end)/,
-                ];
-                
-                for (const pattern of fuzzyPatterns) {
-                    const match = result.match(pattern);
-                    if (match) {
-                        console.log(`[优先级3] 3.A - 模糊匹配成功，尝试处理: ${pattern.source}`);
-                        try {
-                            // 尝试修复和处理匹配的内容
-                            let content = match[1];
-                            
-                            // 如果是消息格式，尝试JSON解析
-                            if (content.includes('群聊:') || content.includes('聊天') || content.includes('私聊')) {
-                                let json = JsonYamlParse(content);
-                                if (json) {
-                                    json = QQ_Msg_DeletOld(json);
-                                    await QQ_Msg_Parse(JSON.stringify(json));
-                                    console.log(`[优先级3] 3.A - 模糊匹配消息格式处理成功`);
-                                    return { success: true, type: "fuzzy_message" };
-                                }
-                            }
-                            
-                            // 如果是动态格式
-                            if (content.includes('moment_start')) {
-                                const momentMatch = content.match(/moment_start([\s\S]*?)moment_end/);
-                                if (momentMatch) {
-                                    const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
-                                    QQ_Moment_Parse(momentMatch[1], isInCommentContext);
-                                    console.log(`[优先级3] 3.A - 模糊匹配动态格式处理成功`);
-                                    return { success: true, type: "fuzzy_moment" };
-                                }
-                            }
-                        } catch (e) {
-                            console.log(`[优先级3] 3.A - 模糊匹配处理失败: ${e.message}`);
-                        }
-                    }
-                }
-                
-                // 3.B - 提取有效文本信息
-                const meaningfulText = result.replace(/<[^>]*>/g, '').replace(/MiPhone_start|MiPhone_end/g, '').trim();
-                if (meaningfulText.length > 20) {
-                    console.log(`[优先级3] 3.B - 提取到有意义文本，输出到新楼层`);
-                    triggerSlash(`/sendas name={{char}} ${meaningfulText}`);
-                    return { success: true, type: "meaningful_text" };
-                }
-                
-                console.log(`[优先级3] 智能提取失败`);
-                return { success: false, reason: "无有效信息" };
-            }
-
-            /**
-             * *** 优先级4: content标签检查 ***
-             */
-            async function QQ_ProcessContentTag(result, isRetry) {
-                console.log(`[优先级4] content标签检查`);
-                
-                // 寻找任何形式的content标签
-                const contentPatterns = [
-                    /<content>([\s\S]*?)<\/content>/i,
-                    /<content>([\s\S]*?)$/i,
-                ];
-                
-                for (const pattern of contentPatterns) {
-                    const match = result.match(pattern);
-                    if (match) {
-                        const content = match[1];
-                        if (content && content.trim().length > 5) {
-                            console.log(`[优先级4] 找到content标签，输出互动空间`);
-                            const cleanedContent = QQ_CleanNestedTags(content);
-                            QQ_ShowInteractiveSpace(cleanedContent, QQ_LastRequestName || "角色");
-                            return { success: true, type: "content_tag_fallback" };
-                        }
-                    }
-                }
-                
-                console.log(`[优先级4] 无有效content标签`);
-                return { success: false, reason: "无content标签" };
-            }
-
-            // 确保函数在window对象上可用
-            window.QQ_ProcessInteractiveContent = QQ_ProcessInteractiveContent;
-
-            /**
-             * *** 测试严格优先级逻辑的功能 ***
-             */
-            function QQ_Test_Priority_Logic() {
-                console.log('=== 优先级逻辑测试 ===');
-                
-                // 测试用例：各种AI回复情况
-                const testCases = [
-                    {
-                        name: "标准消息格式",
-                        content: "MiPhone_start\nmsg_start\n<群聊:测试群>\n时间:2024-12-19 14:30\n角色A--你好大家--2024-12-19 14:30\n</群聊:测试群>\nmsg_end\nMiPhone_end",
-                        expectedPriority: 1
-                    },
-                    {
-                        name: "互动内容格式",
-                        content: "<content>*轻轻拥抱着你* 感受到你的温暖。</content>",
-                        expectedPriority: 2
-                    },
-                    {
-                        name: "content标签格式",
-                        content: "一些文字<content>互动场景描述</content>更多文字",
-                        expectedPriority: 4
-                    },
-                    {
-                        name: "空回复",
-                        content: "",
-                        expectedPriority: 0
-                    },
-                    {
-                        name: "纯文本",
-                        content: "这是一段普通的回复文本，没有特殊格式。",
-                        expectedPriority: 3
-                    }
-                ];
-                
-                console.log('测试用例:', testCases);
-                console.log('✅ 优先级逻辑重构完成');
-                console.log('核心改进:');
-                console.log('1. 严格按照 0→1→2→3→4→5 优先级顺序执行');
-                console.log('2. 每个优先级成功后立即return，不执行后续优先级');
-                console.log('3. 完全消除QQ_Msg_Parse重复调用问题');
-                console.log('4. 修复角色间私聊误判问题');
-                console.log('5. 新增QQ_ProcessInteractiveContent函数替换旧逻辑');
-                
-                return true;
-            }
-
-            // 添加到window对象供调试使用
-            window.QQ_Test_Priority_Logic = QQ_Test_Priority_Logic;
 
             /**
              * 重置重试相关变量
