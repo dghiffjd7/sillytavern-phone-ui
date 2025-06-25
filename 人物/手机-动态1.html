@@ -8715,37 +8715,10 @@ PCM (Plot Construction Mode)
             }
             
             /**
-             * *** 新增：获取全屏设置 ***
+             * *** 简化：获取全屏状态（临时模式，无持久化） ***
              */
-            function QQ_GetFullscreenSettings() {
-                try {
-                    const savedSettings = QQ_GetFromWorldBook('QQ_全屏设置');
-                    return savedSettings || {
-                        enableFullscreen: false,
-                        lastUpdated: null
-                    };
-                } catch (error) {
-                    console.error('获取全屏设置失败:', error);
-                    return {
-                        enableFullscreen: false,
-                        lastUpdated: null
-                    };
-                }
-            }
-            
-            /**
-             * *** 新增：保存全屏设置 ***
-             */
-            function QQ_SaveFullscreenSettings(settings) {
-                try {
-                    settings.lastUpdated = new Date().toISOString();
-                    QQ_SafeSaveToWorldBook('QQ_全屏设置', settings, 'QQ_全屏设置');
-                    console.log('🖥️ 全屏设置已保存:', settings);
-                    return true;
-                } catch (error) {
-                    console.error('保存全屏设置失败:', error);
-                    return false;
-                }
+            function QQ_IsFullscreenEnabled() {
+                return $('#QQ_fullscreen_style').length > 0;
             }
             
             /**
@@ -8823,20 +8796,7 @@ PCM (Plot Construction Mode)
                 }
             }
             
-            /**
-             * *** 新增：初始化全屏设置 ***
-             */
-            function QQ_InitializeFullscreenSettings() {
-                try {
-                    const settings = QQ_GetFullscreenSettings();
-                    if (settings.enableFullscreen) {
-                        QQ_ApplyFullscreenMode(true);
-                    }
-                    console.log('🖥️ 全屏设置已初始化:', settings);
-                } catch (error) {
-                    console.error('初始化全屏设置失败:', error);
-                }
-            }
+
             
             /**
              * *** 修改：显示用户设置界面（包含全屏设置） ***
@@ -8846,7 +8806,7 @@ PCM (Plot Construction Mode)
                 $('.QQ_interactive_settings_panel').remove();
                 
                 const currentInteractiveSettings = QQ_GetInteractiveSettings();
-                const currentFullscreenSettings = QQ_GetFullscreenSettings();
+                const currentFullscreenEnabled = QQ_IsFullscreenEnabled();
                 
                 const panelHtml = `
                     <div class="QQ_interactive_settings_panel" style="
@@ -8899,7 +8859,7 @@ PCM (Plot Construction Mode)
                                     cursor: pointer;
                                     margin-bottom: 10px;
                                 ">
-                                    <input type="checkbox" id="enableFullscreen" ${currentFullscreenSettings.enableFullscreen ? 'checked' : ''} style="
+                                    <input type="checkbox" id="enableFullscreen" ${currentFullscreenEnabled ? 'checked' : ''} style="
                                         width: 18px;
                                         height: 18px;
                                         accent-color: #4CAF50;
@@ -8910,7 +8870,7 @@ PCM (Plot Construction Mode)
                                 <div style="font-size: 13px; color: #666; line-height: 1.4; margin-left: 28px;">
                                     <div>📱 <strong>手机设备：</strong>界面将占满整个屏幕，提供沉浸式体验</div>
                                     <div style="margin-top: 4px;">💻 <strong>电脑设备：</strong>核心界面居中显示，避免过度拉伸</div>
-                                    <div style="margin-top: 4px; color: #888;">✨ 自动适配不同屏幕尺寸，无需额外配置</div>
+                                    <div style="margin-top: 4px; color: #888;">✨ 临时切换模式，每次重新加载都会恢复默认状态</div>
                                 </div>
                             </div>
                             
@@ -9116,29 +9076,18 @@ PCM (Plot Construction Mode)
                             .filter(k => k.length > 0)
                     };
                     
-                    // 保存全屏设置
-                    const newFullscreenSettings = {
-                        enableFullscreen: $('#enableFullscreen').prop('checked')
-                    };
+                    // 获取当前全屏状态（临时模式，不保存）
+                    const currentFullscreenEnabled = $('#enableFullscreen').prop('checked');
                     
-                    let saveSuccess = true;
-                    
-                    if (!QQ_SaveInteractiveSettings(newInteractiveSettings)) {
-                        saveSuccess = false;
-                    }
-                    
-                    if (!QQ_SaveFullscreenSettings(newFullscreenSettings)) {
-                        saveSuccess = false;
-                    }
-                    
-                    if (saveSuccess) {
+                    // 只保存互动设置
+                    if (QQ_SaveInteractiveSettings(newInteractiveSettings)) {
                         $('.QQ_interactive_settings_panel').remove();
                         
-                        // 应用全屏设置
-                        QQ_ApplyFullscreenMode(newFullscreenSettings.enableFullscreen);
+                        // 应用全屏设置（临时）
+                        QQ_ApplyFullscreenMode(currentFullscreenEnabled);
                         
                         // 显示保存成功提示
-                        const fullscreenStatus = newFullscreenSettings.enableFullscreen ? '已启用' : '已禁用';
+                        const fullscreenStatus = currentFullscreenEnabled ? '已启用（临时）' : '已禁用';
                         const keywordStatus = newInteractiveSettings.enableKeywordTrigger ? '已启用' : '已禁用';
                         
                         const message = `✅ 设置已保存！
@@ -9158,16 +9107,16 @@ PCM (Plot Construction Mode)
                 
                 // 绑定取消按钮事件
                 $('.cancel-settings-btn').on('click', function() {
-                    // 恢复原有设置
-                    QQ_ApplyFullscreenMode(currentFullscreenSettings.enableFullscreen);
+                    // 恢复原有全屏状态
+                    QQ_ApplyFullscreenMode(currentFullscreenEnabled);
                     $('.QQ_interactive_settings_panel').remove();
                     toastr.info('已取消设置修改', '设置');
                 });
                 
                 // 点击外部关闭面板
                 $(document).one('click', function() {
-                    // 恢复原有设置
-                    QQ_ApplyFullscreenMode(currentFullscreenSettings.enableFullscreen);
+                    // 恢复原有全屏状态
+                    QQ_ApplyFullscreenMode(currentFullscreenEnabled);
                     $('.QQ_interactive_settings_panel').remove();
                 });
                 
