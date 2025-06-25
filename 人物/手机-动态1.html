@@ -6757,9 +6757,6 @@
             }
 
             async function ResultHandle(result, isRetry = false) {
-                console.log("🔧 ResultHandle - 开始处理AI回复");
-                console.log("📋 按照用户逻辑优先级处理：高优先级成功后不执行低优先级");
-                
                 // *** 修复：初始化消息处理标记，防止重复调用QQ_Msg_Parse ***
                 window.QQ_MessageProcessed = false;
                 
@@ -6879,62 +6876,66 @@
                             // *** 修复：标记已处理，避免后续重复调用 ***
                             if (!window.QQ_MessageProcessed) {
                                 window.QQ_MessageProcessed = true;
-                                await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
                             } else {
                                 console.log("⚠️ 消息已在其他分支处理，跳过重复调用");
                             }
-                            QQ_ResetRetry();
+                        QQ_ResetRetry();
                             QQ_UpdateNewTips();
                             QQ_Save_Msg();
                             window.QQ_MessageProcessed = false; // 重置标记
-                            return;
+                        return;
                         }
                     }
                     
-                    // *** 按照用户逻辑：2.b.一 检查是否有content标签包裹的大量内容 ***
-                    console.log("🔍 不符合线上格式，检查是否有content标签包裹的大量内容");
+                    // *** 优化后的惊喜机制：确保这是最后的手段，并进行严格验证 ***
+                    console.log("AI没有回复线上格式且无有效信息，启动互动机制（最后手段）");
                     
-                    if (QQ_HasContentTag(result)) {
-                        const contentText = QQ_CleanContentTags(result);
-                        if (contentText && contentText.length > 50) { // 大量内容的阈值
-                            console.log("✅ 找到content标签包裹的大量内容，清理后输出到互动空间");
-                            const cleanedContent = QQ_CleanNestedTags(contentText);
-                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                    // 先显示失败警告，让用户以为失败了
+                    triggerSlash("/echo AI没有回复线上格式，正在进行最后的智能检测...");
+                    
+                    // 延迟一点时间，然后进行严格的惊喜机制验证
+                    setTimeout(async () => {
+                        console.log("🎉 互动机制：开始严格验证互动内容");
+                        
+                        // *** 新增：严格的惊喜机制验证流程 ***
+                        const surpriseResult = await QQ_ProcessSurpriseMechanism(result, isRetry);
+                        
+                        if (surpriseResult.shouldContinue) {
+                            // 惊喜机制成功，显示互动内容
+                            QQ_HandleInteractiveContent(surpriseResult.content, QQ_LastRequestName);
                             QQ_ResetRetry();
-                            QQ_UpdateNewTips();
-                            QQ_Save_Msg();
-                            window.QQ_MessageProcessed = false;
-                            return;
-                        }
-                    }
-                    
-                    // *** 按照用户逻辑：2.b.二 完全没有格式且无content标签，最后手段：重传 ***
-                    console.log("❌ 不符合线上格式且无任何线上格式标签，且找不到content标签");
-                    
-                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                                                 } else if (surpriseResult.shouldRetry && !isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                             // 需要重传AI请求
                         QQ_RetryCount++;
-                        console.log(`重传成本高，最后手段：开始第${QQ_RetryCount}次重试`);
-                        triggerSlash(`/echo AI回复格式不符合标准，正在重新生成... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                             console.log(`互动机制验证失败，开始第${QQ_RetryCount}次重试`);
+                             triggerSlash(`/echo 内容不符合标准，正在重新生成... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
                         if (QQ_LastRequest) {
+                                 // *** 修复：直接在当前作用域执行重试，而不是在setTimeout中 ***
+                                 setTimeout(async () => {
                             gening = true;
                             try {
                                 await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
                                 const retryResult = await QQ_Gen(QQ_LastRequest);
-                                return await ResultHandle(retryResult, true);
+                                         await ResultHandle(retryResult, true);
+                                     } catch (error) {
+                                         console.error('互动机制重试失败:', error);
+                                         triggerSlash(`/echo 重试失败: ${error.message}`);
+                                         QQ_ResetRetry();
                             } finally {
                                 gening = false;
                             }
+                                 }, 100); // 短暂延迟确保状态更新
+                                 return; // 提前返回，等待重试结果
                         }
                     } else {
-                        console.log('❌ 重试次数已用完，放弃处理');
-                        if (QQ_RetryCount >= QQ_MAX_RETRY) {
-                            triggerSlash("/echo AI连续回复格式错误，已停止重试，请手动重新发送");
-                        } else {
+                            // *** 修复：绝对不输出到新楼层，改为重试或放弃 ***
+                            console.log('❌ 所有验证都失败，既不是互动内容也无法处理');
                             triggerSlash("/echo AI回复内容无法识别，已放弃处理");
-                        }
                         QQ_ResetRetry();
                     }
+                    }, 1500); // 1.5秒延迟，让用户先看到"失败"消息
                     
                     return;
                 } else if (matches.length > 1) {
@@ -6992,7 +6993,7 @@
                             // *** 修复：避免重复调用 ***
                             if (!window.QQ_MessageProcessed) {
                                 window.QQ_MessageProcessed = true;
-                                await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
                             } else {
                                 console.log("⚠️ 消息已在其他分支处理，跳过重复调用");
                             }
@@ -7023,7 +7024,7 @@
                             // *** 修复：避免重复调用 ***
                             if (!window.QQ_MessageProcessed) {
                                 window.QQ_MessageProcessed = true;
-                                await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
                             } else {
                                 console.log("⚠️ 消息已在其他分支处理，跳过重复调用");
                             }
@@ -7118,7 +7119,7 @@
                     // *** 修复：避免重复调用 ***
                     if (!window.QQ_MessageProcessed) {
                         window.QQ_MessageProcessed = true;
-                        await QQ_Msg_Parse(JSON.stringify(json));
+                    await QQ_Msg_Parse(JSON.stringify(json));
                     } else {
                         console.log("⚠️ 消息已在其他分支处理，跳过传统MSG解析的重复调用");
                     }
@@ -7181,122 +7182,54 @@
              * @param {boolean} isRetry - 是否为重试状态
              * @returns {Object} 处理结果
              */
-            /**
-             * *** 按照用户逻辑优化：互动内容AI回复处理 ***
-             * 3.A 寻找content标签 → 清理多余标签 → 输出到互动空间
-             * 3.B content标签不完全 → 修补content标签 → 清理多余标签后输出到互动空间  
-             * 3.C 完全没有content标签 → 检测是否有大量文本 → 有大量文本则清理多余标签后输出
-             * 3.D 以上皆失败 → 重新发送请求（最后手段）
-             */
-            async function QQ_ProcessInteractiveContent(result, isRetry = false) {
-                console.log('🎯 按照用户逻辑处理互动内容...');
+            async function QQ_ProcessSurpriseMechanism(result, isRetry) {
+                console.log('🔍 互动机制：开始严格验证流程');
                 
-                // *** 3.A：寻找content标签 → 清理 → 输出互动内容前要先输出当下页面的简短回复 ***
-                if (QQ_HasCompleteContentTag(result)) {
-                    console.log('✅ 3.A: 找到完整content标签，先输出页面简短回复，再清理多余标签后输出到互动空间');
-                    const cleanedContent = QQ_CleanNestedTags(result);
-                    QQ_HandleInteractiveContent(cleanedContent, QQ_LastRequestName);
-                    return { success: true, method: '3.A - 完整content标签+先回复' };
-                }
-                
-                // *** 3.B：content标签不完全 → 修补 → 清理 → 输出互动内容前要先输出当下页面的简短回复 ***
-                if (QQ_HasIncompleteContentTag(result)) {
-                    console.log('🔧 3.B: content标签不完全，尝试修补...');
-                    const repairedContent = QQ_RepairIncompleteContentTag(result);
-                    if (repairedContent) {
-                        console.log('✅ 3.B: 修补成功，先输出页面简短回复，再清理多余标签后输出到互动空间');
-                        const cleanedContent = QQ_CleanNestedTags(repairedContent);
-                        QQ_HandleInteractiveContent(cleanedContent, QQ_LastRequestName);
-                        return { success: true, method: '3.B - 修补content标签+先回复' };
-                    }
-                }
-                
-                // *** 3.C：完全没有content标签 → 检测大量文本 → 清理 → 输出互动内容前要先输出当下页面的简短回复 ***
-                if (!QQ_HasContentTag(result)) {
-                    console.log('🔍 3.C: 完全没有content标签，检测是否有大量文本...');
-                    const hasLargeText = QQ_DetectLargeTextContent(result);
-                    if (hasLargeText.isLarge) {
-                        console.log('✅ 3.C: 检测到大量文本，先输出页面简短回复，再清理多余标签后输出');
-                        const cleanedContent = QQ_CleanNestedTags(hasLargeText.content);
-                        // 包装成content格式以便统一处理
-                        const wrappedContent = `<content>${cleanedContent}</content>`;
-                        QQ_HandleInteractiveContent(wrappedContent, QQ_LastRequestName);
-                        return { success: true, method: '3.C - 大量文本包装+先回复' };
-                    }
-                }
-                
-                // *** 3.D：以上皆失败 → 重传（最后手段） ***
-                console.log('❌ 3.D: 以上处理方式都失败，准备重传请求（最后手段）');
-                
-                if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
-                    QQ_RetryCount++;
-                    console.log(`互动内容格式错误，开始第${QQ_RetryCount}次重试`);
-                    triggerSlash(`/echo 互动内容格式不符合标准，正在重新生成... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
-                    
-                    if (QQ_LastRequest) {
-                        gening = true;
-                        try {
-                            await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await QQ_ProcessInteractiveContent(retryResult, true);
-                        } finally {
-                            gening = false;
-                        }
-                    }
-                } else {
-                    console.log('❌ 重试次数已用完，互动内容处理失败');
-                    triggerSlash("/echo 互动内容格式错误且重试失败，请重新发送请求");
-                }
-                
-                return { success: false, method: '3.D - 重传失败' };
-            }
-            
-            /**
-             * *** 检查是否有完整的content标签 ***
-             */
-            function QQ_HasCompleteContentTag(content) {
-                return /<content>[\s\S]*?<\/content>/i.test(content);
-            }
-            
-            /**
-             * *** 修补不完整的content标签 ***
-             */
-            function QQ_RepairIncompleteContentTag(content) {
-                // 检查是否只有开始标签
-                if (/<content>/i.test(content) && !/<\/content>/i.test(content)) {
-                    console.log('修补：添加缺失的</content>结束标签');
-                    return content + '\n</content>';
-                }
-                
-                // 检查是否只有结束标签
-                if (!/<content>/i.test(content) && /<\/content>/i.test(content)) {
-                    console.log('修补：添加缺失的<content>开始标签');
-                    return '<content>\n' + content;
-                }
-                
-                return null;
-            }
-            
-            /**
-             * *** 检测是否有大量文本内容 ***
-             */
-            function QQ_DetectLargeTextContent(content) {
-                // 移除常见的无效内容
-                let cleanContent = content
-                    .replace(/MiPhone_start|MiPhone_end|MiPhone_JSON_START|MiPhone_JSON_END/gi, '')
-                    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-                    .replace(/<consider>[\s\S]*?<\/consider>/gi, '')
-                    .replace(/<!--[\s\S]*?-->/gi, '')
-                    .trim();
-                
-                // 判断是否为大量文本（长度>100字符且包含有意义内容）
-                const hasSignificantContent = (cleanContent.length > 100) && (/[\u4e00-\u9fa5]|[a-zA-Z]/.test(cleanContent));
-                
-                return {
-                    isLarge: hasSignificantContent,
-                    content: cleanContent,
-                    length: cleanContent.length
+                // 初始化返回结果
+                const processResult = {
+                    shouldContinue: false,  // 是否继续显示互动内容
+                    shouldRetry: false,     // 是否需要重试
+                    content: result         // 处理后的内容
                 };
+                
+                // *** 第一步：检查是否有content标签 ***
+                if (!QQ_HasContentTag(result)) {
+                    console.log('❌ 互动机制验证失败：没有找到content标签');
+                    processResult.shouldRetry = false; // 没有content标签就不重试了
+                    return processResult;
+                }
+                
+                console.log('✅ 第一步通过：找到content标签');
+                
+                // *** 第二步：提取并清理content包裹的内容 ***
+                let contentText = QQ_CleanContentTags(result);
+                if (!contentText) {
+                    console.log('❌ 互动机制验证失败：无法提取content内容');
+                    processResult.shouldRetry = true; // 有标签但无内容，重试
+                    return processResult;
+                }
+                
+                console.log('✅ 第二步通过：成功提取content内容');
+                console.log('原始content内容:', contentText);
+                
+                // *** 第三步：清理其他标签包裹的内容 ***
+                const cleanedContent = QQ_CleanNestedTags(contentText);
+                console.log('清理嵌套标签后的内容:', cleanedContent);
+                
+                // *** 第四步：直接进行严格的三种情况互动检查 ***
+                console.log('✅ 第四步：content标签清理完成，进入严格的三种情况检查');
+                
+                // *** 第五步：严格按照三种触发情况进行检查 ***
+                if (QQ_IsInteractiveContent(result, true)) {
+                    console.log('🎉 互动机制验证成功：确认为有效互动内容');
+                    processResult.shouldContinue = true;
+                    processResult.content = result; // 使用原始内容（包含格式）
+                    return processResult;
+                } else {
+                    console.log('❌ 最终验证失败：不符合互动内容标准');
+                    processResult.shouldRetry = true;
+                    return processResult;
+                }
             }
             
             /**
@@ -7435,6 +7368,9 @@
                     /<群聊：([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
                     // 简化英文冒号格式：<群聊:群名>内容（可能没有结束标签）
                     /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                    // *** 修复：移除过于宽松的群聊匹配规则，避免私聊被误判为群聊 ***
+                    // 原规则: /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                    // 问题：会匹配包含"群聊"的任何标签，包括"阿伟和赤城的私聊"
                 ];
                 
                 let groupMatches = [];
@@ -7652,12 +7588,12 @@
                         extractedInfo.privateMessages = extractedInfo.messages;
                         extractedInfo.messages = []; // 清空群聊消息
                     } else {
-                        // 转换群聊消息
+                // 转换群聊消息
                         standardData.群聊[groupChatKey] = {
                             msgs: extractedInfo.messages,
                             members: extractedInfo.members || []
                         };
-                        console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                    console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
                     }
                 }
                 
@@ -12303,13 +12239,13 @@ PCM (Plot Construction Mode)
              * @returns {string} - 修改后的请求内容
              */
             function QQ_ModifyRequestForInteractive(originalRequest) {
-                // *** 根据用户更改1：然后直接请求回复互动内容 ***
+                // 在Request标签中添加互动内容要求
                 const interactiveGuidance = `
 <InteractiveGuidance:🔥 强制执行：用户的消息包含明显的互动意图，必须严格按照以下要求回复 🔥
 
 📱【双重回复要求】：
 1. 【必须先回复】在用户当前发言的位置（私聊/群聊/动态评论）正常回复，表达反应、确认、情感等
-2. 【然后直接请求回复互动内容】用<content>标签包裹详细的现实互动场景描述
+2. 【然后提供互动】用<content>标签包裹详细的现实互动场景描述
 
 🚨【强制执行顺序】：
 - 私聊互动：先在私聊中回复 → 再提供互动内容
@@ -18791,7 +18727,7 @@ ${index + 1}. ${space.name}
                     if (isUserInChat) {
                         // 用户参与的正常私聊
                         if (match[1] === `${UserName}`) {
-                            name = match[2];
+                        name = match[2];
                         } else if (match[2] === `${UserName}`) {
                             name = match[1];
                         }
@@ -18802,10 +18738,10 @@ ${index + 1}. ${space.name}
                         continue;
                     } else {
                         // *** 真正的角色间私聊：标题和消息都不包含用户 ***
-                        console.log(`检测到角色间私聊: ${match[1]} 和 ${match[2]}`);
-                        await QQ_HandleCharacterChat(str, json.私聊[str], match[1], match[2]);
+                            console.log(`检测到角色间私聊: ${match[1]} 和 ${match[2]}`);
+                            await QQ_HandleCharacterChat(str, json.私聊[str], match[1], match[2]);
                         continue;
-                    }
+                        }
                     
                     if (!name) continue;
                     try {
@@ -22825,13 +22761,6 @@ msg_end
              */
             window.QQ_ForceReloadContactGroups = async function() {
                 try {
-                    console.log('🐛 DEBUG: QQ_ForceReloadContactGroups 开始执行');
-                    console.log('🐛 DEBUG: 检查关键函数可用性:', {
-                        getCurrentCharacterId: typeof getCurrentCharacterId,
-                        loadGroupsFromStorage: typeof loadGroupsFromStorage,
-                        contactGroups: typeof contactGroups
-                    });
-                    
                     const characterId = getCurrentCharacterId() || 'default';
                     console.log(`🔄 强制从世界书重新加载分组数据，角色ID: ${characterId}`);
                     
@@ -22913,15 +22842,6 @@ msg_end
                     // *** 修复验证逻辑：重新获取最新的entries数据 ***
                     entries = await getLorebookEntries(worldbook);
                     const verifyEntry = entries.find(entry => entry.comment === comment);
-                    
-                    console.log('🐛 DEBUG: 验证世界书保存结果:', {
-                        comment: comment,
-                        foundEntry: !!verifyEntry,
-                        hasContent: verifyEntry ? !!verifyEntry.content : false,
-                        contentLength: verifyEntry ? verifyEntry.content.length : 0,
-                        contentPreview: verifyEntry ? verifyEntry.content.substring(0, 100) : 'N/A',
-                        contactGroupsCount: contactGroups.length
-                    });
                     
                     if (verifyEntry && verifyEntry.content && verifyEntry.content.includes('"name"')) {
                         console.log(`✅ 分组数据保存验证成功：${contactGroups.length}个分组`);
@@ -31838,9 +31758,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             window.QQ_ShowPublicSpacesError = QQ_ShowPublicSpacesError;
             
             // *** 保留核心功能函数，移除过期测试函数 ***
-            // *** 已删除：QQ_ProcessSurpriseMechanism函数已被QQ_ProcessInteractiveContent替代 ***
-            // window.QQ_ProcessSurpriseMechanism = QQ_ProcessSurpriseMechanism;
-            window.QQ_ProcessInteractiveContent = QQ_ProcessInteractiveContent;
+            window.QQ_ProcessSurpriseMechanism = QQ_ProcessSurpriseMechanism;
             window.QQ_ValidateInteractiveContent = QQ_ValidateInteractiveContent;
             window.QQ_CleanNestedTags = QQ_CleanNestedTags;
             window.QQ_CleanContentTags = QQ_CleanContentTags;
