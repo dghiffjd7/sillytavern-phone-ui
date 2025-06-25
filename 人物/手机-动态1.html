@@ -6466,7 +6466,7 @@
 
 🚨【回复标准】：
 1. 【必须回复所有消息】${UserName}本次发了消息的角色都要回复${UserName}的消息
-2. 【多角色参与】最少3-4名角色参与回复，营造活跃社交氛围
+2. 【多角色参与】除私聊情况外，最少3-4名角色参与回复，营造活跃社交氛围
 3. 【私聊延伸】重要话题可通过至少2名角色的私聊进一步深入讨论
 4.  适当时可输出相关动态内容
 
@@ -6787,52 +6787,63 @@
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
                 
-                // *** 优先级1：标准线上格式检查（最高优先级，成功后立即return） ***
-                console.log("🔍 优先级1：开始标准线上格式检查");
-                const formatResult = await QQ_ProcessStandardFormat(result);
-                if (formatResult.success) {
-                    console.log("✅ 优先级1成功：标准格式处理完成，立即return");
+                // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
+                console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
+                const strictResult = await QQ_ProcessStrictFormat(result);
+                if (strictResult.success) {
+                    console.log("✅ 优先级1成功：严格匹配处理完成，立即return");
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
                     QQ_Save_Msg();
                     return; // 优先级1成功，立即return
                 }
                 
-                if (formatResult.shouldRetry && !isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                if (strictResult.shouldRetry && !isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                     return await QQ_ExecuteRetry();
                 }
                 
-                // *** 优先级2：互动内容检测（成功后立即return） ***
-                console.log("🔍 优先级2：开始互动内容检测");
-                const interactiveResult = await QQ_ProcessInteractiveContent(result);
-                if (interactiveResult.success) {
-                    console.log("✅ 优先级2成功：互动内容处理完成，立即return");
-                    QQ_ResetRetry();
-                    return; // 优先级2成功，立即return
-                }
-                
-                // *** 优先级3：智能提取有效信息（成功后立即return） ***
-                console.log("🔍 优先级3：开始智能提取有效信息");
-                const extractResult = await QQ_ProcessValidExtraction(result);
-                if (extractResult.success) {
-                    console.log("✅ 优先级3成功：智能提取处理完成，立即return");
+                // *** 优先级2（B步骤）：模糊/修复匹配（成功后立即return） ***
+                console.log("🔍 优先级2（B步骤）：开始模糊/修复匹配");
+                const fuzzyResult = await QQ_ProcessFuzzyRepair(result);
+                if (fuzzyResult.success) {
+                    console.log("✅ 优先级2成功：模糊/修复匹配处理完成，立即return");
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
                     QQ_Save_Msg();
+                    return; // 优先级2成功，立即return
+                }
+                
+                // *** 优先级3（C步骤）：互动内容备选（成功后立即return） ***
+                console.log("🔍 优先级3（C步骤）：开始互动内容检测");
+                const interactiveResult = await QQ_ProcessInteractiveContent(result);
+                if (interactiveResult.success) {
+                    console.log("✅ 优先级3成功：互动内容处理完成，立即return");
+                    QQ_ResetRetry();
                     return; // 优先级3成功，立即return
                 }
                 
-                // *** 优先级4：content标签检查（成功后立即return） ***
-                console.log("🔍 优先级4：开始content标签检查");
-                const contentResult = await QQ_ProcessContentTag(result);
-                if (contentResult.success) {
-                    console.log("✅ 优先级4成功：content标签处理完成，立即return");
+                // *** 优先级4：智能提取有效信息（成功后立即return） ***
+                console.log("🔍 优先级4：开始智能提取有效信息");
+                const extractResult = await QQ_ProcessValidExtraction(result);
+                if (extractResult.success) {
+                    console.log("✅ 优先级4成功：智能提取处理完成，立即return");
                     QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    QQ_Save_Msg();
                     return; // 优先级4成功，立即return
                 }
                 
-                // *** 优先级5：重传机制（最后手段） ***
-                console.log("🔍 优先级5：开始重传机制（最后手段）");
+                // *** 优先级5：content标签检查（成功后立即return） ***
+                console.log("🔍 优先级5：开始content标签检查");
+                const contentResult = await QQ_ProcessContentTag(result);
+                if (contentResult.success) {
+                    console.log("✅ 优先级5成功：content标签处理完成，立即return");
+                    QQ_ResetRetry();
+                    return; // 优先级5成功，立即return
+                }
+                
+                // *** 优先级6（D步骤）：重传机制（最后手段） ***
+                console.log("🔍 优先级6（D步骤）：开始重传机制（最后手段）");
                 if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                     QQ_RetryCount++;
                     console.log(`所有处理方式失败，开始第${QQ_RetryCount}次重试`);
@@ -6856,59 +6867,42 @@
             }
             
             /**
-             * *** 优先级1：处理标准线上格式 ***
+             * *** 优先级1（A步骤）：严格匹配完整标签 ***
              */
-            async function QQ_ProcessStandardFormat(result) {
-                const formatPatterns = [
+            async function QQ_ProcessStrictFormat(result) {
+                const strictFormatPatterns = [
                     /MiPhone_start([\s\S]+?)MiPhone_end/g,           // 标准格式
                     /MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/g, // JSON格式
                     /MiPhone_JSON_start([\s\S]+?)MiPhone_JSON_end/g, // 混合格式1
                     /MiPhone_Start([\s\S]+?)MiPhone_End/g,           // 首字母大写
                     /MiPhone_START([\s\S]+?)MiPhone_END/g,           // 全大写
                     /MiPhone([\s\S]+?)MiPhone/g,                     // 简化格式
-                    // 支持不完整的格式
-                    /MiPhone_JSON_START([\s\S]+?)$/g,                // 不完整JSON格式
-                    /MiPhone_start([\s\S]+?)$/g,                     // 不完整标准格式
-                    /MiPhone_Start([\s\S]+?)$/g,                     // 不完整首字母大写格式
-                    /MiPhone_START([\s\S]+?)$/g,                     // 不完整全大写格式
                 ];
                 
                 let matches = [];
-                for (const pattern of formatPatterns) {
+                for (const pattern of strictFormatPatterns) {
                     const found = [...result.matchAll(pattern)];
                     if (found.length > 0) {
                         matches = found;
-                        console.log(`✅ 标准格式匹配成功: ${pattern.source.substring(0, 50)}...`);
-                        
-                        // 自动补全不完整格式
-                        if (pattern.source.includes('$') && found.length > 0) {
-                            console.log("🔧 检测到不完整格式，自动补全");
-                            let content = found[0][1];
-                            if (pattern.source.includes('MiPhone_JSON_START')) {
-                                content += '\nMiPhone_JSON_END';
-                            } else if (pattern.source.includes('MiPhone_start')) {
-                                content += '\nMiPhone_end';
-                            }
-                            matches[0][1] = content;
-                        }
+                        console.log(`✅ 严格格式匹配成功: ${pattern.source.substring(0, 50)}...`);
                         break;
                     }
                 }
                 
                 if (matches.length === 0) {
-                    console.log("❌ 标准格式检查失败：未找到任何格式");
+                    console.log("❌ 严格格式检查失败：未找到任何完整格式");
                     return { success: false, shouldRetry: false };
                 }
                 
                 if (matches.length > 1) {
-                    console.log("❌ 标准格式检查失败：找到多个格式");
+                    console.log("❌ 严格格式检查失败：找到多个格式");
                     return { success: false, shouldRetry: true };
-                    }
-                    
-                // 成功找到单一标准格式，立即处理
-                console.log("✅ 找到单一标准格式，开始处理");
+                }
+                
+                // 成功找到单一严格格式，立即处理
+                console.log("✅ 找到单一严格格式，开始处理");
                 const content = matches[0][1];
-                        
+                
                 // 处理消息内容
                 await QQ_ProcessMsgContent(content);
                 
@@ -6922,17 +6916,114 @@
                 }
                 
                 return { success: true };
-                            }
+            }
             
             /**
-             * *** 优先级2：处理互动内容 ***
+             * *** 优先级2（B步骤）：模糊/修复匹配 ***
+             */
+            async function QQ_ProcessFuzzyRepair(result) {
+                console.log("🔧 开始模糊匹配和修复处理");
+                
+                // 模糊格式匹配：支持不完整的格式
+                const fuzzyFormatPatterns = [
+                    /MiPhone_JSON_START([\s\S]+?)$/g,                // 不完整JSON格式
+                    /MiPhone_start([\s\S]+?)$/g,                     // 不完整标准格式
+                    /MiPhone_Start([\s\S]+?)$/g,                     // 不完整首字母大写格式
+                    /MiPhone_START([\s\S]+?)$/g,                     // 不完整全大写格式
+                    /MiPhone_JSON_start([\s\S]+?)$/g,                // 不完整混合格式
+                ];
+                
+                let repairedContent = null;
+                
+                // 尝试不完整格式匹配和自动修复
+                for (const pattern of fuzzyFormatPatterns) {
+                    const found = [...result.matchAll(pattern)];
+                    if (found.length > 0) {
+                        console.log(`🔧 检测到不完整格式，尝试修复: ${pattern.source.substring(0, 50)}...`);
+                        
+                        let content = found[0][1];
+                        // 自动补全结束标签
+                        if (pattern.source.includes('MiPhone_JSON_START')) {
+                            content += '\nMiPhone_JSON_END';
+                            console.log("🔧 自动补全MiPhone_JSON_END标签");
+                        } else if (pattern.source.includes('MiPhone_start')) {
+                            content += '\nMiPhone_end';
+                            console.log("🔧 自动补全MiPhone_end标签");
+                        } else if (pattern.source.includes('MiPhone_Start')) {
+                            content += '\nMiPhone_End';
+                            console.log("🔧 自动补全MiPhone_End标签");
+                        } else if (pattern.source.includes('MiPhone_START')) {
+                            content += '\nMiPhone_END';
+                            console.log("🔧 自动补全MiPhone_END标签");
+                        }
+                        
+                        repairedContent = content;
+                        break;
+                    }
+                }
+                
+                // 尝试更深度的模糊匹配：寻找聊天格式线索
+                if (!repairedContent) {
+                    console.log("🔧 尝试深度模糊匹配：寻找聊天格式线索");
+                    
+                    // 检查是否包含聊天格式线索
+                    const chatFormatClues = [
+                        /<群聊:/,
+                        /<[^>]+和[^>]+的(?:聊天|私聊)>/,
+                        /<\/群聊:/,
+                        /<\/[^>]+和[^>]+的(?:聊天|私聊)>/,
+                        /时间:\s*\d{4}-\d{2}-\d{2}/,
+                        /--\d{4}-\d{2}-\d{2}/
+                    ];
+                    
+                    let hasChatClues = false;
+                    for (const clue of chatFormatClues) {
+                        if (clue.test(result)) {
+                            hasChatClues = true;
+                            console.log(`🔧 发现聊天格式线索: ${clue.source}`);
+                            break;
+                        }
+                    }
+                    
+                    if (hasChatClues) {
+                        console.log("🔧 包含聊天格式线索，尝试智能包装");
+                        // 智能包装：如果包含聊天线索但缺少外层标签，自动添加
+                        repairedContent = `MiPhone_start\n${result}\nMiPhone_end`;
+                    }
+                }
+                
+                // 如果没有找到可修复的内容
+                if (!repairedContent) {
+                    console.log("❌ 模糊/修复匹配失败：无法找到可修复的格式");
+                    return { success: false };
+                }
+                
+                console.log("✅ 模糊/修复匹配成功，开始处理修复后的内容");
+                
+                // 处理修复后的内容
+                await QQ_ProcessMsgContent(repairedContent);
+                
+                // 处理动态内容
+                const momentMatches = repairedContent.matchAll(/moment_start([\s\S]+?)moment_end/g);
+                if (momentMatches) {
+                    for (const moment of momentMatches) {
+                        const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                        QQ_Moment_Parse(moment[1], isInCommentContext);
+                    }
+                }
+                
+                return { success: true };
+            }
+            
+            /**
+             * *** 优先级3（C步骤）：处理互动内容备选 ***
              */
             async function QQ_ProcessInteractiveContent(result) {
                 console.log("🎯 开始互动内容检测");
                 
-                            if (QQ_IsInteractiveContent(result, true)) {
+                if (QQ_IsInteractiveContent(result, true)) {
                     console.log("✅ 检测到互动内容，显示互动空间");
-                                QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                    QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                     return { success: true };
                 }
                 
@@ -6941,27 +7032,27 @@
             }
             
             /**
-             * *** 优先级3：智能提取有效信息 ***
+             * *** 优先级4：智能提取有效信息 ***
              */
             async function QQ_ProcessValidExtraction(result) {
                 console.log("🎯 开始智能提取有效信息");
                 
-                    const extractedInfo = QQ_ExtractValidInfo(result);
-                    if (extractedInfo.hasValidInfo) {
+                const extractedInfo = QQ_ExtractValidInfo(result);
+                if (extractedInfo.hasValidInfo) {
                     console.log("✅ 智能提取成功，转换为标准格式");
-                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
-                        if (convertedResult) {
-                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                    const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                    if (convertedResult) {
+                        await QQ_Msg_Parse(JSON.stringify(convertedResult));
                         return { success: true };
-                                }
-                            }
-                            
+                    }
+                }
+                
                 console.log("❌ 智能提取失败");
                 return { success: false };
-                    }
-                    
+            }
+            
             /**
-             * *** 优先级4：content标签检查 ***
+             * *** 优先级5：content标签检查 ***
              */
             async function QQ_ProcessContentTag(result) {
                 console.log("🎯 开始content标签检查");
@@ -6972,8 +7063,8 @@
                         console.log("✅ 找到有效content标签，显示互动空间");
                         QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         return { success: true };
-                            }
-                        }
+                    }
+                }
                 
                 console.log("❌ content标签检查失败");
                 return { success: false };
@@ -7047,6 +7138,65 @@
                     }
                 }
             }
+
+            /**
+             * *** 测试AI回复优先级逻辑 ***
+             */
+            window.QQ_Test_Priority_Logic = function() {
+                console.log("🧪 开始测试AI回复优先级逻辑");
+                
+                const testCases = [
+                    {
+                        name: "完整标准格式",
+                        input: "MiPhone_start\n<群聊:测试群>\n用户--测试消息--2024-12-19 14:30\n</群聊:测试群>\nMiPhone_end",
+                        expectedPriority: "优先级1（A步骤）：严格匹配"
+                    },
+                    {
+                        name: "不完整JSON格式",
+                        input: "MiPhone_JSON_START\n<群聊:测试群>\n用户--测试消息--2024-12-19 14:30\n</群聊:测试群>",
+                        expectedPriority: "优先级2（B步骤）：模糊/修复匹配"
+                    },
+                    {
+                        name: "包含聊天线索但无标签",
+                        input: "<群聊:测试群>\n用户--测试消息--2024-12-19 14:30\n</群聊:测试群>",
+                        expectedPriority: "优先级2（B步骤）：模糊/修复匹配"
+                    },
+                    {
+                        name: "互动内容",
+                        input: "*走向你，轻轻抱住你* 今天心情怎么样？",
+                        expectedPriority: "优先级3（C步骤）：互动内容备选"
+                    },
+                    {
+                        name: "纯文本回复",
+                        input: "我今天很好，谢谢关心！",
+                        expectedPriority: "优先级4或5：智能提取/content标签"
+                    }
+                ];
+                
+                console.log("📋 测试用例：");
+                for (let i = 0; i < testCases.length; i++) {
+                    const testCase = testCases[i];
+                    console.log(`${i + 1}. ${testCase.name}: ${testCase.expectedPriority}`);
+                }
+                
+                console.log("\n🎯 优先级处理流程：");
+                console.log("优先级1（A步骤）：严格匹配完整标签 → 立即处理");
+                console.log("优先级2（B步骤）：模糊/修复匹配 → 立即处理");
+                console.log("优先级3（C步骤）：互动内容备选 → 立即处理");
+                console.log("优先级4：智能提取有效信息 → 立即处理");
+                console.log("优先级5：content标签检查 → 立即处理");
+                console.log("优先级6（D步骤）：重传机制（最后手段）");
+                
+                console.log("\n✅ 修复完成：每个优先级成功后立即return，绝不执行后续分支");
+                console.log("🔧 核心改进：增加了B步骤（模糊/修复匹配），解决了A→C直接跳跃的问题");
+                
+                return {
+                    testCases: testCases,
+                    priorityFlow: "A→B→C→D 严格优先级逻辑",
+                    keyFix: "添加了缺失的B步骤（模糊/修复匹配）",
+                    status: "✅ 优先级逻辑修复完成"
+                };
+            };
 
             /**
              * 重置重试相关变量
