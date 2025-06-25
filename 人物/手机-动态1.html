@@ -7545,27 +7545,54 @@
             function QQ_ConvertExtractedToStandard(extractedInfo) {
                 if (!extractedInfo.hasValidInfo) return null;
                 
-                const standardData = {};
+                const standardData = { 私聊: {}, 群聊: {} };
                 
-                // 转换群聊消息
-                if (extractedInfo.messages.length > 0) {
-                    const groupChatKey = extractedInfo.chatName || 'group_chat';
-                    standardData[groupChatKey] = extractedInfo.messages;
-                    console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                // 判断聊天类型并转换
+                if (extractedInfo.chatName) {
+                    // 根据聊天名称判断是私聊还是群聊
+                    const isPrivateChat = extractedInfo.chatName.includes('私聊') || 
+                                         extractedInfo.chatName.includes('和') && extractedInfo.chatName.includes('的');
+                    
+                    if (isPrivateChat && extractedInfo.messages.length > 0) {
+                        // 转换私聊消息 - 统一格式为 "XX和YY的聊天"
+                        let privateChatKey = extractedInfo.chatName;
+                        if (privateChatKey.includes('私聊')) {
+                            privateChatKey = privateChatKey.replace('私聊', '聊天');
+                        } else if (!privateChatKey.includes('聊天')) {
+                            privateChatKey = privateChatKey + '的聊天';
+                        }
+                        
+                        standardData.私聊[privateChatKey] = extractedInfo.messages;
+                        console.log(`✅ 转换私聊消息: ${privateChatKey} (${extractedInfo.messages.length}条)`);
+                    } else if (extractedInfo.messages.length > 0) {
+                        // 转换群聊消息
+                        const groupChatKey = extractedInfo.chatName;
+                        standardData.群聊[groupChatKey] = {
+                            msgs: extractedInfo.messages,
+                            members: extractedInfo.members || []
+                        };
+                        console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                    }
                 }
                 
-                // 转换私聊消息
+                // 处理单独的私聊消息
                 if (extractedInfo.privateMessages.length > 0) {
-                    // 创建独立的私聊key，避免与群聊冲突
-                    const privateChatKey = extractedInfo.chatName ? 
-                        `${extractedInfo.chatName}_private` : 'private_chat';
-                    standardData[privateChatKey] = extractedInfo.privateMessages;
-                    console.log(`✅ 转换私聊消息: ${privateChatKey} (${extractedInfo.privateMessages.length}条)`);
+                    const privateChatKey = 'private_chat';
+                    standardData.私聊[privateChatKey] = extractedInfo.privateMessages;
+                    console.log(`✅ 转换独立私聊消息: ${privateChatKey} (${extractedInfo.privateMessages.length}条)`);
                 }
                 
-                console.log(`✅ 转换完成，总共生成 ${Object.keys(standardData).length} 个聊天组`);
+                // 清理空的分类
+                if (Object.keys(standardData.私聊).length === 0) {
+                    delete standardData.私聊;
+                }
+                if (Object.keys(standardData.群聊).length === 0) {
+                    delete standardData.群聊;
+                }
                 
-                return Object.keys(standardData).length > 0 ? standardData : null;
+                console.log(`✅ 转换完成，私聊: ${standardData.私聊 ? Object.keys(standardData.私聊).length : 0}个，群聊: ${standardData.群聊 ? Object.keys(standardData.群聊).length : 0}个`);
+                
+                return (standardData.私聊 || standardData.群聊) ? standardData : null;
             }
 
             // *** 过期测试函数已清理 ***
