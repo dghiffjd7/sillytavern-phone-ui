@@ -7543,7 +7543,7 @@
                 
                 // 根据聊天类型分别处理群聊和私聊消息 - 兼容单一类型和混合类型
                 if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
-                    // 转换群聊消息
+                // 转换群聊消息
                     const groupChatKey = extractedInfo.chatName;
                     standardData.群聊[groupChatKey] = {
                         msgs: extractedInfo.messages,
@@ -9182,16 +9182,16 @@ PCM (Plot Construction Mode)
                                     border-left: 3px solid #667eea;
                                 ">
                                     <div style="font-weight: 500; color: #667eea; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-                                        <span>✅</span>
-                                        <span>特殊符号触发（永久启用）</span>
-                                    </div>
+                                    <span>✅</span>
+                                    <span>特殊符号触发（永久启用）</span>
+                                </div>
                                     <div style="font-size: 12px; color: #666; line-height: 1.4;">
                                         使用 <code style="background: #667eea; color: white; padding: 2px 6px; border-radius: 3px; font-weight: 600;">&&</code> 符号可以随时触发互动内容<br>
                                         <span style="color: #888;">例如：</span><code style="background: #f1f3f4; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">&&想要拥抱你</code>
-                                    </div>
                                 </div>
-                                
-                                <!-- 关键词触发设置 -->
+                            </div>
+                            
+                            <!-- 关键词触发设置 -->
                                 <label style="
                                     display: flex;
                                     align-items: center;
@@ -9412,7 +9412,7 @@ PCM (Plot Construction Mode)
                 $(document).one('click', function() {
                     // 恢复原有全屏状态
                     QQ_ApplyFullscreenMode(currentFullscreenEnabled);
-                    $('.QQ_interactive_settings_panel').remove();
+                        $('.QQ_interactive_settings_panel').remove();
                 });
                 
                 // 阻止面板内部点击冒泡
@@ -17791,9 +17791,8 @@ ${index + 1}. ${space.name}
                     });
                 }
                 
-                // 添加时间系统消息
-                const timeMsg = `系统消息--${currentTime}--${currentTime}`;
-                groupData.msgs.push(timeMsg);
+                // *** 修复：移除重复时间消息，避免界面显示重复时间 ***
+                // 不再添加纯时间的系统消息，因为会导致界面显示重复时间
                 
                 // *** 立即标记为已初始化，防止任何后续的重复添加 ***
                 QQ_GroupInitializedSet.add(groupName);
@@ -18911,11 +18910,36 @@ ${index + 1}. ${space.name}
                             if (!redirected) {
                                 console.log(`AI创建新群聊: ${name}，参考私聊逻辑进行处理`);
                                 
+                                // *** 修复：智能提取群聊成员 ***
+                                let extractedMembers = json.群聊[name]["members"] || [];
+                                
+                                // 如果没有明确的成员列表，从消息中智能提取
+                                if (extractedMembers.length === 0 && json.群聊[name]["msgs"] && json.群聊[name]["msgs"].length > 0) {
+                                    console.log('🔍 群聊成员列表为空，开始从消息中智能提取成员...');
+                                    const uniqueMembers = new Set();
+                                    
+                                    for (const msg of json.群聊[name]["msgs"]) {
+                                        const parts = msg.split("--");
+                                        if (parts.length >= 2) {
+                                            const senderName = parts[0].trim();
+                                            if (senderName && senderName !== '系统' && senderName !== 'System') {
+                                                uniqueMembers.add(senderName);
+                                            }
+                                        }
+                                    }
+                                    
+                                    extractedMembers = Array.from(uniqueMembers);
+                                    console.log(`✅ 从消息中提取到群聊成员: [${extractedMembers.join(', ')}]`);
+                                    
+                                    // 更新原始数据
+                                    json.群聊[name]["members"] = extractedMembers;
+                                }
+                                
                                 // 创建群聊数据结构
                                 const newGroupData = {
                                     id: `group_${Date.now()}`,
                                     name: name,
-                                    members: json.群聊[name]["members"] || [],
+                                    members: extractedMembers,
                                     avatar: {
                                         type: 'preset',
                                         gradient: {
@@ -18928,6 +18952,13 @@ ${index + 1}. ${space.name}
                                     lastTime: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
                                     timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)
                                 };
+                                
+                                // *** 修复：AI创建群聊时避免重复添加欢迎消息 ***
+                                // 先标记为已初始化，防止AddNewGroup重复添加系统消息
+                                if (!window.QQ_GroupInitializedSet) {
+                                    window.QQ_GroupInitializedSet = new Set();
+                                }
+                                QQ_GroupInitializedSet.add(newGroupData.name);
                                 
                                 // 调用AddNewGroup函数（类似AddNewChar）
                                 AddNewGroup(newGroupData.name, newGroupData.avatar, newGroupData.members, newGroupData.lastMessage);
