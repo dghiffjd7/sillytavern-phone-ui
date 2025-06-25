@@ -7334,9 +7334,10 @@
                     // 简化中文冒号格式：<群聊：群名>内容（可能没有结束标签）
                     /<群聊：([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
                     // 简化英文冒号格式：<群聊:群名>内容（可能没有结束标签）
-                    /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
-                    // 更宽松的格式：检测群聊内容
-                    /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                    /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                    // *** 修复：移除过于宽松的群聊匹配规则，避免私聊被误判为群聊 ***
+                    // 原规则: /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                    // 问题：会匹配包含"群聊"的任何标签，包括"阿伟和赤城的私聊"
                 ];
                 
                 let groupMatches = [];
@@ -7543,13 +7544,24 @@
                 
                 // 根据聊天类型分别处理群聊和私聊消息 - 兼容单一类型和混合类型
                 if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
-                // 转换群聊消息
+                    // *** 修复：检查群聊名称是否为私聊格式，防止误判 ***
                     const groupChatKey = extractedInfo.chatName;
-                    standardData.群聊[groupChatKey] = {
-                        msgs: extractedInfo.messages,
-                        members: extractedInfo.members || []
-                    };
-                    console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                    const isActuallyPrivateChat = /(.+?)和(.+?)的?(?:聊天|私聊)/.test(groupChatKey);
+                    
+                    if (isActuallyPrivateChat) {
+                        console.log(`⚠️ 检测到被误判为群聊的私聊: "${groupChatKey}"，重新分类为私聊`);
+                        // 重新分类为私聊
+                        extractedInfo.chatType = 'private';
+                        extractedInfo.privateMessages = extractedInfo.messages;
+                        extractedInfo.messages = []; // 清空群聊消息
+                    } else {
+                        // 转换群聊消息
+                        standardData.群聊[groupChatKey] = {
+                            msgs: extractedInfo.messages,
+                            members: extractedInfo.members || []
+                        };
+                        console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
+                    }
                 }
                 
                 // 处理私聊消息（无论主类型是什么，都要检查私聊消息）
@@ -18615,6 +18627,11 @@ ${index + 1}. ${space.name}
                 }
             }
 
+            // *** 修复：添加防重复处理机制 ***
+            let QQ_ProcessingMessageHash = null;
+            let QQ_ProcessingStartTime = null;
+            const QQ_PROCESSING_TIMEOUT = 5000; // 5秒超时
+
             /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
@@ -18622,6 +18639,26 @@ ${index + 1}. ${space.name}
             async function QQ_Msg_Parse(content) {
                 //content = QQ_Msg_Repair(content);
                 console.log(`开始解析聊天消息:${content}`);
+                
+                // *** 修复：防重复处理机制 ***
+                const contentHash = btoa(unescape(encodeURIComponent(content))).slice(0, 20); // 生成内容哈希
+                const currentTime = Date.now();
+                
+                // 检查是否正在处理相同内容
+                if (QQ_ProcessingMessageHash === contentHash) {
+                    const timeElapsed = currentTime - QQ_ProcessingStartTime;
+                    if (timeElapsed < QQ_PROCESSING_TIMEOUT) {
+                        console.log(`⚠️ 检测到重复处理同一消息，跳过 (${timeElapsed}ms前开始处理)`);
+                        return;
+                    } else {
+                        console.log(`⚠️ 上次处理已超时(${timeElapsed}ms)，继续处理新请求`);
+                    }
+                }
+                
+                // 设置处理状态
+                QQ_ProcessingMessageHash = contentHash;
+                QQ_ProcessingStartTime = currentTime;
+                
                 let hasstr = false;
                 if (content.match(/\S/)) {
                     hasstr = true;
@@ -18632,6 +18669,9 @@ ${index + 1}. ${space.name}
                         QQ_Error(`解析聊天记录失败,请手动解决`);
                     }
                     // QQ_Error(`yaml解析失败`);
+                    // *** 修复：解析失败时也要清除处理状态 ***
+                    QQ_ProcessingMessageHash = null;
+                    QQ_ProcessingStartTime = null;
                     return;
                 }
                 console.log(`解析成功时的聊天消息:${JSON.stringify(json)}`);
@@ -18753,11 +18793,19 @@ ${index + 1}. ${space.name}
                         // 有新消息时更新消息列表
                         QQ_UpdateMessageList();
                     } catch (error) {
+                        // *** 修复：错误时也要清除处理状态 ***
+                        QQ_ProcessingMessageHash = null;
+                        QQ_ProcessingStartTime = null;
                         throw error;
                         assertIsError(error);
                         //QQ_Error(error.message);
                     }
                 }
+                
+                // *** 修复：处理完成时清除处理状态 ***
+                QQ_ProcessingMessageHash = null;
+                QQ_ProcessingStartTime = null;
+                console.log('✅ QQ_Msg_Parse处理完成，已清除防重复状态');
                 for (let name in json.群聊) {
                     try {
                         // *** 新增：清理群聊消息内容 ***
