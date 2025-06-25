@@ -7334,10 +7334,9 @@
                     // 简化中文冒号格式：<群聊：群名>内容（可能没有结束标签）
                     /<群聊：([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
                     // 简化英文冒号格式：<群聊:群名>内容（可能没有结束标签）
-                    /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
-                    // *** 修复：移除过于宽松的群聊匹配规则，避免私聊被误判为群聊 ***
-                    // 原规则: /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
-                    // 问题：会匹配包含"群聊"的任何标签，包括"阿伟和赤城的私聊"
+                    /<群聊:([^>]+)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    // 更宽松的格式：检测群聊内容
+                    /<(群聊[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
                 ];
                 
                 let groupMatches = [];
@@ -7544,24 +7543,13 @@
                 
                 // 根据聊天类型分别处理群聊和私聊消息 - 兼容单一类型和混合类型
                 if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
-                    // *** 修复：检查群聊名称是否为私聊格式，防止误判 ***
-                    const groupChatKey = extractedInfo.chatName;
-                    const isActuallyPrivateChat = /(.+?)和(.+?)的?(?:聊天|私聊)/.test(groupChatKey);
-                    
-                    if (isActuallyPrivateChat) {
-                        console.log(`⚠️ 检测到被误判为群聊的私聊: "${groupChatKey}"，重新分类为私聊`);
-                        // 重新分类为私聊
-                        extractedInfo.chatType = 'private';
-                        extractedInfo.privateMessages = extractedInfo.messages;
-                        extractedInfo.messages = []; // 清空群聊消息
-                    } else {
                 // 转换群聊消息
-                        standardData.群聊[groupChatKey] = {
-                            msgs: extractedInfo.messages,
-                            members: extractedInfo.members || []
-                        };
+                    const groupChatKey = extractedInfo.chatName;
+                    standardData.群聊[groupChatKey] = {
+                        msgs: extractedInfo.messages,
+                        members: extractedInfo.members || []
+                    };
                     console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
-                    }
                 }
                 
                 // 处理私聊消息（无论主类型是什么，都要检查私聊消息）
@@ -17803,8 +17791,9 @@ ${index + 1}. ${space.name}
                     });
                 }
                 
-                // *** 修复：移除重复时间消息，避免界面显示重复时间 ***
-                // 不再添加纯时间的系统消息，因为会导致界面显示重复时间
+                // 添加时间系统消息
+                const timeMsg = `系统消息--${currentTime}--${currentTime}`;
+                groupData.msgs.push(timeMsg);
                 
                 // *** 立即标记为已初始化，防止任何后续的重复添加 ***
                 QQ_GroupInitializedSet.add(groupName);
@@ -18627,11 +18616,6 @@ ${index + 1}. ${space.name}
                 }
             }
 
-            // *** 修复：添加防重复处理机制 ***
-            let QQ_ProcessingMessageHash = null;
-            let QQ_ProcessingStartTime = null;
-            const QQ_PROCESSING_TIMEOUT = 5000; // 5秒超时
-
             /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
@@ -18639,26 +18623,6 @@ ${index + 1}. ${space.name}
             async function QQ_Msg_Parse(content) {
                 //content = QQ_Msg_Repair(content);
                 console.log(`开始解析聊天消息:${content}`);
-                
-                // *** 修复：防重复处理机制 ***
-                const contentHash = btoa(unescape(encodeURIComponent(content))).slice(0, 20); // 生成内容哈希
-                const currentTime = Date.now();
-                
-                // 检查是否正在处理相同内容
-                if (QQ_ProcessingMessageHash === contentHash) {
-                    const timeElapsed = currentTime - QQ_ProcessingStartTime;
-                    if (timeElapsed < QQ_PROCESSING_TIMEOUT) {
-                        console.log(`⚠️ 检测到重复处理同一消息，跳过 (${timeElapsed}ms前开始处理)`);
-                        return;
-                    } else {
-                        console.log(`⚠️ 上次处理已超时(${timeElapsed}ms)，继续处理新请求`);
-                    }
-                }
-                
-                // 设置处理状态
-                QQ_ProcessingMessageHash = contentHash;
-                QQ_ProcessingStartTime = currentTime;
-                
                 let hasstr = false;
                 if (content.match(/\S/)) {
                     hasstr = true;
@@ -18669,9 +18633,6 @@ ${index + 1}. ${space.name}
                         QQ_Error(`解析聊天记录失败,请手动解决`);
                     }
                     // QQ_Error(`yaml解析失败`);
-                    // *** 修复：解析失败时也要清除处理状态 ***
-                    QQ_ProcessingMessageHash = null;
-                    QQ_ProcessingStartTime = null;
                     return;
                 }
                 console.log(`解析成功时的聊天消息:${JSON.stringify(json)}`);
@@ -18793,19 +18754,11 @@ ${index + 1}. ${space.name}
                         // 有新消息时更新消息列表
                         QQ_UpdateMessageList();
                     } catch (error) {
-                        // *** 修复：错误时也要清除处理状态 ***
-                        QQ_ProcessingMessageHash = null;
-                        QQ_ProcessingStartTime = null;
                         throw error;
                         assertIsError(error);
                         //QQ_Error(error.message);
                     }
                 }
-                
-                // *** 修复：处理完成时清除处理状态 ***
-                QQ_ProcessingMessageHash = null;
-                QQ_ProcessingStartTime = null;
-                console.log('✅ QQ_Msg_Parse处理完成，已清除防重复状态');
                 for (let name in json.群聊) {
                     try {
                         // *** 新增：清理群聊消息内容 ***
@@ -18958,36 +18911,11 @@ ${index + 1}. ${space.name}
                             if (!redirected) {
                                 console.log(`AI创建新群聊: ${name}，参考私聊逻辑进行处理`);
                                 
-                                // *** 修复：智能提取群聊成员 ***
-                                let extractedMembers = json.群聊[name]["members"] || [];
-                                
-                                // 如果没有明确的成员列表，从消息中智能提取
-                                if (extractedMembers.length === 0 && json.群聊[name]["msgs"] && json.群聊[name]["msgs"].length > 0) {
-                                    console.log('🔍 群聊成员列表为空，开始从消息中智能提取成员...');
-                                    const uniqueMembers = new Set();
-                                    
-                                    for (const msg of json.群聊[name]["msgs"]) {
-                                        const parts = msg.split("--");
-                                        if (parts.length >= 2) {
-                                            const senderName = parts[0].trim();
-                                            if (senderName && senderName !== '系统' && senderName !== 'System') {
-                                                uniqueMembers.add(senderName);
-                                            }
-                                        }
-                                    }
-                                    
-                                    extractedMembers = Array.from(uniqueMembers);
-                                    console.log(`✅ 从消息中提取到群聊成员: [${extractedMembers.join(', ')}]`);
-                                    
-                                    // 更新原始数据
-                                    json.群聊[name]["members"] = extractedMembers;
-                                }
-                                
                                 // 创建群聊数据结构
                                 const newGroupData = {
                                     id: `group_${Date.now()}`,
                                     name: name,
-                                    members: extractedMembers,
+                                    members: json.群聊[name]["members"] || [],
                                     avatar: {
                                         type: 'preset',
                                         gradient: {
@@ -19000,13 +18928,6 @@ ${index + 1}. ${space.name}
                                     lastTime: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5),
                                     timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)
                                 };
-                                
-                                // *** 修复：AI创建群聊时避免重复添加欢迎消息 ***
-                                // 先标记为已初始化，防止AddNewGroup重复添加系统消息
-                                if (!window.QQ_GroupInitializedSet) {
-                                    window.QQ_GroupInitializedSet = new Set();
-                                }
-                                QQ_GroupInitializedSet.add(newGroupData.name);
                                 
                                 // 调用AddNewGroup函数（类似AddNewChar）
                                 AddNewGroup(newGroupData.name, newGroupData.avatar, newGroupData.members, newGroupData.lastMessage);
