@@ -22500,7 +22500,39 @@ ${index + 1}. ${space.name}
                     console.warn('QQ_Groups不是数组，重新初始化');
                     QQ_Groups = [];
                 }
-            }
+            } 
+            let isAiReplying = false; // 用一个简单的状态变量来跟踪AI是否在回复
+
+            setInterval(async () => {
+                // 获取当前 SillyTavern 的核心状态：AI是否正在生成消息
+                // state.is_send 在 AI 回复时为 true，结束后为 false
+                const isStreaming = state.is_send;
+
+                // --- 状态判断 ---
+
+                if (isStreaming && !isAiReplying) {
+                    // 条件：AI 刚刚开始回复 (状态从 false -> true)
+                    // 我们在这里将状态标记为“正在回复”，并等待它结束
+                    isAiReplying = true;
+                    console.log('🤖 AI 开始回复...');
+
+                } else if (!isStreaming && isAiReplying) {
+                    // 条件：AI 刚刚结束回复 (状态从 true -> false)
+                    // 这是捕获完整消息并保存的最佳时机！
+                    console.log('✅ AI 回复结束，准备处理和保存消息...');
+                    isAiReplying = false; // 重置状态，为下一次回复做准备
+
+                    // 在这个最准确的时刻，获取AI刚刚完成的最终消息
+                    const finalMessage = ST.GetLastMessage().msg;
+                    
+                    // 调用我们的主保存/处理函数
+                    // 因为时机是准确的，所以 finalMessage 不会是空的
+                    await QQ_Save_Msg(finalMessage);
+                }
+            }, 500);
+            
+            // 启动保护机制
+            protectQQGroups();
             
             // 简化的QQ_Groups完整性检查（不重新加载群聊到界面）
             function ensureQQGroupsIntegrity() {
@@ -22531,28 +22563,6 @@ ${index + 1}. ${space.name}
                     console.log('QQ_Groups恢复后:', QQ_Groups);
                 }
             }
-
-            // 【全新、更可靠的消息触发器】
-            let isAiReplying = false; // 用一个简单的状态变量来跟踪AI是否在回复
-
-            setInterval(async () => {
-                const isStreaming = state.is_send;
-
-                if (isStreaming && !isAiReplying) {
-                    isAiReplying = true;
-                    console.log('🤖 AI 开始回复...');
-                } else if (!isStreaming && isAiReplying) {
-                    console.log('✅ AI 回复结束，准备处理和保存消息...');
-                    isAiReplying = false; 
-
-                    const finalMessage = ST.GetLastMessage().msg;
-                    await QQ_Save_Msg(finalMessage);
-                }
-            }, 500);
-            
-            // 【需要执行的初始化调用】
-            // 启动保护机制
-            protectQQGroups();
             
             // 点击群聊时的完整性检查
             function ensureQQGroupsIntegrityOnClick(groupName) {
