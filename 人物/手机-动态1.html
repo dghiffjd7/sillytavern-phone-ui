@@ -16718,7 +16718,7 @@ ${index + 1}. ${space.name}
             /**
              * *** 新增：从worldbook加载聊天消息备份 ***
              */
-            async function QQ_Load_Chat_Backup() {
+             async function QQ_Load_Chat_Backup() {
                 if (!worldbook || !entries) {
                     console.log('聊天备份加载跳过：缺少worldbook或entries');
                     return false;
@@ -16732,32 +16732,20 @@ ${index + 1}. ${space.name}
                         const backupData = JSON.parse(chatBackupEntry.content);
                         
                         if (backupData.data && (backupData.data.私聊 || backupData.data.群聊)) {
-                            // 检查是否应该使用备份数据
-                            const backupTime = new Date(backupData.lastUpdated);
-                            const timeDiff = Date.now() - backupTime.getTime();
-                            
-                            console.log('找到聊天备份数据，备份时间:', backupData.lastUpdated);
+                            console.log('✅ 找到有效的聊天备份数据，准备恢复...');
+                            console.log('备份时间:', backupData.lastUpdated);
                             console.log('备份数据包含:', Object.keys(backupData.data.私聊 || {}).length, '个私聊,', Object.keys(backupData.data.群聊 || {}).length, '个群聊');
                             
-                            // 如果当前QQ_msgjson为空或数据很少，使用备份恢复
-                            const currentPrivateChats = Object.keys(QQ_msgjson?.私聊 || {}).length;
-                            const currentGroupChats = Object.keys(QQ_msgjson?.群聊 || {}).length;
-                            const backupPrivateChats = Object.keys(backupData.data.私聊 || {}).length;
-                            const backupGroupChats = Object.keys(backupData.data.群聊 || {}).length;
+                            // *** 核心修复：只要有有效备份就直接加载，不再进行复杂的比较 ***
+                            QQ_msgjson = JSON.parse(JSON.stringify(backupData.data)); // 深拷贝
+                            QQ_ChatBackup = backupData;
+                            window.QQ_ChatBackup = QQ_ChatBackup; // 更新全局引用
                             
-                            // 如果备份数据比当前数据更丰富，或者时间差不超过1小时，则恢复备份
-                            if ((backupPrivateChats > currentPrivateChats || backupGroupChats > currentGroupChats) && timeDiff < 3600000) {
-                                console.log('恢复聊天备份数据...');
-                                QQ_msgjson = JSON.parse(JSON.stringify(backupData.data)); // 深拷贝
-                                QQ_ChatBackup = backupData;
-                                window.QQ_ChatBackup = QQ_ChatBackup; // 更新全局引用
-                                
-                                console.log('成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
-                                return true;
-                            } else {
-                                console.log('当前聊天数据较新或更完整，不使用备份');
-                                return false;
-                            }
+                            console.log('✅ 成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                            return true;
+                        } else {
+                            console.log('聊天备份数据格式无效，跳过加载');
+                            return false;
                         }
                     } else {
                         console.log('未找到聊天备份数据');

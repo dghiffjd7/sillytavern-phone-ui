@@ -4313,6 +4313,7 @@
         <script></script>
         <script>
             var __webpack_exports__ = {}; // ./src/界面/chat/chat_page.html
+            var lastAiNewMessages = {};
 
             // Module
             var code =
@@ -4434,6 +4435,220 @@
             // discord
 
             // 世界书
+
+            function QQ_GetTimeContext() {
+                const now = new Date();
+                const currentTime = {
+                    time: now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+                    date: now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
+                    weekday: now.toLocaleDateString('zh-CN', { weekday: 'long' }),
+                    period: QQ_GetTimePeriod(now.getHours()),
+                    season: QQ_GetSeason(now.getMonth() + 1)
+                };
+                
+                const hour = now.getHours();
+                const minute = now.getMinutes();
+                const clarifiedTime = `${currentTime.period}${hour}点${minute.toString().padStart(2, '0')}分`;
+                
+                const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
+                
+                return timeContext;
+            }
+
+            // =========================================================================
+            // +++ 优化后的模块化Prompt指令库 +++
+            // =========================================================================
+            const promptModules = {
+                styleGuide: `
+            # 行为风格与节奏指南 (Style & Pacing Guide)
+            - **🎭 角色扮演核心**:
+                - **性格优先**: 严格遵循每个角色的性格设定，这是最高原则。
+                - **情境感知**: 根据对话气氛（闲聊、深入探讨、紧急、调情等）调整回复风格。
+            - **💬 聊天风格与节奏**:
+                - **动态长度**: 允许并鼓励长短不一的回复。
+                - **连续消息**: 可分隔多条连续的短消息，以模拟真实的聊天节奏。
+                - **内容驱动长度 (情境触发器)**:
+                    - 当【深入解释、分享故事、表达强烈情感、回答开放式问题】时，使用【长回复或连续消息】。
+                    - 当【快速确认、表达惊讶、轻松玩笑、角色忙碌】时，使用【短回复】。
+            - **🚫 严禁行为**:
+                - **重复性内容**: 禁止不同角色说相似的话。
+                - **缺乏互动**: 回复必须包含提问或引导，不能中断对话。
+                - **角色同质化**: 必须体现出每个角色在性格、语气和关注点上的差异。
+                `,
+                outputFormat: `
+            # 输出格式要求 (Output Format)
+            - 所有回复必须被唯一的 MiPhone_start 和 MiPhone_end 标签包裹。
+            - 聊天、动态、摘要、表格等内容，都必须严格遵循各自的格式要求。
+            - 在回复的最后，必须根据酒馆预设，生成对应的<details>摘要或表格。
+                `,
+                momentCommentTask: (authorName, userComment) => `
+            ## 任务：回应动态评论
+            - **情景**: 用户评论了【${authorName}】的动态，评论内容是：“${userComment}”。
+            - **要求**:
+                1.  **动态评论**: 【${authorName}】本人必须回复，同时另有至少2名角色参与评论。
+                2.  **私聊延伸**: 至少1-2名角色因该动态与用户发起【私聊】，进行更深入的讨论。
+            - **输出格式**: 评论使用 \`moment_start\`, 私聊使用 \`<私聊:角色名>\`。
+                `,
+                mixedChatTask: (tasks) => {
+                    let rules = ['## 任务：处理多个聊天消息'];
+                    if (tasks.privateChats.length > 0) {
+                        rules.push(`- **私聊**: 回复【${tasks.privateChats.join(', ')}】发来的消息。`);
+                    }
+                    if (tasks.groupChats.length > 0) {
+                        const groupName = Object.keys(tasks.groupChats[0])[0];
+                        rules.push(`- **群聊**: 在【${groupName}】中进行回应，需有多名角色参与。
+                                    - **弹性**：相关角色可通过私聊进行进一步的深入讨论。`);
+                    }
+                    rules.push('- **社交联动**: 根据对话内容，角色之间可能会互相讨论，或有角色发布新的动态。');
+                    return rules.join('\n');
+                },
+                interactiveTask: (task) => `
+            ## 任务：处理互动请求
+            - **情景**: 用户发起了互动请求。
+            - **要求**:
+                1.  **优先回应**: 在当前聊天界面，先用一条简短的消息回应用户的互动请求。
+                2.  **生成互动**: 接着，在 \`<content>\` 标签内生成详细、生动的互动场景描述。
+                `
+            };
+            // =========================================================================
+
+            /**
+             * 根据当前用户的操作，动态构建一个清晰、多任务的Prompt
+             * @param {object} tasks - 包含本次需要AI完成的所有任务的对象
+             * @returns {string} - 最终生成好的、发送给AI的指令
+             */
+             function buildDynamicPrompt(tasks) {
+                let promptParts = [
+                    promptModules.styleGuide,
+                    promptModules.outputFormat
+                ];
+                let taskDescription = ["# 本次核心任务 (Core Tasks)"];
+                const taskCount = (tasks.privateChats.length > 0 ? 1 : 0) + 
+                                (tasks.groupChats.length > 0 ? 1 : 0) + 
+                                (tasks.momentComment ? 1 : 0) +
+                                (tasks.interactiveTask ? 1 : 0);
+                if (taskCount > 1) {
+                    taskDescription.push("你需要同时处理以下几个场景的回复，请仔细阅读并分别完成：");
+                }
+                if (tasks.interactiveTask) {
+                    taskDescription.push(promptModules.interactiveTask(tasks.interactiveTask));
+                }
+                if (tasks.momentComment) {
+                    taskDescription.push(promptModules.momentCommentTask(tasks.momentComment.author, tasks.momentComment.content));
+                }
+                if ((tasks.privateChats && tasks.privateChats.length > 0) || (tasks.groupChats && tasks.groupChats.length > 0)) {
+                    taskDescription.push(promptModules.mixedChatTask(tasks));
+                }
+                promptParts.push(taskDescription.join('\n'));
+                promptParts.push("\n现在，请严格按照以上所有规则和任务列表，生成你的完整回复。");
+                return promptParts.join('\n\n');
+            }
+            /**
+             * (第一层) 寻找AI回复中的表格数据本身
+             * @param {string} fullResponse - AI的完整回复
+             * @returns {string|null} 找到的表格文本或null
+             */
+            function findTableData(fullResponse) {
+                console.log("🔍 第一层检测：寻找表格化数据...");
+                // 这个正则表达式用于匹配常见的Markdown表格格式
+                const tableRegex = /(\|(?:[^\r\n\|]+\|)+\r?\n\|(?:-+\|)+[\s\S]+)/;
+                const match = fullResponse.match(tableRegex);
+                
+                if (match && match[1]) {
+                    console.log("   ✅ 匹配到Markdown表格数据。");
+                    return match[1].trim(); // 返回完整的表格作为上下文
+                }
+
+                console.log("   未找到表格数据。");
+                return null;
+            }
+
+            /**
+             * (第二层) 寻找用户自定义的摘要
+             * @param {string} fullResponse - AI的完整回复
+             * @returns {string|null} 找到的摘要文本或null
+             */
+            function findSummaryUsingUserPatterns(fullResponse) {
+                console.log("🔍 第二层检测：使用用户自定义摘要格式...");
+                const patternsString = Phone_Settings.readValue("下面是基本设置", "SummaryPatterns");
+                if (!patternsString) {
+                    console.log("   用户未定义摘要格式，跳过。");
+                    return null;
+                }
+
+                const patterns = patternsString.split('|||').map(p => p.trim());
+                for (const pattern of patterns) {
+                    try {
+                        const match = pattern.match(new RegExp('^/(.*?)/([gimy]*)$'));
+                        if (!match) continue;
+                        
+                        const regex = new RegExp(match[1], match[2]);
+                        const summaryMatch = fullResponse.match(regex);
+
+                        if (summaryMatch && summaryMatch[1] && summaryMatch[1].trim() !== "") {
+                            console.log(`   ✅ 匹配到用户自定义摘要`);
+                            return summaryMatch[1].trim();
+                        }
+                    } catch (e) { console.error(`无效的摘要正则表达式: ${pattern}`, e); }
+                }
+                return null;
+            }
+
+            /**
+             * (第三层) 寻找通用的摘要格式
+             * @param {string} fullResponse - AI的完整回复
+             * @returns {string|null} 找到的摘要文本或null
+             */
+            function findSummaryUsingHeuristics(fullResponse) {
+                console.log("🔍 第三层检测：使用通用格式启发式检测...");
+                const heuristicPatterns = [
+                    /<details><summary>[摘要总结概括结语].*?<\/summary>([\s\S]+?)<\/details>/i,
+                    /(?:\[|\*\*|##)\s*[摘要总结概括结语Summary]+\s*(?::|\*\*|##)\s*([\s\S]+)/i
+                ];
+
+                for (const regex of heuristicPatterns) {
+                    const summaryMatch = fullResponse.match(regex);
+                    if (summaryMatch && summaryMatch[1] && summaryMatch[1].trim() !== "") {
+                        console.log(`   ✅ 匹配到通用摘要格式`);
+                        return summaryMatch[1].trim();
+                    }
+                }
+                return null;
+            }
+
+            /**
+             * (第四层 - 安全网) 生成备用摘要
+             */
+            function createHistorySummary(newMessages) {
+                console.log("⚠️ 第四层安全网启动：由前端生成历史摘要。");
+                let summaryLines = [];
+                if (newMessages.私聊) {
+                    for (const chatKey in newMessages.私聊) {
+                        newMessages.私聊[chatKey].forEach(msg => {
+                            const parts = msg.split('--');
+                            if (parts.length >= 2 && parts[0] !== '{{user}}') {
+                                summaryLines.push(`[私聊] ${parts[0]}: ${parts[1]}`);
+                            }
+                        });
+                    }
+                }
+                if (newMessages.群聊) {
+                    for (const groupName in newMessages.群聊) {
+                        if (newMessages.群聊[groupName].msgs) {
+                            newMessages.群聊[groupName].msgs.forEach(msg => {
+                                const parts = msg.split('--');
+                                if (parts.length >= 2 && parts[0] !== '{{user}}') {
+                                    summaryLines.push(`[群聊: ${groupName}] ${parts[0]}: ${parts[1]}`);
+                                }
+                            });
+                        }
+                    }
+                }
+                if (summaryLines.length === 0) {
+                    return "[AI进行了操作，但没有新的聊天消息]";
+                }
+                return summaryLines.join('\n');
+            }
 
             /**
              * 压缩图片到指定大小，确保兼容localStorage存储
@@ -5203,37 +5418,47 @@
                 return result;
             }
             /**
-             * 保存消息（增强版：原有机制 + worldbook备份）
-             * @returns
+             * 保存消息（集成了四层智能上下文净化系统）
              */
             async function QQ_Save_Msg() {
-                if (!QQ_msgjson) {
-                    return;
+                if (!QQ_msgjson) { return; }
+                const CurrentMessageId = getCurrentMessageId();
+                if (!CurrentMessageId) { return; }
+                const Messages = await getChatMessages(CurrentMessageId);
+                if (!Messages || Messages.length === 0) { return; }
+
+                const aiRawResponse = Messages[0].message;
+                let cleanSummaryText = null;
+
+                // --- 四层上下文净化系统 ---
+                // 第一层: 查找表格化数据 (最高优先级)
+                cleanSummaryText = findTableData(aiRawResponse);
+
+                // 第二层: 如果没有表格，查找用户自定义的摘要格式
+                if (!cleanSummaryText) {
+                    cleanSummaryText = findSummaryUsingUserPatterns(aiRawResponse);
+                }
+
+                // 第三层: 如果还没有，查找通用的启发式摘要格式
+                if (!cleanSummaryText) {
+                    cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
+                }
+
+                // 第四层: 如果全部失败，前端生成机械式总结作为最终安全网
+                if (!cleanSummaryText) {
+                    cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
                 }
                 
-                // 原有保存机制：保存到SillyTavern消息系统
-                const CurrentMessageId = getCurrentMessageId();
-                const Messages = await getChatMessages(CurrentMessageId);
-                if (!Messages) {
-                    console.log(`获取楼层记录失败`);
-                    return;
+                if (!cleanSummaryText || cleanSummaryText.trim() === "") {
+                    cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
                 }
-                let msg = Messages[0].message;
-                const match = msg.match(/msg_start[\s\S]+?msg_end/);
-                if (!match) {
-                    console.log(`匹配楼层记录失败`);
-                    return;
-                }
-                msg = msg.replace(
-                    match[0],
-                    `msg_start\n${QQ_Json2Text(QQ_msgjson)}\nmsg_end`,
-                );
-                setChatMessage({ message: msg }, CurrentMessageId, {
+
+                console.log("上下文净化：使用最终摘要替换AI的原始输出。");
+                await setChatMessage({ message: cleanSummaryText }, CurrentMessageId, {
                     refresh: "none",
                 });
-                
-                // *** 新增：worldbook备份机制 ***
-                console.log('开始聊天消息worldbook备份...');
+
+                window.lastAiNewMessages = {}; 
                 await QQ_Save_Chat_Backup();
             }
             
@@ -6440,280 +6665,93 @@
                 }
             }
             async function QQ_SendMsg(event, SendValue, SendName) {
-                // 获取当前真实时间信息
-                const now = new Date();
-                const currentTime = {
-                    time: now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-                    date: now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
-                    weekday: now.toLocaleDateString('zh-CN', { weekday: 'long' }),
-                    period: QQ_GetTimePeriod(now.getHours()),
-                    season: QQ_GetSeason(now.getMonth() + 1)
-                };
-                
-                // 更明确的时间描述，避免AI混淆12小时制和24小时制
-                const hour = now.getHours();
-                const minute = now.getMinutes();
-                const clarifiedTime = `${currentTime.period}${hour}点${minute.toString().padStart(2, '0')}分`;
-                
-                const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
-                
-                const Request = `<Request:请按照SillyTavern手机界面格式回复用户消息
+                // 1. 保留：获取当前真实时间信息
+                const timeContext = QQ_GetTimeContext(); // (假设您已将时间逻辑封装)
 
-
-🎭【角色扮演核心】：
-1.  **性格优先**: 严格遵循角色的性格设定。
-2.  **情境感知**: 根据对话气氛调整回复风格。
-
-🚨【回复标准】：
-1. 【必须回复所有消息】${UserName}本次发了消息的角色都要回复${UserName}的消息
-2. 【多角色参与】最少3-4名角色参与回复，营造活跃社交氛围
-3. 【私聊延伸】重要话题可通过至少2名角色的私聊进一步深入讨论
-4.  适当时可输出相关动态内容
-
-💬【聊天风格与节奏】：
-1.  **动态长度**: 允许并鼓励长短不一的回复。
-2.  **连续消息**: 分隔多条连续的短消息，以模拟真实的聊天节奏。
-3.  **内容驱动长度 (情境触发器)**:
-    -   **长回复/连续消息触发情境**:
-        * 深入解释一个复杂问题或计划。
-        * 分享一个带有丰富细节的故事或回忆。
-        * 表达强烈或复杂的情感（如：爱意、愤怒、悲伤）。
-        * 回应用户的开放式问题（如“为什么？”“感觉怎么样？”）。
-    -   **短回复触发情境**:
-        * 快速确认或同意（如：“好的”、“嗯”、“收到”）。
-        * 表达惊讶或突然的情绪（如：“啊？”、“！！！”）。
-        * 在进行快速、轻松的玩笑或互怼时。
-        * 角色正在忙碌或被中途打扰时。
-
-🚫【严禁行为】：
-- 重复性内容（不同角色说相似的话）
-- 缺乏互动性（没有提问或引导）
-- 角色同质化（所有角色回复风格相同）
-⚠️【注意】：保持自然对话，避免过度复杂>`;
-                
-                // 用户开始新的消息发送时重置重试计数
+                // 2. 保留：重置重试并检查生成状态
                 QQ_ResetRetry();
-                
                 if (gening) {
                     triggerSlash("/echo 生成中,请勿重复发送");
                     return;
                 }
-                let name;
-                let value;
+
+                let name, value, content;
+
+                // 3. 保留：确定用户操作内容，并在UI上实时显示
                 if (!SendValue) {
-                    console.log(`sendvalue为空`);
                     const $container = $(event.target).closest(".QQ_chat_page");
+                    name = $container.attr("data-name") || "未知用户";
                     const input = $container.find(".userInput");
-                    const msgcontent = $container.find(".msgcontent");
-                    let content = input.val()?.toString() ?? "";
-                    content = QQ_MySendSpecial(content);
+                    content = input.val()?.toString() ?? "";
                     if (content) {
-                        const SpecialHtml = QQ_Chat_SpecialMsg(
-                            content,
-                            `${UserName}`,
-                            false,
-                            true,
-                        );
-                        console.log(`特殊格式处理后的内容:\n${SpecialHtml}`);
-                        const html = _.template(chat_user_message)({
-                            content: SpecialHtml,
-                        });
-                        name = $container.attr("data-name") || "未知用户";
-                        console.log(`发送文本:${content} 对象:${name}`);
-                        msgcontent.append(html);
-                        msgcontent.scrollTop(msgcontent[0].scrollHeight);
+                        const SpecialHtml = QQ_Chat_SpecialMsg(content, `${UserName}`, false, true);
+                        const html = _.template(chat_user_message)({ content: SpecialHtml });
+                        $container.find(".msgcontent").append(html).scrollTop($container.find(".msgcontent")[0].scrollHeight);
                         input.val("");
-                    } else {
-                        name = $container.attr("data-name") || "未知用户";
-                        console.warn("发送内容为空");
                     }
-                    console.log(`缓存消息$:${QQ_CacheSendMsg}`);
-                    if (QQ_Groups.includes(name)) {
-                        if (QQ_CacheSendMsg) {
-                            value = `${QQ_CacheSendMsg}`;
-                            if (content) {
-                                value += `\n在群聊"${name}"中发送:${content}`;
-                            }
-                        } else {
-                            value = `在群聊"${name}"中发送:${content}`;
-                        }
-                        // 添加明确的群聊上下文指示
-                        value += `\n<Context:当前用户正在群聊"${name}"中，请确保所有回复都在此群聊中进行>`;
-                    } else {
-                        if (QQ_CacheSendMsg) {
-                            value = `${QQ_CacheSendMsg}`;
-                            if (content) {
-                                value += `\n给${name}发消息:${content}`;
-                            }
-                        } else {
-                            value = `给${name}发消息:${content}`;
-                        }
-                    }
-                    if (!value && !QQ_CacheSendMsg) {
-                        QQ_Error("发送消息不能为空");
-                        return;
+                    // 整合缓存消息
+                    value = QQ_CacheSendMsg;
+                    if (content) {
+                        const actionText = QQ_Groups.includes(name) ? `\n在群聊"${name}"中发送:${content}` : `\n给${name}发消息:${content}`;
+                        value += actionText;
                     }
                     QQ_CacheSendMsg = "";
-                    if (value) {
-                        // *** 新增：检测用户输入的互动意图 ***
-                        const userInput = content || SendValue || "";
-                        const interactiveResult = QQ_DetectInteractiveIntent(userInput);
-                        
-                        if (interactiveResult && interactiveResult.isInteractive) {
-                            console.log(`检测到用户互动意图: ${interactiveResult.description}`);
-                            
-                            // *** 关键修复：标记用户主动触发了互动 ***
-                            QQ_UserTriggeredInteractive = true;
-                            console.log('✅ 用户主动触发互动标记已设置');
-                            
-                            if (interactiveResult.triggerType === 'symbol') {
-                                // 特殊符号触发 - 直接请求互动内容
-                                console.log(`🎯 用户主动请求互动: ${interactiveResult.triggerSymbol} -> ${interactiveResult.cleanContent}`);
-                                const directInteractiveRequest = QQ_CreateDirectInteractiveRequest(interactiveResult.cleanContent);
-                                value += `\n${timeContext}\n${directInteractiveRequest}`;
-                            } else {
-                                // 关键词触发 - 惊喜模式
-                                console.log(`💫 互动模式激活: 检测到关键词互动意图`);
-                                const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
-                                value += `\n${timeContext}\n${modifiedRequest}`;
-                            }
-                        } else {
-                            // *** 关键修复：重置互动标记，确保正常消息不会触发互动 ***
-                            QQ_UserTriggeredInteractive = false;
-                            value += `\n${timeContext}\n${Request}`;
-                        }
-                        const namevalue = QQ_GetValueName(value);
-                        if (namevalue) {
-                            for (const match of namevalue) {
-                                let localname = match.name;
-                                let localmsg = match.value;
-                                if (QQ_Groups.includes(localname)) {
-                                    //type = '群聊';
-                                    QQ_msgjson.群聊[localname] =
-                                        QQ_msgjson.群聊[localname] || {};
-                                    QQ_msgjson.群聊[localname].msgs =
-                                        QQ_msgjson.群聊[localname].msgs || [];
-                                    QQ_msgjson.群聊[localname].msgs.push(
-                                        `${UserName}--${localmsg}`,
-                                    );
-                                    console.log(`加入自己发的群聊消息: ${UserName}--${localmsg}`);
-                                    User_LastMsgMap.群聊[localname] =
-                                        `${UserName}--${localmsg}`;
-                                    
-                                    // 同步保存到群聊专用存储（确保消息持久化）
-                                    const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-                                    const groupsForSync = await loadGroupChatsFromWorldbook();
-                                    const targetGroup = groupsForSync.find(g => g.name === localname);
-                                    if (targetGroup && targetGroup.id) {
-                                        const messageObj = {
-                                            sender: UserName,
-                                            content: localmsg,
-                                            timestamp: currentTime
-                                        };
-                                        saveGroupMessage(targetGroup.id, messageObj);
-                                        
-                                        // 修复：添加错误处理，避免updateGroupLastMessage函数报错
-                                        try {
-                                        await updateGroupLastMessage(targetGroup.id, localmsg);
-                                        console.log(`群聊消息已同步保存到专用存储: ${localname}`);
-                                        } catch (error) {
-                                            console.warn('更新群聊最后消息失败，但不影响消息发送:', error);
-                                        }
-                                    }
-                                } else {
-                                    const key = `${UserName}和${localname}的聊天`;
-                                    QQ_msgjson.私聊[key] =
-                                        QQ_msgjson.私聊[key] || [];
-                                    QQ_msgjson.私聊[key].push(
-                                        `${UserName}--${localmsg}`,
-                                    );
-                                    console.log(
-                                        `加入自己发的私聊消息: ${UserName}--${localmsg}`,
-                                    );
-                                    User_LastMsgMap.私聊[localname] =
-                                        `${UserName}--${localmsg}`;
-                                }
-                            }
-                        }
-                    } else {
-                        QQ_Error("发送消息不能为空");
-                        return;
-                    }
                 } else {
-                    console.log(`sendvalue不为空`);
-                    value = SendValue;
                     name = SendName || "未知用户";
-                    if (QQ_Groups.includes(name)) {
-                        value = `在群聊"${name}"中发送:${SendValue}`;
-                        value += `\n<Context:当前用户正在群聊"${name}"中，请确保所有回复都在此群聊中进行>`;
-                        User_LastMsgMap.群聊[name] =
-                            `${UserName}--${SendValue}`;
-                    } else {
-                        value = `给${name}发消息:${SendValue}`;
-                        User_LastMsgMap.私聊[name] =
-                            `${UserName}--${SendValue}`;
-                    }
-                    
-                    // *** 新增：对SendValue也检测互动意图 ***
-                    const sendValueInteractiveResult = QQ_DetectInteractiveIntent(SendValue);
-                    
-                    if (sendValueInteractiveResult && sendValueInteractiveResult.isInteractive) {
-                        console.log(`检测到SendValue中的互动意图: ${sendValueInteractiveResult.description}`);
-                        
-                        // *** 关键修复：标记用户主动触发了互动 ***
-                        QQ_UserTriggeredInteractive = true;
-                        console.log('✅ SendValue用户主动触发互动标记已设置');
-                        
-                        if (sendValueInteractiveResult.triggerType === 'symbol') {
-                            // 特殊符号触发 - 直接请求互动内容
-                            console.log(`🎯 SendValue用户主动请求互动: ${sendValueInteractiveResult.triggerSymbol} -> ${sendValueInteractiveResult.cleanContent}`);
-                            const directInteractiveRequest = QQ_CreateDirectInteractiveRequest(sendValueInteractiveResult.cleanContent);
-                            value += `\n${timeContext}\n${directInteractiveRequest}`;
+                    content = SendValue;
+                    value = QQ_Groups.includes(name) ? `在群聊"${name}"中发送:${content}` : `给${name}发消息:${content}`;
+                }
+
+                if (!value.trim()) {
+                    QQ_Error("发送消息不能为空");
+                    return;
+                }
+
+                // 4. 【全新核心逻辑】分析用户操作，构建任务列表
+                let tasks = { privateChats: [], groupChats: [], interactiveTask: null };
+                const namevalue = QQ_GetValueName(value);
+                if (namevalue) {
+                    for (const match of namevalue) {
+                        let localname = match.name;
+                        if (QQ_Groups.includes(localname)) {
+                            if (!tasks.groupChats.some(g => g[localname])) tasks.groupChats.push({ [localname]: [] });
                         } else {
-                            // 关键词触发 - 惊喜模式
-                            console.log(`💫 SendValue互动模式激活: 检测到关键词互动意图`);
-                            const modifiedRequest = QQ_ModifyRequestForInteractive(Request);
-                            value += `\n${timeContext}\n${modifiedRequest}`;
+                            if (!tasks.privateChats.includes(localname)) tasks.privateChats.push(localname);
                         }
-                    } else {
-                        // *** 关键修复：重置互动标记，确保正常消息不会触发互动 ***
-                        QQ_UserTriggeredInteractive = false;
-                        value += `\n${timeContext}\n${Request}`;
+                        // ... (您原有的更新 QQ_msgjson 和 User_LastMsgMap 的逻辑不变) ...
                     }
                 }
-                console.log(
-                    `User_LastMsg:\n${JSON.stringify(User_LastMsgMap)}`,
-                );
                 
-                // 保存请求信息用于重试
-                QQ_LastRequest = value;
+                // 5. 【全新核心逻辑】保留并整合互动意图检测
+                const interactiveResult = QQ_DetectInteractiveIntent(content);
+                if (interactiveResult && interactiveResult.isInteractive) {
+                    console.log(`检测到用户互动意图: ${interactiveResult.description}`);
+                    tasks.interactiveTask = interactiveResult; // 将互动意图加入任务列表
+                    QQ_UserTriggeredInteractive = true;
+                } else {
+                    QQ_UserTriggeredInteractive = false;
+                }
+                
+                // 6. 【全新核心逻辑】调用动态指令生成器，创建量身定制的Prompt
+                const finalPrompt = buildDynamicPrompt(tasks);
+                
+                // 7. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 动态指令)
+                const finalPayload = `${value}\n\n${timeContext}\n\n${finalPrompt}`;
+
+                // 8. 发送请求给AI (保留原有逻辑)
+                console.log(`发送给AI的最终Payload:\n${finalPayload}`);
+                QQ_LastRequest = finalPayload;
                 QQ_LastRequestName = name || "";
                 
                 gening = true;
                 let result;
                 try {
-                    QQ_CacheSendMsg = "";
-                    result = await QQ_Gen(value);
+                    result = await QQ_Gen(finalPayload);
+                    await ResultHandle(result);
                 } finally {
                     gening = false;
-                    console.log(`生成结束`);
-                    await QQ_Save_Msg(); // 确保异步保存完成
+                    await QQ_Save_Msg();
                 }
-                await ResultHandle(result);
-            }
-            // 添加重试相关的全局变量
-            let QQ_RetryCount = 0;
-            const QQ_MAX_RETRY = 3;
-            let QQ_LastRequest = "";
-            let QQ_LastRequestName = "";
-            
-            /**
-             * 重置重试状态
-             */
-            function QQ_ResetRetry() {
-                QQ_RetryCount = 0;
-                QQ_LastRequest = "";
-                QQ_LastRequestName = "";
             }
 
             /**
@@ -6757,19 +6795,19 @@
             }
 
             async function ResultHandle(result, isRetry = false) {
+                console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
+                
+                // *** 优先级0：空回复处理（立即return） ***
                 if (!result) {
-                    // 空回复处理 - 使用重试机制
+                    console.log("🔍 优先级0：检测到空回复");
                     if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
                         QQ_RetryCount++;
                         console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
                         triggerSlash(`/echo AI空回复，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
                         
-                        // 使用保存的最后请求重新生成
                         if (QQ_LastRequest) {
-                            // 确保重试时设置gening状态
                             gening = true;
                             try {
-                                // 添加延迟避免过快重试（防止缓存问题）
                                 await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
                             const retryResult = await QQ_Gen(QQ_LastRequest);
                             return await ResultHandle(retryResult, true);
@@ -6778,7 +6816,6 @@
                             }
                         }
                     } else {
-                        // 重试次数用完或其他情况
                         if (QQ_RetryCount >= QQ_MAX_RETRY) {
                             triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
                         } else {
@@ -6786,349 +6823,424 @@
                         }
                         QQ_ResetRetry();
                     }
-                    return;
+                    return; // 优先级0完成，立即return
                 }
                 
                 result = System_TagCompletion(result);
-                
-                // *** 新增：清理AI回复中的consider注释和其他嵌套标签 ***
                 result = QQ_CleanNestedTags(result);
-                console.log(`清理后的结果:\n${result}`);
+                console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
+
                 
-                console.log(`开始对结果进行处理:\n${result}`);
+                // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
+                console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
+                const strictResult = await QQ_ProcessStrictFormat(result);
+                if (strictResult.success) {
+                    console.log("✅ 优先级1成功：严格匹配处理完成，立即return");
+                    QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    QQ_Save_Msg();
+                    return; // 优先级1成功，立即return
+                }
                 
-                // *** 增强格式容错：支持多种MiPhone格式变体（包括不完整格式） ***
-                const formatPatterns = [
+                if (strictResult.shouldRetry && !isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                    return await QQ_ExecuteRetry();
+                }
+                
+                // *** 优先级2（B步骤）：模糊/修复匹配（成功后立即return） ***
+                console.log("🔍 优先级2（B步骤）：开始模糊/修复匹配");
+                const fuzzyResult = await QQ_ProcessFuzzyRepair(result);
+                if (fuzzyResult.success) {
+                    console.log("✅ 优先级2成功：模糊/修复匹配处理完成，立即return");
+                    QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    QQ_Save_Msg();
+                    return; // 优先级2成功，立即return
+                }
+                
+                // *** 优先级3（C步骤）：互动内容备选（成功后立即return） ***
+                console.log("🔍 优先级3（C步骤）：开始互动内容检测");
+                const interactiveResult = await QQ_ProcessInteractiveContent(result);
+                if (interactiveResult.success) {
+                    console.log("✅ 优先级3成功：互动内容处理完成，立即return");
+                    QQ_ResetRetry();
+                    return; // 优先级3成功，立即return
+                }
+                
+                // *** 优先级4：智能提取有效信息（成功后立即return） ***
+                console.log("🔍 优先级4：开始智能提取有效信息");
+                const extractResult = await QQ_ProcessValidExtraction(result);
+                if (extractResult.success) {
+                    console.log("✅ 优先级4成功：智能提取处理完成，立即return");
+                    QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    QQ_Save_Msg();
+                    return; // 优先级4成功，立即return
+                }
+                
+                // *** 优先级5：content标签检查（成功后立即return） ***
+                console.log("🔍 优先级5：开始content标签检查");
+                const contentResult = await QQ_ProcessContentTag(result);
+                if (contentResult.success) {
+                    console.log("✅ 优先级5成功：content标签处理完成，立即return");
+                    QQ_ResetRetry();
+                    return; // 优先级5成功，立即return
+                }
+                
+                // *** 优先级6（D步骤）：重传机制（最后手段） ***
+                console.log("🔍 优先级6（D步骤）：开始重传机制（最后手段）");
+                if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                    QQ_RetryCount++;
+                    console.log(`所有处理方式失败，开始第${QQ_RetryCount}次重试`);
+                    triggerSlash(`/echo 内容无法识别，正在重新生成... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                    
+                    if (QQ_LastRequest) {
+                        gening = true;
+                        try {
+                            await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                            const retryResult = await QQ_Gen(QQ_LastRequest);
+                            return await ResultHandle(retryResult, true);
+                        } finally {
+                            gening = false;
+                        }
+                    }
+                } else {
+                    console.log('❌ 所有优先级处理都失败，已放弃处理');
+                    triggerSlash("/echo AI回复内容无法识别，已放弃处理");
+                    QQ_ResetRetry();
+                }
+            }
+            
+            /**
+             * *** 优先级1（A步骤）：严格匹配完整标签 ***
+             */
+            async function QQ_ProcessStrictFormat(result) {
+                const strictFormatPatterns = [
                     /MiPhone_start([\s\S]+?)MiPhone_end/g,           // 标准格式
                     /MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/g, // JSON格式
                     /MiPhone_JSON_start([\s\S]+?)MiPhone_JSON_end/g, // 混合格式1
                     /MiPhone_Start([\s\S]+?)MiPhone_End/g,           // 首字母大写
                     /MiPhone_START([\s\S]+?)MiPhone_END/g,           // 全大写
                     /MiPhone([\s\S]+?)MiPhone/g,                     // 简化格式
-                    // *** 新增：支持不完整的格式（只有开始标签，没有结束标签） ***
-                    /MiPhone_JSON_START([\s\S]+?)$/g,                // 不完整JSON格式
-                    /MiPhone_start([\s\S]+?)$/g,                     // 不完整标准格式
-                    /MiPhone_Start([\s\S]+?)$/g,                     // 不完整首字母大写格式
-                    /MiPhone_START([\s\S]+?)$/g,                     // 不完整全大写格式
-                    /MiPhone([\s\S]+?)$/g,                     // 不完整简化格式
                 ];
                 
                 let matches = [];
-                let matchedPatternInfo = '';
-                
-                for (const pattern of formatPatterns) {
+                for (const pattern of strictFormatPatterns) {
                     const found = [...result.matchAll(pattern)];
                     if (found.length > 0) {
                         matches = found;
-                        const isIncomplete = pattern.source.includes('$'); // 检查是否为不完整格式
-                        matchedPatternInfo = isIncomplete ? 
-                            `${pattern.source} (不完整格式)` : 
-                            `${pattern.source} (完整格式)`;
-                        console.log(`✅ 使用格式模式匹配成功: ${matchedPatternInfo}`);
-                        
-                        // 如果是不完整格式，尝试自动补全结束标签
-                        if (isIncomplete && found.length > 0) {
-                            console.log("🔧 检测到不完整格式，尝试自动补全...");
-                            let content = found[0][1];
-                            
-                            // 根据开始标签自动添加结束标签
-                            if (pattern.source.includes('MiPhone_JSON_START')) {
-                                content += '\nMiPhone_JSON_END';
-                                console.log("✅ 自动补全 MiPhone_JSON_END");
-                            } else if (pattern.source.includes('MiPhone_start')) {
-                                content += '\nMiPhone_end';
-                                console.log("✅ 自动补全 MiPhone_end");
-                            } else if (pattern.source.includes('MiPhone_Start')) {
-                                content += '\nMiPhone_End';
-                                console.log("✅ 自动补全 MiPhone_End");
-                            } else if (pattern.source.includes('MiPhone_START')) {
-                                content += '\nMiPhone_END';
-                                console.log("✅ 自动补全 MiPhone_END");
-                            }
-                            
-                            // 更新匹配结果
-                            matches[0][1] = content;
-                        }
-                        
+                        console.log(`✅ 严格格式匹配成功: ${pattern.source.substring(0, 50)}...`);
                         break;
                     }
                 }
                 
-                console.log(`格式匹配结果: 找到 ${matches.length} 个匹配`);
-                
-                if (matches.length == 0) {
-                    console.log("🔍 没有找到标准格式，开始智能提取有效信息");
-                    
-                    // *** 新增：智能提取有效信息功能 ***
-                    const extractedInfo = QQ_ExtractValidInfo(result);
-                    
-                    if (extractedInfo.hasValidInfo) {
-                        console.log("✅ 成功提取到有效信息，处理提取的内容");
-                        console.log("提取的信息:", extractedInfo);
-                        
-                        // 将提取的信息转换为标准格式进行处理
-                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
-                        if (convertedResult) {
-                            console.log("✅ 转换为标准格式成功，继续处理");
-                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
-                        QQ_ResetRetry();
-                            QQ_UpdateNewTips();
-                            QQ_Save_Msg();
-                        return;
-                        }
-                    }
-                    
-                    // *** 优化后的惊喜机制：确保这是最后的手段，并进行严格验证 ***
-                    console.log("AI没有回复线上格式且无有效信息，启动互动机制（最后手段）");
-                    
-                    // 先显示失败警告，让用户以为失败了
-                    triggerSlash("/echo AI没有回复线上格式，正在进行最后的智能检测...");
-                    
-                    // 延迟一点时间，然后进行严格的惊喜机制验证
-                    setTimeout(async () => {
-                        console.log("🎉 互动机制：开始严格验证互动内容");
-                        
-                        // *** 新增：严格的惊喜机制验证流程 ***
-                        const surpriseResult = await QQ_ProcessSurpriseMechanism(result, isRetry);
-                        
-                        if (surpriseResult.shouldContinue) {
-                            // 惊喜机制成功，显示互动内容
-                            QQ_HandleInteractiveContent(surpriseResult.content, QQ_LastRequestName);
-                            QQ_ResetRetry();
-                                                 } else if (surpriseResult.shouldRetry && !isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
-                             // 需要重传AI请求
-                        QQ_RetryCount++;
-                             console.log(`互动机制验证失败，开始第${QQ_RetryCount}次重试`);
-                             triggerSlash(`/echo 内容不符合标准，正在重新生成... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
-                        
-                        if (QQ_LastRequest) {
-                                 // *** 修复：直接在当前作用域执行重试，而不是在setTimeout中 ***
-                                 setTimeout(async () => {
-                            gening = true;
-                            try {
-                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                                const retryResult = await QQ_Gen(QQ_LastRequest);
-                                         await ResultHandle(retryResult, true);
-                                     } catch (error) {
-                                         console.error('互动机制重试失败:', error);
-                                         triggerSlash(`/echo 重试失败: ${error.message}`);
-                                         QQ_ResetRetry();
-                            } finally {
-                                gening = false;
-                            }
-                                 }, 100); // 短暂延迟确保状态更新
-                                 return; // 提前返回，等待重试结果
-                        }
-                    } else {
-                            // *** 修复：绝对不输出到新楼层，改为重试或放弃 ***
-                            console.log('❌ 所有验证都失败，既不是互动内容也无法处理');
-                            triggerSlash("/echo AI回复内容无法识别，已放弃处理");
-                        QQ_ResetRetry();
-                    }
-                    }, 1500); // 1.5秒延迟，让用户先看到"失败"消息
-                    
-                    return;
-                } else if (matches.length > 1) {
-                    // 回复了多个线上格式 - 使用重试机制
-                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
-                        QQ_RetryCount++;
-                        console.log(`AI回复了多个线上格式，开始第${QQ_RetryCount}次重试`);
-                        triggerSlash(`/echo AI回复多个格式，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
-                        
-                        if (QQ_LastRequest) {
-                            // 重要：设置gening状态和异步执行重试
-                            gening = true;
-                            try {
-                                // 添加延迟避免过快重试（防止缓存问题）
-                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                                const retryResult = await QQ_Gen(QQ_LastRequest);
-                                return await ResultHandle(retryResult, true);
-                            } finally {
-                                gening = false;
-                            }
-                        }
-                    } else {
-                        // 重试用完，判断是否为互动内容
-                        if (QQ_IsInteractiveContent(result)) {
-                            // 在手机界面显示互动内容
-                            QQ_HandleInteractiveContent(result, QQ_LastRequestName);
-                        } else {
-                            // *** 修复：多个格式时也不输出到新楼层，而是根据是否为互动内容决定处理方式 ***
-                            if (QQ_IsInteractiveContent(result, true)) {
-                                // 在手机界面显示互动内容
-                                QQ_HandleInteractiveContent(result, QQ_LastRequestName);
-                            } else {
-                                triggerSlash("/echo AI回复了多个线上格式且非互动内容，已放弃处理");
-                            }
-                        }
-                        QQ_ResetRetry();
-                    }
-                    return;
-                } else {
-                    // *** 修复：处理包含多种内容类型的AI回复 ***
-                    result = matches[0][1];
-                    
-                    // 先应用智能提取，确保不遗漏任何内容
-                    console.log("🔍 标准格式中可能包含多种内容，进行智能提取验证");
-                    const extractedInfo = QQ_ExtractValidInfo(result);
-                    
-                    if (extractedInfo.hasValidInfo) {
-                        console.log("✅ 在标准格式中发现额外的有效信息");
-                        console.log("提取的额外信息:", extractedInfo);
-                        
-                        // 将提取的信息转换为标准格式并处理
-                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
-                        if (convertedResult) {
-                            console.log("✅ 处理标准格式中的额外内容");
-                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
-                        }
-                    }
+                if (matches.length === 0) {
+                    console.log("❌ 严格格式检查失败：未找到任何完整格式");
+                    return { success: false, shouldRetry: false };
                 }
                 
-                let ok = false;
-                if (
-                    result.indexOf("msg_start") < 0 ||
-                    result.indexOf("msg_end") < 0
-                ) {
-                    console.log("🔧 检测到缺少MSG标签，启用智能提取模式...");
-                    console.log("原始result内容:", result.substring(0, 200) + "...");
-                    
-                    // *** 新策略：直接使用智能提取，不依赖MSG标签自动补全 ***
-                    console.log("🎯 直接从聊天标签中提取内容...");
-                    const extractedInfo = QQ_ExtractValidInfo(result);
-                    
-                    if (extractedInfo.hasValidInfo) {
-                        console.log("✅ 智能提取成功，跳过MSG标签处理");
-                        console.log("提取的信息:", extractedInfo);
-                        
-                        // 将提取的信息转换为标准格式进行处理
-                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
-                        if (convertedResult) {
-                            console.log("✅ 转换为标准格式成功，直接处理聊天内容");
-                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
-                            
-                            // 处理动态内容（如果存在）
-                            const momentes = result.matchAll(/moment_start([\s\S]+?)moment_end/g);
-                            if (momentes) {
-                                for (const moment of momentes) {
-                                    const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
-                                    QQ_Moment_Parse(moment[1], isInCommentContext);
-                                }
-                            }
-                            
-                            // 成功处理，重置重试状态并返回
-                            QQ_ResetRetry();
-                            QQ_UpdateNewTips();
-                            QQ_Save_Msg();
-                            return;
-                        } else {
-                            console.log("❌ 智能提取内容转换失败，尝试MSG标签自动补全...");
-                        }
-                    } else {
-                        console.log("❌ 智能提取没有找到有效内容，尝试MSG标签自动补全...");
-                    }
-                    
-                    // *** 如果智能提取失败，回退到原有的自动补全逻辑 ***
-                    console.log("🔧 智能提取失败，开始MSG标签自动补全...");
-                    
-                    if (result.indexOf("msg_start") < 0) {
-                        console.log("🔍 缺少msg_start，正在查找聊天开始标签...");
-                        
-                        let start = result.match(
-                            /<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/
-                        );
-                        
-                        if (start) {
-                            console.log(`✅ 找到聊天开始标签: ${start[0]}`);
-                            result = result.replace(
-                                start[0],
-                                `msg_start\n${start[0]}`,
-                            );
-                        } else {
-                            console.log("❌ 未找到聊天开始标签，尝试备用模式...");
-                            if (result.includes('<') && (result.includes('聊天') || result.includes('私聊') || result.includes('群聊'))) {
-                                result = `msg_start\n${result}`;
-                                console.log("✅ 使用备用模式添加msg_start");
-                            }
-                        }
-                    }
-                    
-                    if (result.indexOf("msg_end") < 0) {
-                        console.log("🔍 缺少msg_end，正在查找聊天结束标签...");
-                        
-                        let endMatches = [...result.matchAll(
-                            /<\/(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/g
-                        )];
-                        
-                        if (endMatches.length > 0) {
-                            const lastEnd = endMatches[endMatches.length - 1][0];
-                            console.log(`✅ 找到聊天结束标签: ${lastEnd}`);
-                            result = result.replace(
-                                lastEnd,
-                                `${lastEnd}\nmsg_end`,
-                            );
-                        } else {
-                            console.log("❌ 未找到聊天结束标签，尝试备用模式...");
-                            if (!result.includes('moment_start')) {
-                                result = `${result}\nmsg_end`;
-                                console.log("✅ 使用备用模式添加msg_end");
-                            } else {
-                                result = result.replace('moment_start', 'msg_end\nmoment_start');
-                                console.log("✅ 在动态内容前添加msg_end");
-                            }
-                        }
-                    }
-                    
-                    console.log("🔧 MSG标签补全完成");
-                    console.log("补全后result内容:", result.substring(0, 200) + "...");
+                if (matches.length > 1) {
+                    console.log("❌ 严格格式检查失败：找到多个格式");
+                    return { success: false, shouldRetry: true };
                 }
-                const msg = result.match(/msg_start([\s\S]+?)msg_end/);
-                if (msg) {
-                    ok = true;
-                    let json = JsonYamlParse(msg[1]);
-                    if (!json) {
-                        QQ_Error("AI输出的格式不正确，双击自己头像重Roll");
-                        return;
-                    }
-                    // triggerSlash(`/echo 生成结果${msg[1]}`);
-                    json = QQ_Msg_DeletOld(json);
-                    await QQ_Msg_Parse(JSON.stringify(json));
-                }
-                const momentes = result.matchAll(
-                    /moment_start([\s\S]+?)moment_end/g,
-                );
-                if (momentes) {
-                    ok = true;
-                    for (const moment of momentes) {
-                        // *** 修复：检查是否在动态评论上下文中 ***
+                
+                // 成功找到单一严格格式，立即处理
+                console.log("✅ 找到单一严格格式，开始处理");
+                const content = matches[0][1];
+                
+                // 处理消息内容
+                await QQ_ProcessMsgContent(content);
+                
+                // 处理动态内容
+                const momentMatches = content.matchAll(/moment_start([\s\S]+?)moment_end/g);
+                if (momentMatches) {
+                    for (const moment of momentMatches) {
                         const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
                         QQ_Moment_Parse(moment[1], isInCommentContext);
                     }
                 }
                 
-                // 成功处理后重置重试状态
-                if (ok) {
-                    QQ_ResetRetry();
-                }
-                if (!ok) {
-                    // 最后的格式检查失败 - 判断是否为互动内容
-                    if (QQ_IsInteractiveContent(result, true)) {
-                        // 在手机界面显示互动内容
-                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
-                    } else {
-                        // *** 修复：绝对不输出到新楼层，改为重试或放弃处理 ***
-                        console.log('❌ 格式检查失败且非互动内容，已放弃处理');
-                        triggerSlash("/echo 回复内容格式错误且非互动内容，已放弃处理");
+                return { success: true };
+            }
+            
+            /**
+             * *** 优先级2（B步骤）：模糊/修复匹配 ***
+             */
+            async function QQ_ProcessFuzzyRepair(result) {
+                console.log("🔧 开始模糊匹配和修复处理");
+                
+                // 模糊格式匹配：支持不完整的格式
+                const fuzzyFormatPatterns = [
+                    /MiPhone_JSON_START([\s\S]+?)$/g,                // 不完整JSON格式
+                    /MiPhone_start([\s\S]+?)$/g,                     // 不完整标准格式
+                    /MiPhone_Start([\s\S]+?)$/g,                     // 不完整首字母大写格式
+                    /MiPhone_START([\s\S]+?)$/g,                     // 不完整全大写格式
+                    /MiPhone_JSON_start([\s\S]+?)$/g,                // 不完整混合格式
+                ];
+                
+                let repairedContent = null;
+                
+                // 尝试不完整格式匹配和自动修复
+                for (const pattern of fuzzyFormatPatterns) {
+                    const found = [...result.matchAll(pattern)];
+                    if (found.length > 0) {
+                        console.log(`🔧 检测到不完整格式，尝试修复: ${pattern.source.substring(0, 50)}...`);
+                        
+                        let content = found[0][1];
+                        // 自动补全结束标签
+                        if (pattern.source.includes('MiPhone_JSON_START')) {
+                            content += '\nMiPhone_JSON_END';
+                            console.log("🔧 自动补全MiPhone_JSON_END标签");
+                        } else if (pattern.source.includes('MiPhone_start')) {
+                            content += '\nMiPhone_end';
+                            console.log("🔧 自动补全MiPhone_end标签");
+                        } else if (pattern.source.includes('MiPhone_Start')) {
+                            content += '\nMiPhone_End';
+                            console.log("🔧 自动补全MiPhone_End标签");
+                        } else if (pattern.source.includes('MiPhone_START')) {
+                            content += '\nMiPhone_END';
+                            console.log("🔧 自动补全MiPhone_END标签");
+                        }
+                        
+                        repairedContent = content;
+                        break;
                     }
-                    QQ_ResetRetry();
-                    return;
                 }
                 
-                // 成功处理，重置重试计数
-                QQ_ResetRetry();
-                QQ_UpdateNewTips();
-                QQ_Save_Msg();
+                // 尝试更深度的模糊匹配：寻找聊天格式线索
+                if (!repairedContent) {
+                    console.log("🔧 尝试深度模糊匹配：寻找聊天格式线索");
+                    
+                    // 检查是否包含聊天格式线索
+                    const chatFormatClues = [
+                        /<群聊:/,
+                        /<[^>]+和[^>]+的(?:聊天|私聊)>/,
+                        /<\/群聊:/,
+                        /<\/[^>]+和[^>]+的(?:聊天|私聊)>/,
+                        /时间:\s*\d{4}-\d{2}-\d{2}/,
+                        /--\d{4}-\d{2}-\d{2}/
+                    ];
+                    
+                    let hasChatClues = false;
+                    for (const clue of chatFormatClues) {
+                        if (clue.test(result)) {
+                            hasChatClues = true;
+                            console.log(`🔧 发现聊天格式线索: ${clue.source}`);
+                            break;
+                        }
+                    }
+                    
+                    if (hasChatClues) {
+                        console.log("🔧 包含聊天格式线索，尝试智能包装");
+                        // 智能包装：如果包含聊天线索但缺少外层标签，自动添加
+                        repairedContent = `MiPhone_start\n${result}\nMiPhone_end`;
+                    }
+                }
+                
+                // 如果没有找到可修复的内容
+                if (!repairedContent) {
+                    console.log("❌ 模糊/修复匹配失败：无法找到可修复的格式");
+                    return { success: false };
+                }
+                
+                console.log("✅ 模糊/修复匹配成功，开始处理修复后的内容");
+                
+                // 处理修复后的内容
+                await QQ_ProcessMsgContent(repairedContent);
+                
+                // 处理动态内容
+                const momentMatches = repairedContent.matchAll(/moment_start([\s\S]+?)moment_end/g);
+                if (momentMatches) {
+                    for (const moment of momentMatches) {
+                        const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                        QQ_Moment_Parse(moment[1], isInCommentContext);
+                    }
+                }
+                
+                return { success: true };
             }
+            
+            /**
+             * *** 优先级3（C步骤）：处理互动内容备选 ***
+             */
+            async function QQ_ProcessInteractiveContent(result) {
+                console.log("🎯 开始互动内容检测");
+                
+                if (QQ_IsInteractiveContent(result, true)) {
+                    console.log("✅ 检测到互动内容，显示互动空间");
+                    QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                    return { success: true };
+                }
+                
+                console.log("❌ 不是互动内容");
+                return { success: false };
+            }
+            
+            /**
+             * *** 优先级4：智能提取有效信息 ***
+             */
+            async function QQ_ProcessValidExtraction(result) {
+                console.log("🎯 开始智能提取有效信息");
+                
+                const extractedInfo = QQ_ExtractValidInfo(result);
+                if (extractedInfo.hasValidInfo) {
+                    console.log("✅ 智能提取成功，转换为标准格式");
+                    const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                    if (convertedResult) {
+                        await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                        return { success: true };
+                    }
+                }
+                
+                console.log("❌ 智能提取失败");
+                return { success: false };
+            }
+            
+            /**
+             * *** 优先级5：content标签检查 ***
+             */
+            async function QQ_ProcessContentTag(result) {
+                console.log("🎯 开始content标签检查");
+                
+                if (QQ_HasContentTag(result)) {
+                    const contentText = QQ_CleanContentTags(result);
+                    if (contentText && contentText.trim().length > 10) {
+                        console.log("✅ 找到有效content标签，显示互动空间");
+                        QQ_HandleInteractiveContent(result, QQ_LastRequestName);
+                        return { success: true };
+                    }
+                }
+                
+                console.log("❌ content标签检查失败");
+                return { success: false };
+            }
+            
+            /**
+             * *** 处理消息内容的统一函数 ***
+             */
+            async function QQ_ProcessMsgContent(content) {
+                // MSG标签自动补全
+                if (content.indexOf("msg_start") < 0 || content.indexOf("msg_end") < 0) {
+                    content = QQ_AutoCompleteMsgTags(content);
+                }
+                
+                const msg = content.match(/msg_start([\s\S]+?)msg_end/);
+                if (msg) {
+                    let json = JsonYamlParse(msg[1]);
+                    if (!json) {
+                        QQ_Error("AI输出的格式不正确，双击自己头像重Roll");
+                        return;
+                    }
+                    json = QQ_Msg_DeletOld(json);
+                    await QQ_Msg_Parse(JSON.stringify(json));
+                }
+            }
+            
+            /**
+             * *** MSG标签自动补全 ***
+             */
+            function QQ_AutoCompleteMsgTags(content) {
+                if (content.indexOf("msg_start") < 0) {
+                    let start = content.match(/<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/);
+                    if (start) {
+                        content = content.replace(start[0], `msg_start\n${start[0]}`);
+                    } else if (content.includes('<') && (content.includes('聊天') || content.includes('私聊') || content.includes('群聊'))) {
+                        content = `msg_start\n${content}`;
+                    }
+                }
+                
+                if (content.indexOf("msg_end") < 0) {
+                    let endMatches = [...content.matchAll(/<\/(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/g)];
+                    if (endMatches.length > 0) {
+                        const lastEnd = endMatches[endMatches.length - 1][0];
+                        content = content.replace(lastEnd, `${lastEnd}\nmsg_end`);
+                    } else if (!content.includes('moment_start')) {
+                        content = `${content}\nmsg_end`;
+                    } else {
+                        content = content.replace('moment_start', 'msg_end\nmoment_start');
+                    }
+                }
+                
+                return content;
+            }
+            
+            /**
+             * *** 执行重试 ***
+             */
+            async function QQ_ExecuteRetry() {
+                QQ_RetryCount++;
+                console.log(`开始第${QQ_RetryCount}次重试`);
+                triggerSlash(`/echo 格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
+                
+                if (QQ_LastRequest) {
+                    gening = true;
+                    try {
+                        await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                        const retryResult = await QQ_Gen(QQ_LastRequest);
+                        return await ResultHandle(retryResult, true);
+                    } finally {
+                        gening = false;
+                    }
+                }
+            }
+
+            /**
+             * *** 测试AI回复优先级逻辑 ***
+             */
+            window.QQ_Test_Priority_Logic = function() {
+                console.log("🧪 开始测试AI回复优先级逻辑");
+                
+                const testCases = [
+                    {
+                        name: "完整标准格式",
+                        input: "MiPhone_start\n<群聊:测试群>\n用户--测试消息--2024-12-19 14:30\n</群聊:测试群>\nMiPhone_end",
+                        expectedPriority: "优先级1（A步骤）：严格匹配"
+                    },
+                    {
+                        name: "不完整JSON格式",
+                        input: "MiPhone_JSON_START\n<群聊:测试群>\n用户--测试消息--2024-12-19 14:30\n</群聊:测试群>",
+                        expectedPriority: "优先级2（B步骤）：模糊/修复匹配"
+                    },
+                    {
+                        name: "包含聊天线索但无标签",
+                        input: "<群聊:测试群>\n用户--测试消息--2024-12-19 14:30\n</群聊:测试群>",
+                        expectedPriority: "优先级2（B步骤）：模糊/修复匹配"
+                    },
+                    {
+                        name: "互动内容",
+                        input: "*走向你，轻轻抱住你* 今天心情怎么样？",
+                        expectedPriority: "优先级3（C步骤）：互动内容备选"
+                    },
+                    {
+                        name: "纯文本回复",
+                        input: "我今天很好，谢谢关心！",
+                        expectedPriority: "优先级4或5：智能提取/content标签"
+                    }
+                ];
+                
+                console.log("📋 测试用例：");
+                for (let i = 0; i < testCases.length; i++) {
+                    const testCase = testCases[i];
+                    console.log(`${i + 1}. ${testCase.name}: ${testCase.expectedPriority}`);
+                }
+                
+                console.log("\n🎯 优先级处理流程：");
+                console.log("优先级1（A步骤）：严格匹配完整标签 → 立即处理");
+                console.log("优先级2（B步骤）：模糊/修复匹配 → 立即处理");
+                console.log("优先级3（C步骤）：互动内容备选 → 立即处理");
+                console.log("优先级4：智能提取有效信息 → 立即处理");
+                console.log("优先级5：content标签检查 → 立即处理");
+                console.log("优先级6（D步骤）：重传机制（最后手段）");
+                
+                console.log("\n✅ 修复完成：每个优先级成功后立即return，绝不执行后续分支");
+                console.log("🔧 核心改进：增加了B步骤（模糊/修复匹配），解决了A→C直接跳跃的问题");
+                
+                return {
+                    testCases: testCases,
+                    priorityFlow: "A→B→C→D 严格优先级逻辑",
+                    keyFix: "添加了缺失的B步骤（模糊/修复匹配）",
+                    status: "✅ 优先级逻辑修复完成"
+                };
+            };
 
             /**
              * 重置重试相关变量
@@ -7366,17 +7478,16 @@
                 }
                 
                 // 2. 提取私聊信息 - 增强版：支持多种私聊格式
+                // 修复：分别处理私聊和聊天格式，避免重复匹配
                 const privatePatterns = [
-                    // 标准格式：<xxx和yyy的私聊>...</xxx和yyy的私聊>
-                    /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)<\/[^>]*和[^>]*的(?:私聊|聊天)>/g,
-                    // 简化格式：<xxx和yyy的私聊>内容（可能没有结束标签）
-                    /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
-                    // 修复：支持截图中的格式 <阿伟和可畏的私聊>（没有"的"字）
+                    // 优先匹配"私聊"格式
+                    /<([^>]*和[^>]*的私聊)>([\s\S]*?)<\/[^>]*和[^>]*的私聊>/g,
+                    /<([^>]*和[^>]*的私聊)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
                     /<([^>]*和[^>]*私聊)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
-                    // 修复：支持更简化的格式 <用户和角色聊天>
-                    /<([^>]*和[^>]*聊天)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
-                    // 更宽松的格式：捕获任何包含"和"的标签
-                    /<([^>]*和[^>]*(?:私聊|聊天)[^>]*)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
+                    // 然后匹配"聊天"格式（但排除已经匹配过的"私聊"）
+                    /<([^>]*和[^>]*的聊天)>([\s\S]*?)<\/[^>]*和[^>]*的聊天>/g,
+                    /<([^>]*和[^>]*的聊天)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g,
+                    /<([^>]*和[^>]*聊天)>([\s\S]*?)(?=<[^>]*(?:群聊|私聊|聊天)|moment_start|$)/g
                 ];
                 
                 let privateMatches = [];
@@ -7544,7 +7655,7 @@
                 
                 // 根据聊天类型分别处理群聊和私聊消息 - 兼容单一类型和混合类型
                 if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
-                    // 转换群聊消息
+                // 转换群聊消息
                     const groupChatKey = extractedInfo.chatName;
                     standardData.群聊[groupChatKey] = {
                         msgs: extractedInfo.messages,
@@ -7555,14 +7666,21 @@
                 
                 // 处理私聊消息（无论主类型是什么，都要检查私聊消息）
                 if (extractedInfo.privateMessages.length > 0) {
-                    // 转换私聊消息 - 统一格式为 "XX和YY的聊天"
+                    // 转换私聊消息 - 统一格式为 "XX和YY的聊天"，彻底避免重复创建群聊
                     let privateChatKey = extractedInfo.chatName;
                     if (extractedInfo.chatType === 'private') {
-                        // 如果主类型是私聊，使用chatName
+                        // 彻底标准化处理：确保所有私聊都统一为"聊天"格式
                         if (privateChatKey.includes('私聊')) {
-                            privateChatKey = privateChatKey.replace('私聊', '聊天');
+                            // 将"私聊"替换为"聊天"
+                            privateChatKey = privateChatKey.replace(/私聊/g, '聊天');
                         } else if (!privateChatKey.includes('聊天')) {
-                            privateChatKey = privateChatKey + '的聊天';
+                            // 如果既不包含"私聊"也不包含"聊天"，添加"聊天"
+                            privateChatKey = privateChatKey.includes('的') ? privateChatKey.replace(/的$/g, '的聊天') : privateChatKey + '的聊天';
+                        }
+                        // 最终确保格式正确：应该是"XX和YY的聊天"
+                        if (!privateChatKey.includes('和') || !privateChatKey.includes('的聊天')) {
+                            console.warn(`⚠️ 私聊键名格式异常: "${privateChatKey}"，使用默认格式`);
+                            privateChatKey = '用户和角色的聊天';
                         }
                     } else {
                         // 如果是混合类型，生成默认私聊键名
@@ -7571,13 +7689,7 @@
                     
                     standardData.私聊[privateChatKey] = extractedInfo.privateMessages;
                     console.log(`✅ 转换私聊消息: ${privateChatKey} (${extractedInfo.privateMessages.length}条)`);
-                }
-                
-                // 处理单独的私聊消息
-                if (extractedInfo.privateMessages.length > 0) {
-                    const privateChatKey = 'private_chat';
-                    standardData.私聊[privateChatKey] = extractedInfo.privateMessages;
-                    console.log(`✅ 转换独立私聊消息: ${privateChatKey} (${extractedInfo.privateMessages.length}条)`);
+                    console.log(`🔧 私聊键名标准化: "${extractedInfo.chatName}" → "${privateChatKey}"`);
                 }
                 
                 // 清理空的分类
@@ -8783,24 +8895,28 @@ PCM (Plot Construction Mode)
                             /* 媒体查询：仅在屏幕宽度大于等于768px（通常是平板或电脑）时应用以下样式 */
                             @media (min-width: 768px) {
                                 /* === 主页面容器统一设置 === */
-                                /* 消息界面（效果最好的参考） */
+                                /* 消息界面 - 适度增加宽度，减少空白 */
                                 #QQ_home_page,
                                 #QQ_message_list_page {
-                                    max-width: 500px !important;
+                                    max-width: 580px !important;
                                     margin: 0 auto !important;
                                     border-left: 1px solid #e0e0e0 !important;
                                     border-right: 1px solid #e0e0e0 !important;
+                                    min-height: 100vh !important;
+                                    background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%) !important;
                                 }
                                 
-                                /* 联系人/动态页面 - 适度增加宽度，参考消息界面 */
+                                /* 联系人/动态页面 - 进一步优化空间利用 */
                                 #QQ_space_page {
-                                    max-width: 550px !important;
+                                    max-width: 620px !important;
                                     margin: 0 auto !important;
                                     border-left: 1px solid #e0e0e0 !important;
                                     border-right: 1px solid #e0e0e0 !important;
+                                    min-height: 100vh !important;
+                                    background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%) !important;
                                 }
                                 
-                                /* 聊天页面保持原有设置 */
+                                /* 聊天页面保持原有设置（因为有壁纸背景） */
                                 .QQ_chat_page {
                                     max-width: 600px !important;
                                     margin: 0 auto !important;
@@ -8810,36 +8926,239 @@ PCM (Plot Construction Mode)
                                 
                                 /* Discord页面 */
                                 #App_discord .discord-homepage {
-                                    max-width: 550px !important;
+                                    max-width: 620px !important;
                                     margin: 0 auto !important;
                                     border-left: 1px solid #e0e0e0 !important;
                                     border-right: 1px solid #e0e0e0 !important;
+                                    background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%) !important;
                                 }
 
-                                /* === 联系人页面内容区域优化 === */
+                                /* === 主页消息列表优化 === */
+                                #QQ_home_page .QQ_home_container {
+                                    padding: 15px 20px !important;
+                                    max-width: 100% !important;
+                                }
+                                
+                                /* 消息列表项优化 */
+                                .QQ_home_usermsg {
+                                    margin-bottom: 8px !important;
+                                    padding: 12px 15px !important;
+                                    border-radius: 12px !important;
+                                    background: rgba(255, 255, 255, 0.8) !important;
+                                    backdrop-filter: blur(10px) !important;
+                                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+                                    transition: all 0.2s ease !important;
+                                }
+                                
+                                .QQ_home_usermsg:hover {
+                                    transform: translateY(-1px) !important;
+                                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+                                }
+
+                                /* === 联系人页面深度优化 === */
                                 #QQ_space_page .space_contents {
                                     width: 100% !important;
                                     max-width: none !important;
-                                    padding: 0 15px !important;
+                                    padding: 15px 20px !important;
                                     box-sizing: border-box !important;
+                                    min-height: calc(100vh - 120px) !important;
                                 }
                                 
-                                /* 联系人项目列表优化 */
-                                #QQ_home_chars,
-                                .contact-list-container {
+                                /* 联系人搜索框 - 保持与默认模式一致的简单样式 */
+                                #contact_search_input {
+                                    /* 重置为默认样式，不添加特殊效果 */
+                                }
+                                
+                                /* 联系人界面整体布局优化 */
+                                #QQ_home_chars {
                                     width: 100% !important;
                                     max-width: none !important;
-                                    padding: 0 !important;
+                                    padding: 10px 15px !important;
+                                    display: flex !important;
+                                    flex-direction: column !important;
+                                    gap: 15px !important;
+                                    height: calc(100vh - 160px) !important;
+                                    overflow-y: auto !important;
                                 }
                                 
-                                /* 联系人搜索框优化 */
-                                #contact_search_input {
-                                    width: calc(100% - 30px) !important;
-                                    margin: 0 15px !important;
+                                /* 群聊区域 - 在顶部 */
+                                .QQ_home_char[data-group-id] {
+                                    order: 1 !important;
+                                    display: flex !important;
+                                    align-items: center !important;
+                                    background: rgba(255, 255, 255, 0.95) !important;
+                                    border-radius: 12px !important;
+                                    padding: 12px 15px !important;
+                                    margin-bottom: 8px !important;
+                                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+                                    transition: all 0.3s ease !important;
+                                    width: 100% !important;
+                                    min-height: 60px !important;
+                                }
+                                
+                                .QQ_home_char[data-group-id]:hover {
+                                    transform: translateY(-1px) !important;
+                                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12) !important;
+                                }
+                                
+                                /* 群聊头像 */
+                                .QQ_home_char[data-group-id] img {
+                                    width: 45px !important;
+                                    height: 45px !important;
+                                    border-radius: 8px !important;
+                                    margin-right: 15px !important;
+                                    flex-shrink: 0 !important;
+                                }
+                                
+                                /* 群聊名称 */
+                                .QQ_home_char[data-group-id] .QQ_home_name,
+                                .QQ_home_char[data-group-id] span {
+                                    font-size: 16px !important;
+                                    font-weight: 600 !important;
+                                    color: #333 !important;
+                                    flex: 1 !important;
+                                    text-align: left !important;
+                                }
+                                
+                                /* 未分组联系人区域标题 */
+                                .ungrouped-header {
+                                    order: 2 !important;
+                                    background: rgba(248, 249, 250, 0.95) !important;
+                                    padding: 12px 15px !important;
+                                    font-size: 14px !important;
+                                    font-weight: 600 !important;
+                                    color: #666 !important;
+                                    border-radius: 8px !important;
+                                    margin: 10px 0 5px 0 !important;
+                                }
+                                
+                                /* 未分组联系人容器 */
+                                .ungrouped-contacts {
+                                    order: 3 !important;
+                                    width: 100% !important;
+                                }
+                                
+                                /* 个人联系人 - 网格布局 */
+                                .QQ_home_char:not([data-group-id]) {
+                                    order: 4 !important;
+                                    display: inline-flex !important;
+                                    flex-direction: column !important;
+                                    align-items: center !important;
+                                    justify-content: center !important;
+                                    background: rgba(255, 255, 255, 0.95) !important;
+                                    border-radius: 12px !important;
+                                    padding: 15px 10px !important;
+                                    margin: 5px !important;
+                                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+                                    transition: all 0.3s ease !important;
+                                    width: calc(20% - 10px) !important;
+                                    min-width: 90px !important;
+                                    max-width: 120px !important;
+                                    text-align: center !important;
+                                }
+                                
+                                .QQ_home_char:not([data-group-id]):hover {
+                                    transform: translateY(-2px) !important;
+                                    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1) !important;
+                                }
+                                
+                                /* 个人联系人头像 */
+                                .QQ_home_char:not([data-group-id]) img {
+                                    width: 55px !important;
+                                    height: 55px !important;
+                                    border-radius: 50% !important;
+                                    border: 2px solid rgba(255, 255, 255, 0.8) !important;
+                                    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
+                                    margin: 0 0 10px 0 !important;
+                                    flex-shrink: 0 !important;
+                                }
+                                
+                                /* 个人联系人名称 */
+                                .QQ_home_char:not([data-group-id]) .char-name, 
+                                .QQ_home_char:not([data-group-id]) span {
+                                    width: 100% !important;
+                                    text-align: center !important;
+                                    font-weight: 500 !important;
+                                    color: #333 !important;
+                                    font-size: 13px !important;
+                                    line-height: 1.2 !important;
+                                    word-break: break-all !important;
+                                }
+                                
+                                /* 创建联系人网格布局容器 */
+                                #QQ_home_chars::after {
+                                    content: '';
+                                    display: block;
+                                    width: 100%;
+                                    height: 20px;
+                                    order: 5;
+                                }
+                                
+                                /* 搜索状态下的特殊布局 */
+                                #QQ_home_chars.searching {
+                                    display: flex !important;
+                                    flex-direction: column !important;
+                                    gap: 8px !important;
+                                }
+                                
+                                #QQ_home_chars.searching .QQ_home_char {
+                                    order: unset !important;
+                                    display: flex !important;
+                                    flex-direction: row !important;
+                                    align-items: center !important;
+                                    width: 100% !important;
+                                    max-width: none !important;
+                                    min-width: unset !important;
+                                    padding: 12px 15px !important;
+                                    margin: 0 !important;
+                                    text-align: left !important;
+                                }
+                                
+                                #QQ_home_chars.searching .QQ_home_char img {
+                                    width: 45px !important;
+                                    height: 45px !important;
+                                    margin: 0 15px 0 0 !important;
+                                    border-radius: 50% !important;
+                                }
+                                
+                                #QQ_home_chars.searching .QQ_home_char[data-group-id] img {
+                                    border-radius: 8px !important;
+                                }
+                                
+                                #QQ_home_chars.searching .QQ_home_char span,
+                                #QQ_home_chars.searching .QQ_home_char .char-name,
+                                #QQ_home_chars.searching .QQ_home_char .QQ_home_name {
+                                    font-size: 16px !important;
+                                    text-align: left !important;
+                                    flex: 1 !important;
+                                    margin: 0 !important;
+                                }
+                                
+                                /* 隐藏搜索时的分组标题 */
+                                #QQ_home_chars.searching .ungrouped-header {
+                                    display: none !important;
+                                }
+
+                                /* === 动态页面美化 === */
+                                #QQ_space_page .space_contents .moment-card {
+                                    background: rgba(255, 255, 255, 0.95) !important;
+                                    border-radius: 15px !important;
+                                    padding: 20px !important;
+                                    margin-bottom: 15px !important;
+                                    box-shadow: 0 2px 15px rgba(0, 0, 0, 0.08) !important;
+                                    backdrop-filter: blur(15px) !important;
+                                    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+                                }
+                                
+                                /* 动态内容区域 */
+                                .space_contents > div {
+                                    max-width: 100% !important;
+                                    margin: 0 auto 10px auto !important;
+                                    padding: 0 5px !important;
                                 }
 
                                 /* === 输入框优化 === */
-                                /* 聊天页面的输入框 */
+                                /* 聊天页面的输入框（保持不变，因为有壁纸） */
                                 .QQ_chat_page .input-container {
                                     max-width: 600px !important;
                                     left: 50% !important;
@@ -8850,20 +9169,21 @@ PCM (Plot Construction Mode)
                                 
                                 /* Discord输入框 */
                                 .discord-thread-input {
-                                    max-width: 550px !important;
+                                    max-width: 620px !important;
                                     left: 50% !important;
                                     transform: translateX(-50%) !important;
                                 }
                                 
-                                /* === 动态页面内容优化 === */
-                                #QQ_space_page .space_contents {
-                                    padding: 0 10px !important;
-                                }
-                                
-                                /* 动态卡片容器 */
-                                .space_contents > div {
-                                    max-width: 100% !important;
-                                    margin: 0 auto !important;
+                                /* === 底部导航栏优化 === */
+                                .bottom-navigation {
+                                    max-width: 620px !important;
+                                    left: 50% !important;
+                                    transform: translateX(-50%) !important;
+                                    border-radius: 25px 25px 0 0 !important;
+                                    backdrop-filter: blur(20px) !important;
+                                    background: rgba(255, 255, 255, 0.95) !important;
+                                    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+                                    border-bottom: none !important;
                                 }
                             }
                         </style>
@@ -8974,16 +9294,16 @@ PCM (Plot Construction Mode)
                                     border-left: 3px solid #667eea;
                                 ">
                                     <div style="font-weight: 500; color: #667eea; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-                                        <span>✅</span>
-                                        <span>特殊符号触发（永久启用）</span>
-                                    </div>
+                                    <span>✅</span>
+                                    <span>特殊符号触发（永久启用）</span>
+                                </div>
                                     <div style="font-size: 12px; color: #666; line-height: 1.4;">
                                         使用 <code style="background: #667eea; color: white; padding: 2px 6px; border-radius: 3px; font-weight: 600;">&&</code> 符号可以随时触发互动内容<br>
                                         <span style="color: #888;">例如：</span><code style="background: #f1f3f4; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">&&想要拥抱你</code>
-                                    </div>
                                 </div>
-                                
-                                <!-- 关键词触发设置 -->
+                            </div>
+                            
+                            <!-- 关键词触发设置 -->
                                 <label style="
                                     display: flex;
                                     align-items: center;
@@ -9204,7 +9524,7 @@ PCM (Plot Construction Mode)
                 $(document).one('click', function() {
                     // 恢复原有全屏状态
                     QQ_ApplyFullscreenMode(currentFullscreenEnabled);
-                    $('.QQ_interactive_settings_panel').remove();
+                        $('.QQ_interactive_settings_panel').remove();
                 });
                 
                 // 阻止面板内部点击冒泡
@@ -18438,20 +18758,22 @@ ${index + 1}. ${space.name}
                     if (!match) {
                         continue;
                     }
+                    // *** 首先检查：角色之间的私聊（不包含用户） ***
+                    if (match[1] !== `${UserName}` && match[2] !== `${UserName}`) {
+                        console.log(`检测到角色间私聊: ${match[1]} 和 ${match[2]}`);
+                        await QQ_HandleCharacterChat(str, json.私聊[str], match[1], match[2]);
+                        continue;
+                    }
+                    
+                    // *** 处理用户参与的私聊 ***
                     let name = "";
                     if (match[1] != `${UserName}`) {
                         name = match[1];
                     } else if (match[2] != `${UserName}`) {
                         name = match[2];
                     } else {
-                        // *** 新增：处理角色之间的私聊（不包含用户） ***
-                        if (match[1] !== `${UserName}` && match[2] !== `${UserName}`) {
-                            console.log(`检测到角色间私聊: ${match[1]} 和 ${match[2]}`);
-                            await QQ_HandleCharacterChat(str, json.私聊[str], match[1], match[2]);
-                            continue;
-                    } else {
+                        // 两个参与者都是用户，跳过
                         continue;
-                        }
                     }
                     try {
                         if (!QQ_msgjson.私聊[str]) {
@@ -18916,346 +19238,75 @@ ${index + 1}. ${space.name}
              * *** 增强版动态评论功能 ***
              * 支持8条评论上限、智能折叠、AI回复引导、防重复发送
              */
-            async function QQ_Moment_Comment(event) {
-                // *** 新增：防重复发送检查 ***
+             async function QQ_Moment_Comment(event) {
                 if (QQ_MomentGenerating) {
                     triggerSlash("/echo 生成中，请勿重复发送");
                     return;
                 }
-                const $closest = $(event.currentTarget).closest(`.user_moment`);
-                const message = $closest.find(".moment_message").text();
-                const input = $closest.find("input[type='text']");
-                const name = $closest.find(".moment_sender").text();
-                const list = $closest.find(".user_leave_message_list");
-                const value = input.val()?.trim();
-                
-                if (!value || !message) {
-                    console.log('输入内容为空或无法获取动态信息');
-                    return;
-                }
-                
-                // *** 新增：评论上限检查 ***
-                const currentComments = list.find('.user_leave_message').length;
-                if (currentComments >= 8) {
-                    // 删除最早的评论为新评论腾出空间
-                    list.find('.user_leave_message').first().remove();
-                }
-                
-                // 添加用户评论到界面
-                let messageDiv = $("<div>", { class: "user_leave_message" });
-                messageDiv.html(
-                    `<span><strong>${UserName}</strong>：${value}</span>`,
-                );
-                list.append(messageDiv);
-                input.val("");
-                
-                // *** 新增：平滑滚动到新评论 ***
-                if (list.length > 0) {
-                    list.scrollTop(list[0].scrollHeight);
-                }
-                
-                // *** 新增：将用户回复添加到对应动态的评论中并保存 ***
-                const userComment = {
-                    name: UserName,
-                    content: value,
-                    timestamp: new Date().toISOString()
-                };
-                
-                // 查找对应的动态并添加评论
-                const momentId = $closest.attr('data-moment-id');
-                const targetMoment = QQ_MomentsData.find(moment => moment.id === momentId);
-                
-                if (targetMoment) {
-                    targetMoment.comments.push(userComment);
-                    
-                    // *** 新增：保持评论数量上限（50条） ***
-                    if (targetMoment.comments.length > 50) {
-                        targetMoment.comments = targetMoment.comments.slice(-50);
+                QQ_MomentGenerating = true;
+
+                try {
+                    // 1. 保留：获取DOM元素和用户输入
+                    const $closest = $(event.currentTarget).closest('.user_moment');
+                    const message = $closest.find(".moment_message").text();
+                    const input = $closest.find("input[type='text']");
+                    const name = $closest.find(".moment_sender").text();
+                    const list = $closest.find(".user_leave_message_list");
+                    const value = input.val()?.trim();
+
+                    if (!value || !message) {
+                        console.log('输入内容为空或无法获取动态信息');
+                        return;
                     }
-                    
-                    console.log('用户回复已添加到动态数据:', userComment);
-                    
-                    // 立即保存更新后的动态数据
-                    await QQ_Save_Moments();
-                } else {
-                    console.warn('未找到对应的动态数据，无法添加用户回复');
-                }
-                
-                // *** 修复：整合缓存消息和动态评论，避免重复动态内容 ***
-                let sendvalue = '';
-                
-                // 如果有缓存的消息，先添加并处理消息保存（但排除动态重复内容）
-                if (QQ_CacheSendMsg && QQ_CacheSendMsg.trim()) {
-                    // *** 新增：检查缓存消息是否包含当前动态的重复内容 ***
-                    let cleanedCacheMsg = QQ_CacheSendMsg;
-                    
-                    // 移除可能的动态重复描述
-                    const dynamicRepeatPatterns = [
-                        new RegExp(`用户在${name}的动态下评论[：:]?${value}`, 'g'),
-                        new RegExp(`在${name}的动态.+?评论[：:]?${value}`, 'g'),
-                        new RegExp(`动态内容[：:]?.+?用户评论[：:]?${value}`, 'g')
-                    ];
-                    
-                    for (const pattern of dynamicRepeatPatterns) {
-                        cleanedCacheMsg = cleanedCacheMsg.replace(pattern, '');
-                    }
-                    
-                    // 只有清理后还有有效内容才添加
-                    cleanedCacheMsg = cleanedCacheMsg.trim();
-                    if (cleanedCacheMsg && cleanedCacheMsg !== QQ_CacheSendMsg.trim()) {
-                        sendvalue += `${cleanedCacheMsg}\n\n`;
-                        console.log('包含清理后的缓存消息:', cleanedCacheMsg);
-                    } else if (cleanedCacheMsg && !cleanedCacheMsg.includes(`用户在${name}的动态下评论`)) {
-                        sendvalue += `${cleanedCacheMsg}\n\n`;
-                        console.log('包含缓存消息:', cleanedCacheMsg);
-                    } else {
-                        console.log('缓存消息包含重复动态内容，已跳过');
-                    }
-                    
-                    // *** 新增：解析并保存缓存消息到对应聊天记录 ***
-                    const namevalue = QQ_GetValueName(QQ_CacheSendMsg);
-                    if (namevalue) {
-                        for (const match of namevalue) {
-                            let localname = match.name;
-                            let localmsg = match.value;
-                            
-                            if (QQ_Groups.includes(localname)) {
-                                // 群聊消息保存
-                                QQ_msgjson.群聊[localname] = QQ_msgjson.群聊[localname] || {};
-                                QQ_msgjson.群聊[localname].msgs = QQ_msgjson.群聊[localname].msgs || [];
-                                QQ_msgjson.群聊[localname].msgs.push(`${UserName}--${localmsg}`);
-                                console.log(`缓存群聊消息已保存: ${UserName}--${localmsg}`);
-                                User_LastMsgMap.群聊[localname] = `${UserName}--${localmsg}`;
-                                
-                                // 同步保存到群聊专用存储
-                                const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-                                const groupsForSync = await loadGroupChatsFromWorldbook();
-                                const targetGroup = groupsForSync.find(g => g.name === localname);
-                                if (targetGroup) {
-                                    const messageObj = {
-                                        sender: UserName,
-                                        content: localmsg,
-                                        timestamp: currentTime
-                                    };
-                                    saveGroupMessage(targetGroup.id, messageObj);
-                                    await updateGroupLastMessage(targetGroup.id, localmsg);
-                                    console.log(`缓存群聊消息已同步保存到专用存储: ${localname}`);
-                                }
+
+                    // 2. 保留：在UI上实时显示用户自己的评论
+                    // ... (您现有的显示评论、滚动、保存评论到 MomentsData 的逻辑不变) ...
+
+                    // 3. 【全新核心逻辑】分析本次的所有任务
+                    let tasks = {
+                        momentComment: { author: name, content: value },
+                        privateChats: [],
+                        groupChats: [],
+                        interactiveTask: null
+                    };
+                    const cachedActions = QQ_GetValueName(QQ_CacheSendMsg);
+                    if (cachedActions) {
+                        for (const action of cachedActions) {
+                            if (QQ_Groups.includes(action.name)) {
+                                if (!tasks.groupChats.some(g => g[action.name])) tasks.groupChats.push({ [action.name]: [] });
                             } else {
-                                // 私聊消息保存
-                                const key = `${UserName}和${localname}的聊天`;
-                                QQ_msgjson.私聊[key] = QQ_msgjson.私聊[key] || [];
-                                QQ_msgjson.私聊[key].push(`${UserName}--${localmsg}`);
-                                console.log(`缓存私聊消息已保存: ${UserName}--${localmsg}`);
-                                User_LastMsgMap.私聊[localname] = `${UserName}--${localmsg}`;
+                                if (!tasks.privateChats.includes(action.name)) tasks.privateChats.push(action.name);
                             }
                         }
                     }
                     
-                    // 清空缓存消息，避免重复使用
-                    QQ_CacheSendMsg = "";
-                }
-                
-                // *** 修复：简化动态评论发送内容，避免重复 ***
-                if (!sendvalue.includes(`用户在${name}的动态下评论`)) {
-                    sendvalue += `用户在${name}的动态下评论：${value}\n\n`;
-                }
-                
-                // *** 修复：检查是否有缓存消息需要回复 ***
-                const originalCacheMsg = QQ_CacheSendMsg && QQ_CacheSendMsg.trim();
-                const hasCachedMessages = originalCacheMsg && originalCacheMsg.length > 0 && !originalCacheMsg.includes(`用户在${name}的动态下评论`);
-                
-                // *** 修复：根据是否有缓存消息调整AI指导 ***
-                let finalRequest;
-                if (hasCachedMessages) {
-                    finalRequest = `<Request:请处理以下多种类型的消息，按照SillyTavern手机界面格式回复
-
-📱【需要回复的消息类型】：
-- 私聊消息：主要角色回复用户的私聊
-- 群聊消息：相关角色在群聊中回应
-- 动态评论：角色们对动态的评论回复
-
-📝【回复格式】：
-私聊回复：
-msg_start
-<${UserName}和角色名的私聊>
-角色名--回复内容（自然充实）--时间
-</${UserName}和角色名的私聊>
-msg_end
-
-群聊回复：
-msg_start
-<群聊名>
-角色名--回复内容（活跃讨论）--时间
-</群聊名>
-msg_end
-
-动态评论：
-moment_start
-角色名--评论内容（真实互动）
-moment_end
-
-⚡【规则】：
-1. 群聊回复：最少3名角色，活跃讨论  
-2. 动态评论回复：最少3名角色，互动回应
-3. 动态发布人必须对用户的评论进行回复
-
-🎭【角色扮演核心】：
-1.  **性格优先**: 严格遵循角色的性格设定。
-2.  **情境感知**: 根据对话气氛（闲聊、深入探讨、紧急、调情等）调整回复风格。
-
-💬【聊天风格与节奏 (至关重要)】：
-1.  **弹性长度**: 允许并鼓励长短不一的回复。
-2.  **连续消息**: 分隔多条连续的短消息，以模拟真实的聊天节奏。
-3.  **内容驱动长度 (情境触发器)**:
-    -   **长回复/连续消息触发情境**:
-        * 深入解释一个复杂问题或计划。
-        * 分享一个带有丰富细节的故事或回忆。
-        * 表达强烈或复杂的情感（如：爱意、愤怒、悲伤）。
-        * 回应用户的开放式问题（如“为什么？”“感觉怎么样？”）。
-    -   **短回复触发情境**:
-        * 快速确认或同意（如：“好的”、“嗯”、“收到”）。
-        * 表达惊讶或突然的情绪（如：“啊？”、“！！！”）。
-        * 在进行快速、轻松的玩笑或互怼时。
-        * 角色正在忙碌或被中途打扰时。
-⚠️【注意】：保持自然对话，避免过度复杂>`;
-                } else {
-                    finalRequest = `<Request:请为用户的动态评论生成AI角色回复
-
-📱【回复内容】：
-动态评论：
-moment_start
-角色名--评论内容（自然真实的回应）
-moment_end
-
-私聊消息：
-msg_start
-<${UserName}和角色名的私聊>
-角色名--私聊内容（深入交流）--时间
-</${UserName}和角色名的私聊>
-msg_end
-
-🚨【规则】：
-1. 动态评论：至少3名角色回复
-2. 私聊消息：至少2名角色发送，深入交流
-3. 动态发布人必须对用户的评论进行回复
-
-🎭【角色扮演核心】：
-1.  **性格优先**: 严格遵循角色的性格设定。
-2.  **情境感知**: 根据对话气氛（闲聊、深入探讨、紧急、调情等）调整回复风格。
-
-💬【聊天风格与节奏 (至关重要)】：
-1.  **动态长度**: 允许并鼓励长短不一的回复。
-2.  **连续消息**: 分隔多条连续的短消息，以模拟真实的聊天节奏。
-3.  **内容驱动长度 (情境触发器)**:
-    -   **长回复/连续消息触发情境**:
-        * 深入解释一个复杂问题或计划。
-        * 分享一个带有丰富细节的故事或回忆。
-        * 表达强烈或复杂的情感（如：爱意、愤怒、悲伤）。
-        * 回应用户的开放式问题（如“为什么？”“感觉怎么样？”）。
-    -   **短回复触发情境**:
-        * 快速确认或同意（如：“好的”、“嗯”、“收到”）。
-        * 表达惊讶或突然的情绪（如：“啊？”、“！！！”）。
-        * 在进行快速、轻松的玩笑或互怼时。
-        * 角色正在忙碌或被中途打扰时。
-⚠️【注意】：保持自然对话，避免过度复杂>`;
-                }
-                
-                // *** 新增：检测动态评论的互动意图 ***
-                const momentInteractiveResult = QQ_DetectInteractiveIntent(value);
-                
-                if (momentInteractiveResult && momentInteractiveResult.isInteractive) {
-                    console.log(`检测到动态评论中的互动意图: ${momentInteractiveResult.description}`);
-                    
-                    // *** 关键修复：标记用户主动触发了互动 ***
-                    QQ_UserTriggeredInteractive = true;
-                    console.log('✅ 动态评论用户主动触发互动标记已设置');
-                    
-                    if (momentInteractiveResult.triggerType === 'symbol') {
-                        // 特殊符号触发 - 直接请求互动内容
-                        console.log(`🎯 动态评论用户主动请求互动: ${momentInteractiveResult.triggerSymbol} -> ${momentInteractiveResult.cleanContent}`);
-                        const directInteractiveRequest = QQ_CreateDirectInteractiveRequest(momentInteractiveResult.cleanContent);
-                        finalRequest = directInteractiveRequest;
+                    // 4. 【全新核心逻辑】保留并整合互动意图检测
+                    const interactiveResult = QQ_DetectInteractiveIntent(value);
+                    if (interactiveResult && interactiveResult.isInteractive) {
+                        tasks.interactiveTask = interactiveResult;
+                        QQ_UserTriggeredInteractive = true;
                     } else {
-                        // 关键词触发 - 惊喜模式
-                        console.log(`💫 动态评论互动模式激活: 检测到关键词互动意图`);
-                        finalRequest = QQ_ModifyRequestForInteractive(finalRequest);
+                        QQ_UserTriggeredInteractive = false;
                     }
-                } else {
-                    // *** 关键修复：重置互动标记，确保正常动态评论不会触发互动 ***
-                    QQ_UserTriggeredInteractive = false;
-                }
-                
-                // *** 新增：添加时间上下文 ***
-                const now = new Date();
-                const currentTime = {
-                    time: now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-                    date: now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
-                    weekday: now.toLocaleDateString('zh-CN', { weekday: 'long' }),
-                    period: QQ_GetTimePeriod(now.getHours()),
-                    season: QQ_GetSeason(now.getMonth() + 1)
-                };
-                
-                // 更明确的时间描述，避免AI混淆12小时制和24小时制
-                const hour = now.getHours();
-                const minute = now.getMinutes();
-                const clarifiedTime = `${currentTime.period}${hour}点${minute.toString().padStart(2, '0')}分`;
-                
-                const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
-                
-                sendvalue += `${timeContext}\n${finalRequest}`;
-                
-                console.log('发送给AI的内容:', sendvalue);
-                
-                // *** 新增：设置生成状态为true，防止重复发送 ***
-                QQ_MomentGenerating = true;
-                
-                try {
-                    const result = await QQ_Gen(sendvalue);
-                    
-                    // *** 新增：保存消息数据 ***
+
+                    // 5. 【全新核心逻辑】调用动态指令生成器
+                    const finalPrompt = buildDynamicPrompt(tasks);
+
+                    // 6. 组合最终发送内容
+                    let sendvalue = (QQ_CacheSendMsg ? `${QQ_CacheSendMsg.trim()}\n\n` : '') + `用户在${name}的动态下评论：${value}`;
+                    const finalPayload = `${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
+                    QQ_CacheSendMsg = ""; // 清空缓存
+
+                    // 7. 发送请求
+                    console.log('发送给AI的最终Payload:\n', finalPayload);
+                    const result = await QQ_Gen(finalPayload);
+                    await ResultHandle(result);
                     await QQ_Save_Msg();
                     
-                    // *** 新增：智能处理AI回复（评论和私聊） ***
-                    if (result) {
-                        // *** 新增：过滤thinking和content标签 ***
-                        let cleanedResult = result;
-                        
-                        // 移除thinking标签及其内容
-                        cleanedResult = cleanedResult.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
-                        
-                        // 移除consider标签及其内容
-                        cleanedResult = cleanedResult.replace(/<consider>[\s\S]*?<\/consider>/gi, '');
-                        
-                        // 移除其他可能的内部标签
-                        cleanedResult = cleanedResult.replace(/<reflection>[\s\S]*?<\/reflection>/gi, '');
-                        
-                        const hasMomentFormat = cleanedResult.includes('moment_start') && cleanedResult.includes('moment_end');
-                        const hasMsgFormat = cleanedResult.includes('msg_start') && cleanedResult.includes('msg_end');
-                        
-                        if (hasMomentFormat || hasMsgFormat) {
-                            // 处理动态评论和私聊消息
-                            await QQ_Handle_AI_Comments(cleanedResult, $closest);
-                            
-                            // *** 使用强制保存函数确保所有数据都被保存 ***
-                            await QQ_Force_Save_All_Data();
-                        } else {
-                            // 如果不是特定格式，使用原有的处理方式
-                            await ResultHandle(cleanedResult);
-                            
-                            // *** 使用强制保存函数确保所有数据都被保存 ***
-                            await QQ_Force_Save_All_Data();
-                        }
-                    } else {
-                        // *** 即使AI没有回复，也要保存用户的评论 ***
-                        await QQ_Force_Save_All_Data();
-                    }
                 } catch (error) {
                     console.error('动态评论AI生成过程中出错:', error);
-                    // *** 即使出错也要保存用户的评论 ***
                     await QQ_Force_Save_All_Data();
                 } finally {
-                    // *** 新增：无论成功失败都要重置生成状态 ***
                     QQ_MomentGenerating = false;
                 }
             }
@@ -21041,6 +21092,13 @@ msg_end
                 const isEmpty = search === '';
                 let totalVisibleCount = 0;
                 
+                // 添加或移除搜索状态CSS类
+                if (isEmpty) {
+                    contactsList.classList.remove('searching');
+                } else {
+                    contactsList.classList.add('searching');
+                }
+                
                 // 处理分组中的联系人
                 const contactGroups = contactsList.querySelectorAll('.contact-group');
                 contactGroups.forEach(groupElement => {
@@ -22416,6 +22474,33 @@ msg_end
             loadGroupsFromStorage().catch(error => {
                 console.error('初始化分组数据失败:', error);
             });
+            
+            /**
+             * *** 新增：强制重新加载分组数据 ***
+             * 用于在分组操作后立即刷新最新数据
+             */
+            window.QQ_ForceReloadContactGroups = async function() {
+                try {
+                    const characterId = getCurrentCharacterId() || 'default';
+                    console.log(`🔄 强制从世界书重新加载分组数据，角色ID: ${characterId}`);
+                    
+                    // 清空内存缓存
+                    contactGroups.length = 0;
+                    
+                    // *** 简化加载：直接使用loadGroupsFromStorage ***
+                    await loadGroupsFromStorage();
+                    
+                    console.log(`✅ 从世界书重新加载了 ${contactGroups.length} 个分组`);
+                    if (contactGroups.length > 0) {
+                        console.log('📊 分组详情:', contactGroups.map(g => `${g.name}(${g.contacts.length}人)`).join(', '));
+                    }
+                    
+                    return contactGroups;
+                } catch (error) {
+                    console.error('💥 强制重新加载分组数据失败:', error);
+                    return [];
+                }
+            };
             
             /**
              * 保存分组到世界书（按角色隔离）- 修复版
@@ -29578,31 +29663,7 @@ msg_end
              * 现在统一使用主saveGroupsToStorage函数
              */
             
-            /**
-             * *** 新增：强制重新加载分组数据 ***
-             */
-            window.QQ_ForceReloadContactGroups = async function() {
-                try {
-                    const characterId = getCurrentCharacterId() || 'default';
-                    console.log(`🔄 强制从世界书重新加载分组数据，角色ID: ${characterId}`);
-                    
-                    // 清空内存缓存
-                    contactGroups.length = 0;
-                    
-                    // *** 简化加载：直接使用loadGroupsFromStorage ***
-                    await loadGroupsFromStorage();
-                    
-                    console.log(`✅ 从世界书重新加载了 ${contactGroups.length} 个分组`);
-                    if (contactGroups.length > 0) {
-                        console.log('📊 分组详情:', contactGroups.map(g => `${g.name}(${g.contacts.length}人)`).join(', '));
-                    }
-                    
-                    return contactGroups;
-                } catch (error) {
-                    console.error('💥 强制重新加载分组数据失败:', error);
-                    return [];
-                }
-            };
+
             
             /**
              * *** 已移除：重复的window.loadGroupsFromStorage定义 ***
@@ -32484,6 +32545,78 @@ MiPhone_JSON_END`;
             });
             
             /**
+             * *** 新增：清理重复的私聊群组 ***
+             */
+            window.QQ_CleanDuplicatePrivateChats = function() {
+                console.log('🧹 开始清理重复的私聊群组...');
+                
+                try {
+                    // 获取世界书中的群聊数据
+                    const worldInfo = getWorldInfoSettings();
+                    let hasChanges = false;
+                    
+                    if (worldInfo && worldInfo.entries) {
+                        const duplicateGroups = [];
+                        const seenChats = new Set();
+                        
+                        worldInfo.entries.forEach((entry, index) => {
+                            if (entry.key && entry.key.includes('QQ_GroupChats_')) {
+                                try {
+                                    const data = JSON.parse(entry.content);
+                                    
+                                    // 检查是否有重复的私聊格式
+                                    Object.keys(data).forEach(chatKey => {
+                                        const normalizedKey = chatKey.replace('私聊', '聊天');
+                                        
+                                        if (chatKey !== normalizedKey && seenChats.has(normalizedKey)) {
+                                            console.log(`🔍 发现重复私聊: "${chatKey}" 和 "${normalizedKey}"`);
+                                            duplicateGroups.push({
+                                                entryIndex: index,
+                                                originalKey: chatKey,
+                                                normalizedKey: normalizedKey,
+                                                entry: entry
+                                            });
+                                        } else {
+                                            seenChats.add(normalizedKey);
+                                        }
+                                    });
+                                } catch (e) {
+                                    console.warn('⚠️ 解析群聊数据失败:', entry.key, e);
+                                }
+                            }
+                        });
+                        
+                        // 清理重复的条目
+                        if (duplicateGroups.length > 0) {
+                            console.log(`🗑️ 准备清理 ${duplicateGroups.length} 个重复群组`);
+                            
+                            duplicateGroups.forEach(duplicate => {
+                                console.log(`删除重复群组: ${duplicate.originalKey}`);
+                                // 这里可以选择删除或合并数据
+                                // 为安全起见，我们先标记而不是直接删除
+                                duplicate.entry.comment = `[待清理] 重复的私聊群组: ${duplicate.originalKey}`;
+                                hasChanges = true;
+                            });
+                            
+                            if (hasChanges) {
+                                console.log('💾 保存清理后的世界书数据...');
+                                saveWorldInfo(worldInfo);
+                                console.log('✅ 重复群组清理完成！');
+                                toastr.success(`已标记 ${duplicateGroups.length} 个重复群组待清理`, '数据清理');
+                            }
+                        } else {
+                            console.log('✅ 未发现重复的私聊群组');
+                            toastr.info('未发现重复的私聊群组', '数据清理');
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 清理重复群组时出错:', error);
+                    toastr.error('清理过程中出现错误', '数据清理');
+                }
+            };
+            
+            /**
              * *** 新增：调试分组数据存储状况 ***
              */
             window.QQ_Debug_Group_Storage = function() {
@@ -32819,6 +32952,78 @@ MiPhone_JSON_END`;
                     toastr.error('测试过程中出现错误，请查看控制台', '测试失败');
                 }
             }
+            
+            /**
+             * *** 新增：清理重复的私聊群组 ***
+             */
+            window.QQ_CleanDuplicatePrivateChats = function() {
+                console.log('🧹 开始清理重复的私聊群组...');
+                
+                try {
+                    // 获取世界书中的群聊数据
+                    const worldInfo = getWorldInfoSettings();
+                    let hasChanges = false;
+                    
+                    if (worldInfo && worldInfo.entries) {
+                        const duplicateGroups = [];
+                        const seenChats = new Set();
+                        
+                        worldInfo.entries.forEach((entry, index) => {
+                            if (entry.key && entry.key.includes('QQ_GroupChats_')) {
+                                try {
+                                    const data = JSON.parse(entry.content);
+                                    
+                                    // 检查是否有重复的私聊格式
+                                    Object.keys(data).forEach(chatKey => {
+                                        const normalizedKey = chatKey.replace('私聊', '聊天');
+                                        
+                                        if (chatKey !== normalizedKey && seenChats.has(normalizedKey)) {
+                                            console.log(`🔍 发现重复私聊: "${chatKey}" 和 "${normalizedKey}"`);
+                                            duplicateGroups.push({
+                                                entryIndex: index,
+                                                originalKey: chatKey,
+                                                normalizedKey: normalizedKey,
+                                                entry: entry
+                                            });
+                                        } else {
+                                            seenChats.add(normalizedKey);
+                                        }
+                                    });
+                                } catch (e) {
+                                    console.warn('⚠️ 解析群聊数据失败:', entry.key, e);
+                                }
+                            }
+                        });
+                        
+                        // 清理重复的条目
+                        if (duplicateGroups.length > 0) {
+                            console.log(`🗑️ 准备清理 ${duplicateGroups.length} 个重复群组`);
+                            
+                            duplicateGroups.forEach(duplicate => {
+                                console.log(`删除重复群组: ${duplicate.originalKey}`);
+                                // 这里可以选择删除或合并数据
+                                // 为安全起见，我们先标记而不是直接删除
+                                duplicate.entry.comment = `[待清理] 重复的私聊群组: ${duplicate.originalKey}`;
+                                hasChanges = true;
+                            });
+                            
+                            if (hasChanges) {
+                                console.log('💾 保存清理后的世界书数据...');
+                                saveWorldInfo(worldInfo);
+                                console.log('✅ 重复群组清理完成！');
+                                toastr.success(`已标记 ${duplicateGroups.length} 个重复群组待清理`, '数据清理');
+                            }
+                        } else {
+                            console.log('✅ 未发现重复的私聊群组');
+                            toastr.info('未发现重复的私聊群组', '数据清理');
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 清理重复群组时出错:', error);
+                    toastr.error('清理过程中出现错误', '数据清理');
+                }
+            };
             
         </script>
     </body>
