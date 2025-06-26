@@ -16706,71 +16706,79 @@ ${index + 1}. ${space.name}
             /**
              * *** 新增：从worldbook加载聊天消息备份 ***
              */
-            async function QQ_Load_Chat_Backup() {
-                // 使用与其他功能相同的简单检查方式
+             async function QQ_Load_Chat_Backup() {
+                // 统一的入口点，确保世界书环境就绪
                 if (!worldbook || !entries) {
                     console.log('聊天备份加载跳过：缺少worldbook或entries');
                     return false;
                 }
                 
                 try {
-                    // 先尝试使用统一的QQ_GetFromWorldBook加载机制
-                    let backupData = await QQ_GetFromWorldBook('手机-聊天消息备份');
-                    
-                    // 如果QQ_GetFromWorldBook返回null，尝试直接从entries查找（兼容旧格式）
-                    if (!backupData) {
-                        console.log('尝试直接从entries加载聊天备份（兼容旧格式）...');
-                        const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
-                        if (chatBackupEntry && chatBackupEntry.content) {
-                            try {
-                                backupData = JSON.parse(chatBackupEntry.content);
-                                console.log('✅ 使用直接解析方式加载到备份数据');
-                            } catch (parseError) {
-                                console.error('解析聊天备份数据失败:', parseError);
-                                return false;
-                            }
-                        }
-                    }
-                    
-                    if (backupData && backupData.data && (backupData.data.私聊 || backupData.data.群聊)) {
-                        console.log('✅ 找到有效的聊天备份数据，准备恢复...');
-                        console.log('备份时间:', backupData.lastUpdated);
-                            console.log('备份数据包含:', Object.keys(backupData.data.私聊 || {}).length, '个私聊,', Object.keys(backupData.data.群聊 || {}).length, '个群聊');
-                            
-                        // 参考动态加载的成功实现：直接覆盖全局数据
-                                QQ_msgjson = JSON.parse(JSON.stringify(backupData.data)); // 深拷贝
-                                QQ_ChatBackup = backupData;
-                                window.QQ_ChatBackup = QQ_ChatBackup; // 更新全局引用
-                        window.QQ_msgjson = QQ_msgjson; // 确保全局引用同步
-                        
-                        console.log('✅ 成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
-                        
-                        // 触发界面更新，参考动态加载的做法
-                        try {
-                            // 更新消息列表显示
-                            if (typeof QQ_UpdateMessageList === 'function') {
-                                QQ_UpdateMessageList();
-                            }
-                            
-                            // 如果当前在聊天界面，刷新聊天内容
-                            if (currentChatTarget && (QQ_msgjson.私聊[`${UserName}和${currentChatTarget}的聊天`] || QQ_msgjson.群聊[currentChatTarget])) {
-                                console.log('刷新当前聊天界面:', currentChatTarget);
-                                // 重新加载当前聊天
-                                setTimeout(() => {
-                                    QQ_ChangeChatPage(currentChatTarget);
-                                }, 100);
-                            }
-                        } catch (updateError) {
-                            console.warn('界面更新时出错，但聊天数据已成功加载:', updateError);
-                        }
-                        
-                        return true;
-                    } else {
-                        console.log('未找到有效的聊天备份数据');
+                    // 1. 查找唯一的世界书备份条目
+                    const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                    if (!chatBackupEntry || !chatBackupEntry.content) {
+                        console.log('在 worldbook entries 中未找到 "手机-聊天消息备份" 条目或其内容为空。');
                         return false;
                     }
+                    
+                    // 2. 解析JSON数据
+                    let backupData;
+                    try {
+                        backupData = JSON.parse(chatBackupEntry.content);
+                    } catch (parseError) {
+                        console.error('解析聊天备份 JSON 数据失败:', parseError);
+                        return false;
+                    }
+
+                    // 3. 兼容新旧两种数据格式
+                    // 新格式把数据包在 .data 里，旧格式直接就是数据对象。
+                    const finalData = backupData && backupData.data ? backupData.data : backupData;
+
+                    if (!finalData || (!finalData.私聊 && !finalData.群聊)) {
+                        console.log('解析后的备份数据中未找到有效的私聊或群聊内容。');
+                        return false;
+                    }
+
+                    console.log('✅ 找到有效的聊天备份数据，准备恢复...');
+                    
+                    // 4. 恢复核心数据到全局变量
+                    window.QQ_msgjson = JSON.parse(JSON.stringify(finalData));
+                    
+                    // 5. 从备份中恢复群组列表 (关键修复)
+                    if (window.QQ_msgjson.群聊) {
+                        const loadedGroups = Object.keys(window.QQ_msgjson.群聊).map(groupName => ({
+                            id: window.QQ_msgjson.群聊[groupName].id || `group_${Date.now()}_${Math.random()}`,
+                            name: groupName,
+                            members: window.QQ_msgjson.群聊[groupName].members || []
+                        }));
+                        window.QQ_Groups = loadedGroups;
+                        console.log('✅ 从聊天备份中成功恢复群组列表:', loadedGroups.length, '个群组');
+                    }
+
+                    // 6. 异步更新UI界面，确保数据加载完成后再渲染
+                    setTimeout(() => {
+                        try {
+                            console.log('开始异步更新UI界面...');
+                            if (typeof renderContactGroups === 'function') {
+                                renderContactGroups(); // 渲染联系人+群组列表
+                            }
+                            if (typeof QQ_UpdateMessageList === 'function') {
+                                QQ_UpdateMessageList(); // 更新消息红点
+                            }
+                            // 如果之前停留在某个聊天，自动打开
+                            if (window.currentChatTarget && (window.QQ_msgjson.私聊[`${UserName}和${window.currentChatTarget}的聊天`] || window.QQ_msgjson.群聊[window.currentChatTarget])) {
+                                QQ_ChangeChatPage(window.currentChatTarget);
+                            }
+                            console.log('✅ UI界面已异步更新');
+                        } catch (updateError) {
+                            console.warn('UI异步更新时出错，但数据已成功加载:', updateError);
+                        }
+                    }, 100);
+                    
+                    return true;
+
                 } catch (error) {
-                    console.error('加载聊天备份失败:', error);
+                    console.error('加载聊天备份过程中发生未知错误:', error);
                     return false;
                 }
             }
