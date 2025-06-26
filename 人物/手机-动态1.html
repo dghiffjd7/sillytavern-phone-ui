@@ -5511,11 +5511,15 @@
                 }
                 
                 try {
-                    // *** 新增：在保存前清理过期消息数据和系统消息 ***
+                    // *** 修复：只清理系统消息，保留所有用户对话消息 ***
                     const cleanedMsgjson = JSON.parse(JSON.stringify(QQ_msgjson)); // 深拷贝避免修改原数据
                     
-                    // 清理过期消息
-                    QQ_CleanOldChatMessages(cleanedMsgjson);
+                    // 注释掉过度激进的时间清理 - 手机前端应该永久保存用户对话
+                    // QQ_CleanOldChatMessages(cleanedMsgjson);
+                    console.log('手机前端特殊处理：跳过时间基础的消息清理，保留所有用户对话记录');
+                    
+                    // *** 新增：手机前端专用温和清理（只清理明显无用的数据） ***
+                    QQ_GentleMobileCleanup(cleanedMsgjson);
                     
                     // *** 新增：排除系统消息 ***
                     if (cleanedMsgjson.私聊) {
@@ -5777,6 +5781,60 @@
                 
                 if (totalOptimized > 0) {
                     console.log(`评论存储优化完成，总共优化了 ${totalOptimized} 条评论`);
+                }
+            }
+            
+            /**
+             * *** 新增：手机前端专用温和清理（只清理明显无用的数据） ***
+             */
+            function QQ_GentleMobileCleanup(msgjsonData) {
+                try {
+                    let cleanedCount = 0;
+                    
+                    // 只清理空消息和格式异常的消息，保留所有有效用户对话
+                    if (msgjsonData.私聊) {
+                        for (const chatKey in msgjsonData.私聊) {
+                            const chat = msgjsonData.私聊[chatKey];
+                            if (Array.isArray(chat)) {
+                                const originalLength = chat.length;
+                                msgjsonData.私聊[chatKey] = chat.filter(msg => {
+                                    // 只过滤掉空消息或格式严重异常的消息
+                                    if (typeof msg !== 'string' || msg.trim() === '') {
+                                        return false;
+                                    }
+                                    // 保留所有其他消息，包括系统消息
+                                    return true;
+                                });
+                                cleanedCount += originalLength - msgjsonData.私聊[chatKey].length;
+                            }
+                        }
+                    }
+                    
+                    if (msgjsonData.群聊) {
+                        for (const groupKey in msgjsonData.群聊) {
+                            const group = msgjsonData.群聊[groupKey];
+                            if (group && Array.isArray(group.msgs)) {
+                                const originalLength = group.msgs.length;
+                                group.msgs = group.msgs.filter(msg => {
+                                    // 只过滤掉空消息或格式严重异常的消息
+                                    if (typeof msg !== 'string' || msg.trim() === '') {
+                                        return false;
+                                    }
+                                    // 保留所有其他消息，包括系统消息
+                                    return true;
+                                });
+                                cleanedCount += originalLength - group.msgs.length;
+                            }
+                        }
+                    }
+                    
+                    if (cleanedCount > 0) {
+                        console.log(`手机前端温和清理：移除了 ${cleanedCount} 条空消息或格式异常的消息`);
+                    } else {
+                        console.log('手机前端温和清理：没有需要清理的无效消息');
+                    }
+                } catch (error) {
+                    console.error('手机前端温和清理时出错:', error);
                 }
             }
             
