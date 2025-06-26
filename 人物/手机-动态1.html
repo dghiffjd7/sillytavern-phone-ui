@@ -5521,6 +5521,9 @@
                     // *** 新增：手机前端专用温和清理（只清理明显无用的数据） ***
                     QQ_GentleMobileCleanup(cleanedMsgjson);
                     
+                    // *** 新增：限制聊天消息总数量，避免备份过大 ***
+                    QQ_LimitChatMessages(cleanedMsgjson, 500);
+                    
                     // *** 新增：排除系统消息 ***
                     if (cleanedMsgjson.私聊) {
                         for (const chatKey in cleanedMsgjson.私聊) {
@@ -5579,7 +5582,7 @@
                         }
                     }
                     
-                    console.log('准备备份聊天消息:', totalPrivateChats, '个私聊,', totalGroupChats, '个群聊, 共', totalUserMessages, '条用户对话消息（已排除系统消息）');
+                    console.log('准备备份聊天消息:', totalPrivateChats, '个私聊,', totalGroupChats, '个群聊, 共', totalUserMessages, '条用户对话消息（已排除系统消息，限制最多500条）');
                     
                     if (chatBackupEntry) {
                         // 更新现有条目
@@ -5781,6 +5784,165 @@
                 
                 if (totalOptimized > 0) {
                     console.log(`评论存储优化完成，总共优化了 ${totalOptimized} 条评论`);
+                }
+            }
+            
+            /**
+             * *** 新增：限制聊天消息总数量，保留最新的消息 ***
+             * @param {Object} msgjsonData - 聊天数据对象
+             * @param {number} maxMessages - 最大保留消息数量
+             */
+            function QQ_LimitChatMessages(msgjsonData, maxMessages = 500) {
+                try {
+                    console.log(`开始执行聊天消息数量限制，最大保留 ${maxMessages} 条消息`);
+                    
+                    // 收集所有消息并添加时间戳
+                    const allMessages = [];
+                    
+                    // 收集私聊消息
+                    if (msgjsonData.私聊) {
+                        for (const chatKey in msgjsonData.私聊) {
+                            const chat = msgjsonData.私聊[chatKey];
+                            if (Array.isArray(chat)) {
+                                chat.forEach(msg => {
+                                    if (typeof msg === 'string' && msg.includes('--')) {
+                                        const parts = msg.split('--');
+                                        if (parts.length >= 3) {
+                                            try {
+                                                const timestamp = new Date(parts[2]).getTime();
+                                                allMessages.push({
+                                                    type: '私聊',
+                                                    chatKey: chatKey,
+                                                    message: msg,
+                                                    timestamp: timestamp || 0
+                                                });
+                                            } catch (e) {
+                                                // 时间解析失败，设置为当前时间
+                                                allMessages.push({
+                                                    type: '私聊',
+                                                    chatKey: chatKey,
+                                                    message: msg,
+                                                    timestamp: Date.now()
+                                                });
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    
+                    // 收集群聊消息
+                    if (msgjsonData.群聊) {
+                        for (const groupKey in msgjsonData.群聊) {
+                            const group = msgjsonData.群聊[groupKey];
+                            if (group && Array.isArray(group.msgs)) {
+                                group.msgs.forEach(msg => {
+                                    if (typeof msg === 'string' && msg.includes('--')) {
+                                        const parts = msg.split('--');
+                                        if (parts.length >= 3) {
+                                            try {
+                                                const timestamp = new Date(parts[2]).getTime();
+                                                allMessages.push({
+                                                    type: '群聊',
+                                                    chatKey: groupKey,
+                                                    message: msg,
+                                                    timestamp: timestamp || 0
+                                                });
+                                            } catch (e) {
+                                                // 时间解析失败，设置为当前时间
+                                                allMessages.push({
+                                                    type: '群聊',
+                                                    chatKey: groupKey,
+                                                    message: msg,
+                                                    timestamp: Date.now()
+                                                });
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    
+                    console.log(`收集到总共 ${allMessages.length} 条消息`);
+                    
+                    // 如果消息数量超过限制，进行削减
+                    if (allMessages.length > maxMessages) {
+                        // 按时间戳排序，保留最新的消息
+                        allMessages.sort((a, b) => b.timestamp - a.timestamp);
+                        
+                        // 只保留最新的maxMessages条消息
+                        const keepMessages = allMessages.slice(0, maxMessages);
+                        const removedCount = allMessages.length - maxMessages;
+                        
+                        console.log(`消息数量超限，将保留最新的 ${maxMessages} 条消息，删除 ${removedCount} 条旧消息`);
+                        
+                        // 清空原始数据
+                        if (msgjsonData.私聊) {
+                            for (const chatKey in msgjsonData.私聊) {
+                                msgjsonData.私聊[chatKey] = [];
+                            }
+                        }
+                        if (msgjsonData.群聊) {
+                            for (const groupKey in msgjsonData.群聊) {
+                                if (msgjsonData.群聊[groupKey] && msgjsonData.群聊[groupKey].msgs) {
+                                    msgjsonData.群聊[groupKey].msgs = [];
+                                }
+                            }
+                        }
+                        
+                        // 重新分配保留的消息
+                        keepMessages.forEach(msgObj => {
+                            if (msgObj.type === '私聊') {
+                                if (!msgjsonData.私聊[msgObj.chatKey]) {
+                                    msgjsonData.私聊[msgObj.chatKey] = [];
+                                }
+                                msgjsonData.私聊[msgObj.chatKey].push(msgObj.message);
+                            } else if (msgObj.type === '群聊') {
+                                if (!msgjsonData.群聊[msgObj.chatKey]) {
+                                    msgjsonData.群聊[msgObj.chatKey] = { msgs: [] };
+                                }
+                                if (!msgjsonData.群聊[msgObj.chatKey].msgs) {
+                                    msgjsonData.群聊[msgObj.chatKey].msgs = [];
+                                }
+                                msgjsonData.群聊[msgObj.chatKey].msgs.push(msgObj.message);
+                            }
+                        });
+                        
+                        // 按时间重新排序每个聊天的消息
+                        if (msgjsonData.私聊) {
+                            for (const chatKey in msgjsonData.私聊) {
+                                if (Array.isArray(msgjsonData.私聊[chatKey]) && msgjsonData.私聊[chatKey].length > 0) {
+                                    msgjsonData.私聊[chatKey].sort((a, b) => {
+                                        const timeA = new Date(a.split('--')[2]).getTime();
+                                        const timeB = new Date(b.split('--')[2]).getTime();
+                                        return timeA - timeB;
+                                    });
+                                }
+                            }
+                        }
+                        
+                        if (msgjsonData.群聊) {
+                            for (const groupKey in msgjsonData.群聊) {
+                                const group = msgjsonData.群聊[groupKey];
+                                if (group && Array.isArray(group.msgs) && group.msgs.length > 0) {
+                                    group.msgs.sort((a, b) => {
+                                        const timeA = new Date(a.split('--')[2]).getTime();
+                                        const timeB = new Date(b.split('--')[2]).getTime();
+                                        return timeA - timeB;
+                                    });
+                                }
+                            }
+                        }
+                        
+                        console.log(`消息数量限制完成，已保留最新的 ${maxMessages} 条消息`);
+                    } else {
+                        console.log(`消息数量 ${allMessages.length} 未超过限制 ${maxMessages}，无需删除`);
+                    }
+                    
+                } catch (error) {
+                    console.error('限制聊天消息数量时出错:', error);
                 }
             }
             
@@ -6098,6 +6260,62 @@
                 console.log('清理结果已保存到世界书');
                 
                 return window.QQ_Show_Moments_Stats();
+            };
+            
+            /**
+             * *** 新增：测试聊天消息数量限制功能（调试用） ***
+             */
+            window.QQ_Test_Message_Limit = function() {
+                console.log('=== 聊天消息数量限制测试 ===');
+                
+                if (!QQ_msgjson) {
+                    console.log('❌ QQ_msgjson 不存在，无法测试');
+                    return false;
+                }
+                
+                // 统计当前消息数量
+                let totalMessages = 0;
+                let privateChats = 0;
+                let groupChats = 0;
+                
+                if (QQ_msgjson.私聊) {
+                    for (const chatKey in QQ_msgjson.私聊) {
+                        if (Array.isArray(QQ_msgjson.私聊[chatKey])) {
+                            privateChats++;
+                            totalMessages += QQ_msgjson.私聊[chatKey].length;
+                        }
+                    }
+                }
+                
+                if (QQ_msgjson.群聊) {
+                    for (const groupKey in QQ_msgjson.群聊) {
+                        const group = QQ_msgjson.群聊[groupKey];
+                        if (group && Array.isArray(group.msgs)) {
+                            groupChats++;
+                            totalMessages += group.msgs.length;
+                        }
+                    }
+                }
+                
+                console.log(`当前消息统计:`);
+                console.log(`- 私聊: ${privateChats} 个`);
+                console.log(`- 群聊: ${groupChats} 个`);
+                console.log(`- 总消息数: ${totalMessages} 条`);
+                
+                if (totalMessages > 500) {
+                    console.log(`⚠️ 消息数量 ${totalMessages} 超过限制500条，下次保存时会自动削减`);
+                } else {
+                    console.log(`✅ 消息数量 ${totalMessages} 未超过限制500条`);
+                }
+                
+                console.log('💡 提示：调用 QQ_Save_Chat_Backup() 来测试消息限制功能');
+                
+                return {
+                    totalMessages,
+                    privateChats,
+                    groupChats,
+                    needsLimit: totalMessages > 500
+                };
             };
             
             /**
