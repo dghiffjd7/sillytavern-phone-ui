@@ -4313,6 +4313,7 @@
         <script></script>
         <script>
             var __webpack_exports__ = {}; // ./src/界面/chat/chat_page.html
+            var lastAiNewMessages = {};
 
             // Module
             var code =
@@ -4434,6 +4435,113 @@
             // discord
 
             // 世界书
+
+            /**
+             * (第一层) 寻找AI回复中的表格数据本身
+             * @param {string} fullResponse - AI的完整回复
+             * @returns {string|null} 找到的表格文本或null
+             */
+            function findTableData(fullResponse) {
+                console.log("🔍 第一层检测：寻找表格化数据...");
+                // 这个正则表达式用于匹配常见的Markdown表格格式
+                const tableRegex = /(\|(?:[^\r\n\|]+\|)+\r?\n\|(?:-+\|)+[\s\S]+)/;
+                const match = fullResponse.match(tableRegex);
+                
+                if (match && match[1]) {
+                    console.log("   ✅ 匹配到Markdown表格数据。");
+                    return match[1].trim(); // 返回完整的表格作为上下文
+                }
+
+                console.log("   未找到表格数据。");
+                return null;
+            }
+
+            /**
+             * (第二层) 寻找用户自定义的摘要
+             * @param {string} fullResponse - AI的完整回复
+             * @returns {string|null} 找到的摘要文本或null
+             */
+            function findSummaryUsingUserPatterns(fullResponse) {
+                console.log("🔍 第二层检测：使用用户自定义摘要格式...");
+                const patternsString = Phone_Settings.readValue("下面是基本设置", "SummaryPatterns");
+                if (!patternsString) {
+                    console.log("   用户未定义摘要格式，跳过。");
+                    return null;
+                }
+
+                const patterns = patternsString.split('|||').map(p => p.trim());
+                for (const pattern of patterns) {
+                    try {
+                        const match = pattern.match(new RegExp('^/(.*?)/([gimy]*)$'));
+                        if (!match) continue;
+                        
+                        const regex = new RegExp(match[1], match[2]);
+                        const summaryMatch = fullResponse.match(regex);
+
+                        if (summaryMatch && summaryMatch[1] && summaryMatch[1].trim() !== "") {
+                            console.log(`   ✅ 匹配到用户自定义摘要`);
+                            return summaryMatch[1].trim();
+                        }
+                    } catch (e) { console.error(`无效的摘要正则表达式: ${pattern}`, e); }
+                }
+                return null;
+            }
+
+            /**
+             * (第三层) 寻找通用的摘要格式
+             * @param {string} fullResponse - AI的完整回复
+             * @returns {string|null} 找到的摘要文本或null
+             */
+            function findSummaryUsingHeuristics(fullResponse) {
+                console.log("🔍 第三层检测：使用通用格式启发式检测...");
+                const heuristicPatterns = [
+                    /<details><summary>[摘要总结概括结语].*?<\/summary>([\s\S]+?)<\/details>/i,
+                    /(?:\[|\*\*|##)\s*[摘要总结概括结语Summary]+\s*(?::|\*\*|##)\s*([\s\S]+)/i
+                ];
+
+                for (const regex of heuristicPatterns) {
+                    const summaryMatch = fullResponse.match(regex);
+                    if (summaryMatch && summaryMatch[1] && summaryMatch[1].trim() !== "") {
+                        console.log(`   ✅ 匹配到通用摘要格式`);
+                        return summaryMatch[1].trim();
+                    }
+                }
+                return null;
+            }
+
+            /**
+             * (第四层 - 安全网) 生成备用摘要
+             */
+            function createHistorySummary(newMessages) {
+                console.log("⚠️ 第四层安全网启动：由前端生成历史摘要。");
+                let summaryLines = [];
+                if (newMessages.私聊) {
+                    for (const chatKey in newMessages.私聊) {
+                        newMessages.私聊[chatKey].forEach(msg => {
+                            const parts = msg.split('--');
+                            if (parts.length >= 2 && parts[0] !== '{{user}}') {
+                                summaryLines.push(`[私聊] ${parts[0]}: ${parts[1]}`);
+                            }
+                        });
+                    }
+                }
+                if (newMessages.群聊) {
+                    for (const groupName in newMessages.群聊) {
+                        if (newMessages.群聊[groupName].msgs) {
+                            newMessages.群聊[groupName].msgs.forEach(msg => {
+                                const parts = msg.split('--');
+                                if (parts.length >= 2 && parts[0] !== '{{user}}') {
+                                    summaryLines.push(`[群聊: ${groupName}] ${parts[0]}: ${parts[1]}`);
+                                }
+                            });
+                        }
+                    }
+                }
+                if (summaryLines.length === 0) {
+                    return "[AI进行了操作，但没有新的聊天消息]";
+                }
+                return summaryLines.join('\n');
+            }
 
             /**
              * 压缩图片到指定大小，确保兼容localStorage存储
@@ -5203,37 +5311,47 @@
                 return result;
             }
             /**
-             * 保存消息（增强版：原有机制 + worldbook备份）
-             * @returns
+             * 保存消息（集成了四层智能上下文净化系统）
              */
             async function QQ_Save_Msg() {
-                if (!QQ_msgjson) {
-                    return;
+                if (!QQ_msgjson) { return; }
+                const CurrentMessageId = getCurrentMessageId();
+                if (!CurrentMessageId) { return; }
+                const Messages = await getChatMessages(CurrentMessageId);
+                if (!Messages || Messages.length === 0) { return; }
+
+                const aiRawResponse = Messages[0].message;
+                let cleanSummaryText = null;
+
+                // --- 四层上下文净化系统 ---
+                // 第一层: 查找表格化数据 (最高优先级)
+                cleanSummaryText = findTableData(aiRawResponse);
+
+                // 第二层: 如果没有表格，查找用户自定义的摘要格式
+                if (!cleanSummaryText) {
+                    cleanSummaryText = findSummaryUsingUserPatterns(aiRawResponse);
+                }
+
+                // 第三层: 如果还没有，查找通用的启发式摘要格式
+                if (!cleanSummaryText) {
+                    cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
+                }
+
+                // 第四层: 如果全部失败，前端生成机械式总结作为最终安全网
+                if (!cleanSummaryText) {
+                    cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
                 }
                 
-                // 原有保存机制：保存到SillyTavern消息系统
-                const CurrentMessageId = getCurrentMessageId();
-                const Messages = await getChatMessages(CurrentMessageId);
-                if (!Messages) {
-                    console.log(`获取楼层记录失败`);
-                    return;
+                if (!cleanSummaryText || cleanSummaryText.trim() === "") {
+                    cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
                 }
-                let msg = Messages[0].message;
-                const match = msg.match(/msg_start[\s\S]+?msg_end/);
-                if (!match) {
-                    console.log(`匹配楼层记录失败`);
-                    return;
-                }
-                msg = msg.replace(
-                    match[0],
-                    `msg_start\n${QQ_Json2Text(QQ_msgjson)}\nmsg_end`,
-                );
-                setChatMessage({ message: msg }, CurrentMessageId, {
+
+                console.log("上下文净化：使用最终摘要替换AI的原始输出。");
+                await setChatMessage({ message: cleanSummaryText }, CurrentMessageId, {
                     refresh: "none",
                 });
-                
-                // *** 新增：worldbook备份机制 ***
-                console.log('开始聊天消息worldbook备份...');
+
+                window.lastAiNewMessages = {}; 
                 await QQ_Save_Chat_Backup();
             }
             
@@ -6489,6 +6607,8 @@
 - 重复性内容（不同角色说相似的话）
 - 缺乏互动性（没有提问或引导）
 - 角色同质化（所有角色回复风格相同）
+
+
 ⚠️【注意】：保持自然对话，避免过度复杂>`;
                 
                 // 用户开始新的消息发送时重置重试计数
@@ -6786,6 +6906,7 @@
                 result = System_TagCompletion(result);
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
+
                 
                 // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
                 console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
