@@ -5429,17 +5429,17 @@
             async function QQ_Save_Msg() {
                 console.log('=== QQ_Save_Msg 开始执行 ===');
                 
-                if (!QQ_msgjson) { 
+                if (!QQ_msgjson) {
                     console.log('❌ QQ_Save_Msg: QQ_msgjson 不存在，跳过保存');
-                    return; 
+                    return;
                 }
                 console.log('✅ QQ_msgjson 检查通过');
                 
                 const CurrentMessageId = getCurrentMessageId();
                 console.log('🔍 getCurrentMessageId() 返回值:', CurrentMessageId, '类型:', typeof CurrentMessageId);
                 
-                if (!CurrentMessageId) {
-                    console.log('⚠️ QQ_Save_Msg: getCurrentMessageId() 失败，但由于手机前端特殊性，直接执行聊天备份');
+                if (CurrentMessageId === null || CurrentMessageId === undefined) {
+                    console.log('⚠️ QQ_Save_Msg: getCurrentMessageId() 真正失败，直接执行聊天备份');
                     // 手机前端可能不需要依赖CurrentMessageId，直接执行聊天备份
                     console.log('开始执行聊天备份...');
                     await QQ_Save_Chat_Backup();
@@ -5447,11 +5447,18 @@
                     return;
                 }
                 console.log('✅ CurrentMessageId 获取成功:', CurrentMessageId);
+                console.log('🔍 手机前端环境详情:', {
+                    'window.location.href': window.location.href,
+                    'document.title': document.title,
+                    '是否在iframe中': window !== window.top,
+                    'body包含MiPhone': document.body.innerHTML.includes('MiPhone'),
+                    'DOM结构': document.querySelector('.mes') ? '有SillyTavern消息结构' : '无标准消息结构'
+                });
                 
                 const Messages = await getChatMessages(CurrentMessageId);
                 if (!Messages || Messages.length === 0) { 
                     console.log('❌ QQ_Save_Msg: getChatMessages() 失败或为空，跳过保存');
-                    return; 
+                    return;
                 }
                 console.log('✅ Messages 获取成功，长度:', Messages.length);
 
@@ -6086,7 +6093,7 @@
                 console.log('=== 测试完成 ===');
                 return true;
             };
-
+            
             /**
              * *** 新增：检查聊天备份状态（调试用） ***
              */
@@ -15703,13 +15710,13 @@ ${index + 1}. ${space.name}
                 if (!restoredFromBackup) {
                     // 如果从备份加载失败（比如新用户），则尝试解析当前楼层的旧格式消息作为备用方案
                     console.log('备份加载失败，尝试解析当前楼层消息...');
-                    let match = message.match(/msg_start([\s\S]+?)msg_end/);
-                    if (match) {
+                let match = message.match(/msg_start([\s\S]+?)msg_end/);
+                if (match) {
                         console.log(`解析当前楼层聊天记录：\n${match[1].trim()}`);
-                        await QQ_Msg_Parse(match[1].trim());
-                        if (!match[1].match(/\S/)) {
-                            await QQ_Save_Msg();
-                        }
+                    await QQ_Msg_Parse(match[1].trim());
+                    if (!match[1].match(/\S/)) {
+                        await QQ_Save_Msg();
+                    }
                     }
                 }
                 const matches = message.matchAll(
