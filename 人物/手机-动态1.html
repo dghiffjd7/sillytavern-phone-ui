@@ -7209,6 +7209,7 @@
                     console.log("✅ 优先级1成功：严格匹配处理完成，立即return");
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
+                    await QQ_Save_Chat_Backup(); 
                     return; // 优先级1成功，立即return
                 }
                 
@@ -7223,6 +7224,7 @@
                     console.log("✅ 优先级2成功：模糊/修复匹配处理完成，立即return");
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
+                    await QQ_Save_Chat_Backup(); 
                     return; // 优先级2成功，立即return
                 }
                 
@@ -7232,6 +7234,7 @@
                 if (interactiveResult.success) {
                     console.log("✅ 优先级3成功：互动内容处理完成，立即return");
                     QQ_ResetRetry();
+                    await QQ_Save_Chat_Backup(); 
                     return; // 优先级3成功，立即return
                 }
                 
@@ -7242,6 +7245,7 @@
                     console.log("✅ 优先级4成功：智能提取处理完成，立即return");
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
+                    await QQ_Save_Chat_Backup(); 
                     return; // 优先级4成功，立即return
                 }
                 
@@ -22497,56 +22501,6 @@ ${index + 1}. ${space.name}
                     QQ_Groups = [];
                 }
             } 
-            let isAiReplying = false; // 用一个简单的状态变量来跟踪AI是否在回复
-
-            // =================================================================================
-            // AI 状态监听器 - 修复版 (2024-07-29)
-            // 解决了SillyTavern.state初始化时机问题，确保监听器在安全的环境下运行
-            // =================================================================================
-
-            let mainAiListenerId = null; // 用于存储主监听器的ID
-
-            function QQ_Start_AI_State_Listener() {
-                // 如果监听器已在运行，则不再重复创建
-                if (mainAiListenerId) return;
-
-                console.log('🚀 AI 状态监听器已启动！');
-
-                mainAiListenerId = setInterval(async () => {
-                    // [修复] 从父窗口(parent)获取状态，因为此UI在iframe中运行
-                    const isStreaming = parent.SillyTavern.state.is_send;
-
-                    if (isStreaming && !isAiReplying) {
-                        isAiReplying = true;
-                        console.log('🤖 AI 开始回复...');
-                    } else if (!isStreaming && isAiReplying) {
-                        console.log('✅ AI 回复结束，准备处理和保存消息...');
-                        isAiReplying = false; 
-
-                        // [修复] 从父窗口(parent)获取SillyTavern的工具集(ST)
-                        // 注意: 此处假设父窗口有 ST 对象，这是常见的ST扩展实践
-                        if (parent.ST && typeof parent.ST.GetLastMessage === 'function') {
-                            const finalMessage = parent.ST.GetLastMessage().msg;
-                            await QQ_Save_Msg(finalMessage);
-                        } else {
-                            console.error('❌ 无法在父窗口找到 ST.GetLastMessage() 函数！消息保存失败。');
-                        }
-                    }
-                }, 500);
-            }
-
-            // 就绪检查器：等待 SillyTavern 核心对象准备好
-            let readinessCheckCount = 0;
-            const readinessChecker = setInterval(() => {
-                // [修复] 检查父窗口(parent)的SillyTavern对象
-                if (parent.SillyTavern && parent.SillyTavern.state) {
-                    console.log('✅ parent.SillyTavern.state 已就绪!');
-                    // 清除自己
-                    clearInterval(readinessChecker);
-                    // 安全启动主监听器
-                    QQ_Start_AI_State_Listener();
-                }
-            }, 200); // 每 200ms 检查一次
             
             // 启动保护机制
             protectQQGroups();
