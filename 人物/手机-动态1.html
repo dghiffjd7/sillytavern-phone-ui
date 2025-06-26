@@ -22503,33 +22503,46 @@ ${index + 1}. ${space.name}
             } 
             let isAiReplying = false; // 用一个简单的状态变量来跟踪AI是否在回复
 
-            setInterval(async () => {
-                // 获取当前 SillyTavern 的核心状态：AI是否正在生成消息
-                // state.is_send 在 AI 回复时为 true，结束后为 false
-                const isStreaming = SillyTavern.state.is_send;
+            // =================================================================================
+            // AI 状态监听器 - 修复版 (2024-07-29)
+            // 解决了SillyTavern.state初始化时机问题，确保监听器在安全的环境下运行
+            // =================================================================================
 
-                // --- 状态判断 ---
+            let mainAiListenerId = null; // 用于存储主监听器的ID
 
-                if (isStreaming && !isAiReplying) {
-                    // 条件：AI 刚刚开始回复 (状态从 false -> true)
-                    // 我们在这里将状态标记为“正在回复”，并等待它结束
-                    isAiReplying = true;
-                    console.log('🤖 AI 开始回复...');
+            function QQ_Start_AI_State_Listener() {
+                // 如果监听器已在运行，则不再重复创建
+                if (mainAiListenerId) return;
 
-                } else if (!isStreaming && isAiReplying) {
-                    // 条件：AI 刚刚结束回复 (状态从 true -> false)
-                    // 这是捕获完整消息并保存的最佳时机！
-                    console.log('✅ AI 回复结束，准备处理和保存消息...');
-                    isAiReplying = false; // 重置状态，为下一次回复做准备
+                console.log('🚀 AI 状态监听器已启动！');
 
-                    // 在这个最准确的时刻，获取AI刚刚完成的最终消息
-                    const finalMessage = ST.GetLastMessage().msg;
-                    
-                    // 调用我们的主保存/处理函数
-                    // 因为时机是准确的，所以 finalMessage 不会是空的
-                    await QQ_Save_Msg(finalMessage);
+                mainAiListenerId = setInterval(async () => {
+                    // 由于启动时已确保SillyTavern.state存在，这里的调用是安全的
+                    const isStreaming = SillyTavern.state.is_send;
+
+                    if (isStreaming && !isAiReplying) {
+                        isAiReplying = true;
+                        console.log('🤖 AI 开始回复...');
+                    } else if (!isStreaming && isAiReplying) {
+                        console.log('✅ AI 回复结束，准备处理和保存消息...');
+                        isAiReplying = false; 
+
+                        const finalMessage = ST.GetLastMessage().msg;
+                        await QQ_Save_Msg(finalMessage);
+                    }
+                }, 500);
+            }
+
+            // 就绪检查器：等待 SillyTavern 核心对象准备好
+            const readinessChecker = setInterval(() => {
+                if (window.SillyTavern && window.SillyTavern.state) {
+                    console.log('✅ SillyTavern.state 已就绪!');
+                    // 清除自己
+                    clearInterval(readinessChecker);
+                    // 安全启动主监听器
+                    QQ_Start_AI_State_Listener();
                 }
-            }, 500);
+            }, 200); // 每 200ms 检查一次
             
             // 启动保护机制
             protectQQGroups();
