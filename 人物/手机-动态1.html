@@ -5424,80 +5424,96 @@
                 return result;
             }
             /**
-             * 保存消息（集成了四层智能上下文净化系统）
+             * 处理收到的新消息，并触发解析和保存 (已修复上下文净化问题)
+             * @param {string} msg 
              */
-            async function QQ_Save_Msg() {
-                console.log('=== QQ_Save_Msg 开始执行 ===');
-                
-                if (!QQ_msgjson) {
-                    console.log('❌ QQ_Save_Msg: QQ_msgjson 不存在，跳过保存');
-                    return;
-                }
-                console.log('✅ QQ_msgjson 检查通过');
-                
-                const CurrentMessageId = getCurrentMessageId();
-                console.log('🔍 getCurrentMessageId() 返回值:', CurrentMessageId, '类型:', typeof CurrentMessageId);
-                
-                if (CurrentMessageId === null || CurrentMessageId === undefined) {
-                    console.log('⚠️ QQ_Save_Msg: getCurrentMessageId() 真正失败，直接执行聊天备份');
-                    // 手机前端可能不需要依赖CurrentMessageId，直接执行聊天备份
-                    console.log('开始执行聊天备份...');
-                    await QQ_Save_Chat_Backup();
-                    console.log('聊天备份执行完成');
-                    return;
-                }
-                console.log('✅ CurrentMessageId 获取成功:', CurrentMessageId);
-                console.log('🔍 手机前端环境详情:', {
-                    'window.location.href': window.location.href,
-                    'document.title': document.title,
-                    '是否在iframe中': window !== window.top,
-                    'body包含MiPhone': document.body.innerHTML.includes('MiPhone'),
-                    'DOM结构': document.querySelector('.mes') ? '有SillyTavern消息结构' : '无标准消息结构'
-                });
-                
-                const Messages = await getChatMessages(CurrentMessageId);
-                if (!Messages || Messages.length === 0) { 
-                    console.log('❌ QQ_Save_Msg: getChatMessages() 失败或为空，跳过保存');
-                    return;
-                }
-                console.log('✅ Messages 获取成功，长度:', Messages.length);
-
-                const aiRawResponse = Messages[0].message;
-                let cleanSummaryText = null;
-
-                // --- 四层上下文净化系统 ---
-                // 第一层: 查找表格化数据 (最高优先级)
-                cleanSummaryText = findTableData(aiRawResponse);
-
-                // 第二层: 如果没有表格，查找用户自定义的摘要格式
-                if (!cleanSummaryText) {
-                    cleanSummaryText = findSummaryUsingUserPatterns(aiRawResponse);
+            async function QQ_Save_Msg(msg) {
+                // ------------------ 第一部分：解析并保存UI数据 ------------------
+                // 这部分确保无论如何，收到的新消息都会被解析并存入我们的 QQ_msgjson 备份系统。
+                console.log(`收到新消息，准备解析处理...`);
+                try {
+                    const parse_ret = await QQ_Msg_Parse(msg);
+                    if (parse_ret) {
+                        console.log('✅ 解析成功，即将触发聊天记录保存到世界书...');
+                        await QQ_Save_Chat_Backup();
+                    } else {
+                        console.warn('⚠️ 消息解析失败或消息内容为空，本次不执行聊天记录备份。消息内容:', msg);
+                    }
+                } catch (error) {
+                    console.error('❌ 在解析和备份聊天记录时发生错误:', error);
                 }
 
-                // 第三层: 如果还没有，查找通用的启发式摘要格式
-                if (!cleanSummaryText) {
-                    cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
-                }
+                // ------------------ 第二部分：净化并重写AI上下文 ------------------
+                // 这部分的目标是生成一个简短的摘要来替换AI的冗长回复，以节省Token。
+                // 【关键修复】：我们必须在这里加入安全检查，防止它破坏我们的功能性标签。
+                try {
+                    const CurrentMessageId = await getLatestMessageId();
+                    if (CurrentMessageId === null) {
+                        console.warn('⚠️ QQ_Save_Msg: 无法获取最新消息ID，跳过上下文净化。');
+                        return;
+                    }
 
-                // 第四层: 如果全部失败，前端生成机械式总结作为最终安全网
-                if (!cleanSummaryText) {
-                    cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
-                }
-                
-                if (!cleanSummaryText || cleanSummaryText.trim() === "") {
-                    cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
-                }
+                    const Messages = await getChatMessages(CurrentMessageId);
+                    if (!Messages || Messages.length === 0) {
+                        console.log('❌ QQ_Save_Msg: getChatMessages() 失败或为空，跳过上下文净化');
+                        return;
+                    }
 
-                console.log("上下文净化：使用最终摘要替换AI的原始输出。");
-                await setChatMessage({ message: cleanSummaryText }, CurrentMessageId, {
-                    refresh: "none",
-                });
-                
-                window.lastAiNewMessages = {}; 
-                
-                console.log('开始执行聊天备份...');
-                await QQ_Save_Chat_Backup();
-                console.log('聊天备份执行完成');
+                    const aiRawResponse = Messages[0].message;
+
+                    // --- 【安全检查开始】 ---
+                    // 检查消息是否包含前端依赖的特殊功能标签。
+                    // 如果包含，说明这不是一个纯粹的AI对话回复，而是承载着功能性数据，绝对不能修改。
+                    const isFunctionalMessage =
+                        aiRawResponse.includes('MiPhone_Start') ||
+                        aiRawResponse.includes('<msg_start>') ||
+                        aiRawResponse.includes('<moment_start>') ||
+                        aiRawResponse.includes('<discord_start>');
+
+                    if (isFunctionalMessage) {
+                        console.log('✅ 检测到功能性标签 (MiPhone, msg, moment等)，跳过上下文净化，保持原始消息内容不变。');
+                        return; // 立即退出，不执行后续的 setChatMessage 覆盖操作
+                    }
+                    // --- 【安全检查结束】 ---
+
+
+                    // 如果不是功能性消息，才继续执行净化流程...
+                    console.log('消息为纯对话，开始执行四层上下文净化...');
+                    let cleanSummaryText = null;
+
+                    // 第一层: 查找表格化数据
+                    cleanSummaryText = findTableData(aiRawResponse);
+
+                    // 第二层: 查找用户自定义的摘要格式
+                    if (!cleanSummaryText) {
+                        cleanSummaryText = findSummaryUsingUserPatterns(aiRawResponse);
+                    }
+
+                    // 第三层: 查找通用的启发式摘要格式
+                    if (!cleanSummaryText) {
+                        cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
+                    }
+
+                    // 第四层: 前端生成机械式总结作为最终安全网
+                    if (!cleanSummaryText) {
+                        cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
+                    }
+                    
+                    if (!cleanSummaryText || cleanSummaryText.trim() === "") {
+                        cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
+                        console.log('⚠️ 四层净化全部失败，使用默认文本。');
+                    }
+
+                    console.log("✅ 上下文净化完成，使用最终摘要替换AI的原始输出。");
+                    await setChatMessage({ message: cleanSummaryText }, CurrentMessageId, {
+                        refresh: "none",
+                    });
+                    
+                    window.lastAiNewMessages = {}; 
+
+                } catch (error) {
+                    console.error('❌ 在净化和重写AI上下文时发生错误:', error);
+                }
             }
             
             /**
