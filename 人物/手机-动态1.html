@@ -5424,46 +5424,36 @@
                 return result;
             }
             /**
-             * 处理收到的新消息，并触发解析和保存 (已修复上下文净化问题)
-             * @param {string} msg 
+             * 最终修复版本：处理新消息、备份UI数据、并正确地净化AI上下文
+             * @param {string} msg - AI回复的原始消息字符串
              */
             async function QQ_Save_Msg(msg) {
-                // ------------------ 第一部分：解析并保存UI数据 ------------------
-                // 这部分确保无论如何，收到的新消息都会被解析并存入我们的 QQ_msgjson 备份系统。
-                console.log(`收到新消息，准备解析处理...`);
+                if (!msg || msg.trim() === "") {
+                    console.warn('⚠️ 收到的消息为空，已跳过所有处理。');
+                    return;
+                }
+                console.log('✅ 收到新消息，开始最终处理流程...');
+
+                // --- 步骤 1: 解析并备份UI数据 ---
+                // 这是最高优先级，确保无论如何，前端所需的数据都被解析并保存。
                 try {
-                    const parse_ret = await QQ_Msg_Parse(msg);
-                    if (parse_ret) {
-                        console.log('✅ 解析成功，即将触发聊天记录保存到世界书...');
+                    if (await QQ_Msg_Parse(msg)) {
+                        console.log('✅ 消息解析成功，触发聊天记录备份...');
                         await QQ_Save_Chat_Backup();
                     } else {
-                        console.warn('⚠️ 消息解析失败或消息内容为空，本次不执行聊天记录备份。消息内容:', msg);
+                        console.warn('⚠️ 消息未包含有效聊天内容，跳过聊天记录备份。');
                     }
                 } catch (error) {
-                    console.error('❌ 在解析和备份聊天记录时发生错误:', error);
+                    console.error('❌ 在解析和备份UI数据时发生严重错误:', error);
                 }
 
-                // ------------------ 第二部分：净化并重写AI上下文 ------------------
-                // 这部分的目标是生成一个简短的摘要来替换AI的冗长回复，以节省Token。
-                // 【关键修复】：我们必须在这里加入安全检查，防止它破坏我们的功能性标签。
+                // --- 步骤 2: 净化AI回复以优化上下文 ---
+                // 目标是生成一个简短摘要，替换聊天记录中AI的原始回复，以节省Token。
                 try {
-                    const CurrentMessageId = await getLatestMessageId();
-                    if (CurrentMessageId === null) {
-                        console.warn('⚠️ QQ_Save_Msg: 无法获取最新消息ID，跳过上下文净化。');
-                        return;
-                    }
+                    const aiRawResponse = msg; // 我们直接使用传入的原始消息
 
-                    const Messages = await getChatMessages(CurrentMessageId);
-                    if (!Messages || Messages.length === 0) {
-                        console.log('❌ QQ_Save_Msg: getChatMessages() 失败或为空，跳过上下文净化');
-                        return;
-                    }
-
-                    const aiRawResponse = Messages[0].message;
-
-                    // --- 【安全检查开始】 ---
-                    // 检查消息是否包含前端依赖的特殊功能标签。
-                    // 如果包含，说明这不是一个纯粹的AI对话回复，而是承载着功能性数据，绝对不能修改。
+                    // --- 安全检查 ---
+                    // 检查消息是否包含前端的功能性标签，如果是，则不进行任何净化和覆盖操作。
                     const isFunctionalMessage =
                         aiRawResponse.includes('MiPhone_Start') ||
                         aiRawResponse.includes('<msg_start>') ||
@@ -5471,48 +5461,48 @@
                         aiRawResponse.includes('<discord_start>');
 
                     if (isFunctionalMessage) {
-                        console.log('✅ 检测到功能性标签 (MiPhone, msg, moment等)，跳过上下文净化，保持原始消息内容不变。');
-                        return; // 立即退出，不执行后续的 setChatMessage 覆盖操作
+                        console.log('✅ 检测到功能性标签，跳过上下文净化，保持AI原始回复不变。');
+                        return; // 功能性消息处理到此结束，不修改上下文。
                     }
-                    // --- 【安全检查结束】 ---
 
-
-                    // 如果不是功能性消息，才继续执行净化流程...
-                    console.log('消息为纯对话，开始执行四层上下文净化...');
+                    // --- 四层上下文净化系统 ---
+                    console.log('消息为纯对话，开始执行上下文净化...');
                     let cleanSummaryText = null;
 
                     // 第一层: 查找表格化数据
                     cleanSummaryText = findTableData(aiRawResponse);
-
                     // 第二层: 查找用户自定义的摘要格式
-                    if (!cleanSummaryText) {
-                        cleanSummaryText = findSummaryUsingUserPatterns(aiRawResponse);
-                    }
-
+                    if (!cleanSummaryText) cleanSummaryText = findSummaryUsingUserPatterns(aiRawResponse);
                     // 第三层: 查找通用的启发式摘要格式
-                    if (!cleanSummaryText) {
-                        cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
-                    }
-
-                    // 第四层: 前端生成机械式总结作为最终安全网
-                    if (!cleanSummaryText) {
-                        cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
-                    }
+                    if (!cleanSummaryText) cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
+                    // 第四层: 前端生成机械式总结
+                    if (!cleanSummaryText) cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
                     
                     if (!cleanSummaryText || cleanSummaryText.trim() === "") {
                         cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
                         console.log('⚠️ 四层净化全部失败，使用默认文本。');
                     }
 
-                    console.log("✅ 上下文净化完成，使用最终摘要替换AI的原始输出。");
-                    await setChatMessage({ message: cleanSummaryText }, CurrentMessageId, {
-                        refresh: "none",
-                    });
+                    // --- 步骤 3: 使用“回合”编号来安全地更新上下文 ---
+                    // 这是正确的做法，我们不再需要任何 messageId。
+                    const context = await ST.GetContext();
+                    const turnNumber = context.turn;
+                    
+                    const summaryMessageObject = System_TagCompletion([{
+                        "is_user": false,
+                        "is_name": true,
+                        "send_date": 0,
+                        "name": charcardname,
+                        "msg": cleanSummaryText,
+                    }]);
+
+                    console.log(`✅ 净化完成，准备使用摘要更新第 ${turnNumber} 回合的上下文。`);
+                    await setChatMessage(summaryMessageObject, turnNumber, false);
                     
                     window.lastAiNewMessages = {}; 
 
                 } catch (error) {
-                    console.error('❌ 在净化和重写AI上下文时发生错误:', error);
+                    console.error('❌ 在净化和重写AI上下文时发生严重错误:', error);
                 }
             }
             
