@@ -15600,16 +15600,23 @@ ${index + 1}. ${space.name}
                 const message = System_TagCompletion(
                     await ST.GetCurrentMessages(),
                 );
-                let match = message.match(/msg_start([\s\S]+?)msg_end/);
-                if (match) {
-                    console.log(
-                        `解析聊天记录!!!!!!!!!!!!!!!\n${match[1].trim()}`,
-                    );
-                    await QQ_Msg_Parse(match[1].trim());
-                    console.log(`转回文本的结果`, QQ_Json2Text(QQ_msgjson));
-                    if (!match[1].match(/\S/)) {
-                        // 没有有效内容才保存
-                        await QQ_Save_Msg();
+
+                // 首先，尝试从聊天备份中恢复历史记录
+                const restoredFromBackup = await QQ_Load_Chat_Backup();
+
+                if (!restoredFromBackup) {
+                    // 如果备份恢复失败（如新用户），则尝试解析当前楼层的消息
+                    console.log('备份恢复失败，尝试解析当前楼层消息...');
+                    let match = message.match(/msg_start([\s\S]+?)msg_end/);
+                    if (match) {
+                        console.log(
+                            `解析当前楼层聊天记录!!!!!!!!!!!!!!!\n${match[1].trim()}`,
+                        );
+                        await QQ_Msg_Parse(match[1].trim());
+                        if (!match[1].match(/\S/)) {
+                            // 只有在当前楼层为空时才保存，避免覆盖
+                            await QQ_Save_Msg();
+                        }
                     }
                 } else {
                     // *** 新增：如果没有找到现有聊天记录，尝试从备份恢复 ***
@@ -16706,7 +16713,7 @@ ${index + 1}. ${space.name}
             /**
              * *** 新增：从worldbook加载聊天消息备份 ***
              */
-             async function QQ_Load_Chat_Backup() {
+            async function QQ_Load_Chat_Backup() {
                 // 统一的入口点，确保世界书环境就绪
                 if (!worldbook || !entries) {
                     console.log('聊天备份加载跳过：缺少worldbook或entries');
@@ -16717,7 +16724,7 @@ ${index + 1}. ${space.name}
                     // 1. 查找唯一的世界书备份条目
                     const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
                     if (!chatBackupEntry || !chatBackupEntry.content) {
-                        console.log('在 worldbook entries 中未找到 "手机-聊天消息备份" 条目或其内容为空。');
+                        console.log('在 world book entries 中未找到 "手机-聊天消息备份" 条目或其内容为空。');
                         return false;
                     }
                     
