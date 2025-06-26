@@ -22500,41 +22500,7 @@ ${index + 1}. ${space.name}
                     console.warn('QQ_Groups不是数组，重新初始化');
                     QQ_Groups = [];
                 }
-                
-                            // 定期检查QQ_Groups的完整性（不再重新加载，只从界面恢复）
-            setInterval(() => {
-                if (groupChatInitialized && Array.isArray(QQ_Groups) && QQ_Groups.length === 0) {
-                    console.log('定期检查：QQ_Groups为空，尝试从界面元素恢复');
-                    
-                    // 只从现有界面元素恢复QQ_Groups，不重新加载
-                    const contactsGroups = document.querySelectorAll('#QQ_home_chars [data-group-type="true"]');
-                    const messageGroups = document.querySelectorAll('#QQ_message_list_chars [data-group-type="true"]');
-                    
-                    contactsGroups.forEach(element => {
-                        const groupName = element.getAttribute('data-group-name');
-                        if (groupName && !QQ_Groups.includes(groupName)) {
-                            QQ_Groups.push(groupName);
-                            console.log(`定期检查：从联系人界面恢复群聊: ${groupName}`);
-                        }
-                    });
-                    
-                    messageGroups.forEach(element => {
-                        const groupName = element.getAttribute('data-group-name');
-                        if (groupName && !QQ_Groups.includes(groupName)) {
-                            QQ_Groups.push(groupName);
-                            console.log(`定期检查：从消息界面恢复群聊: ${groupName}`);
-                        }
-                    });
-                    
-                    if (QQ_Groups.length > 0) {
-                        console.log('定期检查：QQ_Groups恢复完成:', QQ_Groups);
-                    }
-                }
-            }, 30000); // 每30秒检查一次
             }
-            
-            // 启动保护机制
-            protectQQGroups();
             
             // 简化的QQ_Groups完整性检查（不重新加载群聊到界面）
             function ensureQQGroupsIntegrity() {
@@ -22565,6 +22531,28 @@ ${index + 1}. ${space.name}
                     console.log('QQ_Groups恢复后:', QQ_Groups);
                 }
             }
+
+            // 【全新、更可靠的消息触发器】
+            let isAiReplying = false; // 用一个简单的状态变量来跟踪AI是否在回复
+
+            setInterval(async () => {
+                const isStreaming = state.is_send;
+
+                if (isStreaming && !isAiReplying) {
+                    isAiReplying = true;
+                    console.log('🤖 AI 开始回复...');
+                } else if (!isStreaming && isAiReplying) {
+                    console.log('✅ AI 回复结束，准备处理和保存消息...');
+                    isAiReplying = false; 
+
+                    const finalMessage = ST.GetLastMessage().msg;
+                    await QQ_Save_Msg(finalMessage);
+                }
+            }, 500);
+            
+            // 【需要执行的初始化调用】
+            // 启动保护机制
+            protectQQGroups();
             
             // 点击群聊时的完整性检查
             function ensureQQGroupsIntegrityOnClick(groupName) {
