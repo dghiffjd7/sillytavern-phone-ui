@@ -5467,6 +5467,7 @@
              * @returns
              */
             async function QQ_Save_Chat_Backup() {
+                // 使用与动态和群聊保存相同的简单检查方式
                 if (!worldbook || !entries || !QQ_msgjson) {
                     console.log('聊天备份跳过：缺少worldbook或entries或聊天数据');
                     return;
@@ -5540,14 +5541,14 @@
                     console.log('准备备份聊天消息:', totalPrivateChats, '个私聊,', totalGroupChats, '个群聊, 共', totalUserMessages, '条用户对话消息（已排除系统消息）');
                     
                     if (chatBackupEntry) {
-                        // 更新现有条目
+                        // 更新现有条目，参考动态保存的成功实现
                         await setLorebookEntries(worldbook, [{
                             uid: chatBackupEntry.uid,
                             content: backupJson,
                         }]);
                         console.log('聊天消息已更新到现有worldbook备份条目');
                     } else {
-                        // 创建新条目
+                        // 创建新条目，参考动态和群聊的成功实现
                         await createLorebookEntry(worldbook, {
                             comment: "手机-聊天消息备份",
                             key: ["此世界书永不触发_聊天备份"],
@@ -5561,8 +5562,18 @@
                         });
                         console.log('聊天消息已保存到新worldbook备份条目');
                         
-                        // 重新获取entries以包含新创建的条目
+                        // 重新获取entries以包含新创建的条目，参考动态保存的做法
                         entries = await getLorebookEntries(worldbook);
+                    }
+                    
+                    // 可选：保存到世界书文件（如果函数存在）
+                    if (typeof saveWorldInfo === 'function') {
+                        try {
+                            await saveWorldInfo();
+                            console.log('聊天备份已同步到世界书文件');
+                        } catch (saveError) {
+                            console.warn('世界书文件保存失败，但内存保存成功:', saveError);
+                        }
                     }
                 } catch (error) {
                     console.error('聊天消息备份失败:', error);
@@ -16719,6 +16730,7 @@ ${index + 1}. ${space.name}
              * *** 新增：从worldbook加载聊天消息备份 ***
              */
              async function QQ_Load_Chat_Backup() {
+                // 使用与动态加载相同的简单检查方式
                 if (!worldbook || !entries) {
                     console.log('聊天备份加载跳过：缺少worldbook或entries');
                     return false;
@@ -16736,12 +16748,33 @@ ${index + 1}. ${space.name}
                             console.log('备份时间:', backupData.lastUpdated);
                             console.log('备份数据包含:', Object.keys(backupData.data.私聊 || {}).length, '个私聊,', Object.keys(backupData.data.群聊 || {}).length, '个群聊');
                             
-                            // *** 核心修复：只要有有效备份就直接加载，不再进行复杂的比较 ***
+                            // 参考动态加载的成功实现：直接覆盖全局数据
                             QQ_msgjson = JSON.parse(JSON.stringify(backupData.data)); // 深拷贝
                             QQ_ChatBackup = backupData;
                             window.QQ_ChatBackup = QQ_ChatBackup; // 更新全局引用
+                            window.QQ_msgjson = QQ_msgjson; // 确保全局引用同步
                             
                             console.log('✅ 成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                            
+                            // 触发界面更新，参考动态加载的做法
+                            try {
+                                // 更新消息列表显示
+                                if (typeof QQ_UpdateMessageList === 'function') {
+                                    QQ_UpdateMessageList();
+                                }
+                                
+                                // 如果当前在聊天界面，刷新聊天内容
+                                if (currentChatTarget && (QQ_msgjson.私聊[`${UserName}和${currentChatTarget}的聊天`] || QQ_msgjson.群聊[currentChatTarget])) {
+                                    console.log('刷新当前聊天界面:', currentChatTarget);
+                                    // 重新加载当前聊天
+                                    setTimeout(() => {
+                                        QQ_ChangeChatPage(currentChatTarget);
+                                    }, 100);
+                                }
+                            } catch (updateError) {
+                                console.warn('界面更新时出错，但聊天数据已成功加载:', updateError);
+                            }
+                            
                             return true;
                         } else {
                             console.log('聊天备份数据格式无效，跳过加载');
@@ -33010,6 +33043,91 @@ MiPhone_JSON_END`;
                 } catch (error) {
                     console.error('❌ 清理重复群组时出错:', error);
                     toastr.error('清理过程中出现错误', '数据清理');
+                }
+            };
+            
+            /**
+             * *** 新增：测试聊天备份功能 ***
+             */
+            window.QQ_Test_Chat_Backup = async function() {
+                console.log('=== 聊天备份功能测试 ===');
+                
+                try {
+                    // 检查世界书环境
+                    console.log('1. 检查世界书环境...');
+                    if (!worldbook || !entries) {
+                        console.error('❌ 世界书环境不可用');
+                        return;
+                    }
+                    console.log('✅ 世界书环境正常');
+                    
+                    // 检查聊天数据
+                    console.log('2. 检查聊天数据...');
+                    if (!QQ_msgjson) {
+                        console.error('❌ 聊天数据不存在');
+                        return;
+                    }
+                    
+                    const privateChats = Object.keys(QQ_msgjson.私聊 || {}).length;
+                    const groupChats = Object.keys(QQ_msgjson.群聊 || {}).length;
+                    console.log(`✅ 当前聊天数据: ${privateChats}个私聊, ${groupChats}个群聊`);
+                    
+                    // 测试保存功能
+                    console.log('3. 测试保存功能...');
+                    await QQ_Save_Chat_Backup();
+                    console.log('✅ 保存测试完成');
+                    
+                    // 检查是否保存成功
+                    console.log('4. 验证保存结果...');
+                    const chatBackupEntry = entries.find(entry => entry.comment === "手机-聊天消息备份");
+                    if (chatBackupEntry && chatBackupEntry.content) {
+                        const backupData = JSON.parse(chatBackupEntry.content);
+                        console.log('✅ 世界书中找到备份数据');
+                        console.log('备份时间:', backupData.lastUpdated);
+                        console.log('备份包含:', Object.keys(backupData.data.私聊 || {}).length, '个私聊,', Object.keys(backupData.data.群聊 || {}).length, '个群聊');
+                    } else {
+                        console.error('❌ 世界书中未找到备份数据');
+                        return;
+                    }
+                    
+                    // 测试加载功能
+                    console.log('5. 测试加载功能...');
+                    const loadResult = await QQ_Load_Chat_Backup();
+                    if (loadResult) {
+                        console.log('✅ 加载测试成功');
+                        console.log('加载后数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
+                    } else {
+                        console.error('❌ 加载测试失败');
+                    }
+                    
+                    // 检查修复效果
+                    console.log('6. 检查修复效果...');
+                    const functions = [
+                        'QQ_Save_Chat_Backup',
+                        'QQ_Load_Chat_Backup',
+                        'QQ_UpdateMessageList'
+                    ];
+                    
+                    functions.forEach(fname => {
+                        if (typeof window[fname] === 'function') {
+                            console.log(`✅ ${fname} 函数存在且可用`);
+                        } else {
+                            console.log(`❌ ${fname} 函数不存在`);
+                        }
+                    });
+                    
+                    console.log('=== 聊天备份功能测试完成 ===');
+                    console.log('🔧 修复要点:');
+                    console.log('- 使用与动态保存相同的简单检查方式');
+                    console.log('- 保存后确保全局引用同步');
+                    console.log('- 加载后自动触发界面更新');
+                    console.log('- 参考动态和群聊的成功实现模式');
+                    
+                    toastr.success('聊天备份功能测试完成，请查看控制台详细信息', '测试完成');
+                    
+                } catch (error) {
+                    console.error('聊天备份测试失败:', error);
+                    toastr.error('测试过程中出现错误，请查看控制台', '测试失败');
                 }
             };
             
