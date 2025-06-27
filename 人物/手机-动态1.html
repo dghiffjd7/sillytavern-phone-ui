@@ -17280,8 +17280,9 @@ ${index + 1}. ${space.name}
                 // 添加或更新"查看更多"按钮
                 QQ_Update_Moments_LoadMore(sortedMoments.length);
                 
-                // 初始化点赞按钮事件绑定（如果还没有初始化）
+                // 强制重新初始化点赞按钮事件绑定
                 if (typeof QQ_InitMomentLikes === 'function') {
+                    console.log('🔄 重新初始化动态点赞功能...');
                     QQ_InitMomentLikes();
                 }
                 
@@ -17289,6 +17290,11 @@ ${index + 1}. ${space.name}
                 if (typeof QQ_LoadMomentLikes === 'function') {
                     await QQ_LoadMomentLikes();
                 }
+                
+                // 添加调试信息
+                console.log(`✅ 动态渲染完成，共 ${$('.user_moment').length} 个动态元素`);
+                console.log(`🎯 检测到 ${$('.moment_button').length} 个点赞按钮`);
+                console.log(`📊 检测到 ${$('[data-moment-id]').length} 个包含动态ID的元素`);
                 
                 console.log(`动态内容渲染完成，显示 ${momentsDisplayCount}/${sortedMoments.length} 条`);
             }
@@ -32689,7 +32695,24 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         }
                     });
                     
-                    // 类型2：绑定动态模板中的👍点赞区域
+                    // 类型2：绑定动态模板中的整个moment_button区域（包括SVG和后面的文本）
+                    $(document).off('click', '.moment_button').on('click', '.moment_button', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        // 查找动态ID - 向上查找包含data-moment-id的元素
+                        const momentElement = $(this).closest('.user_moment[data-moment-id]');
+                        const momentId = momentElement.data('moment-id');
+                        
+                        if (momentId) {
+                            console.log('点击点赞按钮，动态ID:', momentId);
+                            QQ_LikeMoment(momentId);
+                        } else {
+                            console.warn('找不到动态ID，无法执行点赞操作');
+                        }
+                    });
+                    
+                    // 类型3：绑定动态模板中的SVG（作为备用）
                     $(document).off('click', '.moment_button svg').on('click', '.moment_button svg', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -32699,16 +32722,12 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         const momentId = momentElement.data('moment-id');
                         
                         if (momentId) {
-                            // 判断这是否是点赞按钮（通过路径内容或父元素判断）
-                            const svgPath = $(this).find('path').attr('d');
-                            // 检查是否是👍按钮（根据SVG path特征判断）
-                            if (svgPath && svgPath.includes('471.411583')) { // 这是👍按钮的path特征
-                                QQ_LikeMoment(momentId);
-                            }
+                            console.log('点击SVG点赞按钮，动态ID:', momentId);
+                            QQ_LikeMoment(momentId);
                         }
                     });
                     
-                    // 类型3：直接绑定包含"人已赞"文本的区域
+                    // 类型4：直接绑定包含"人已赞"文本的区域
                     $(document).off('click', 'span:contains("人已赞")').on('click', 'span:contains("人已赞")', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -32717,6 +32736,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         const momentId = momentElement.data('moment-id');
                         
                         if (momentId) {
+                            console.log('点击"人已赞"文本，动态ID:', momentId);
                             QQ_LikeMoment(momentId);
                         }
                     });
@@ -32773,20 +32793,46 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 const firstMoment = QQ_MomentsData[0];
                 console.log('📊 第一条动态的点赞数据:', firstMoment.likes);
                 
-                // 检查UI元素
-                const likeButtons = $('.moment-like-button');
-                console.log(`🎯 找到 ${likeButtons.length} 个点赞按钮`);
+                // 检查UI元素 - 多种类型的点赞按钮
+                const discordLikeButtons = $('.moment-like-button');
+                const momentButtons = $('.moment_button');
+                const likeTextSpans = $('span:contains("人已赞")');
+                const momentElements = $('.user_moment[data-moment-id]');
                 
-                if (likeButtons.length > 0) {
-                    const firstButton = likeButtons.first();
-                    const momentId = firstButton.data('moment-id');
+                console.log(`🎯 Discord点赞按钮: ${discordLikeButtons.length} 个`);
+                console.log(`👍 动态点赞按钮: ${momentButtons.length} 个`);
+                console.log(`📝 点赞文本区域: ${likeTextSpans.length} 个`);
+                console.log(`📋 有动态ID的元素: ${momentElements.length} 个`);
+                
+                // 尝试点击第一个可用的点赞按钮
+                if (momentButtons.length > 0) {
+                    const firstButton = momentButtons.first();
+                    const momentElement = firstButton.closest('.user_moment[data-moment-id]');
+                    const momentId = momentElement.data('moment-id');
                     console.log(`🧪 测试点赞第一条动态: ${momentId}`);
+                    
+                    if (momentId) {
+                        console.log('🔥 执行点赞测试...');
+                        QQ_LikeMoment(momentId);
+                    } else {
+                        console.warn('⚠️ 第一个点赞按钮没有关联的动态ID');
+                    }
+                } else if (discordLikeButtons.length > 0) {
+                    const firstButton = discordLikeButtons.first();
+                    const momentId = firstButton.data('moment-id');
+                    console.log(`🧪 测试Discord点赞按钮: ${momentId}`);
                     
                     if (momentId) {
                         QQ_LikeMoment(momentId);
                     }
                 } else {
-                    console.warn('⚠️ 未找到点赞按钮，请确保页面已加载动态');
+                    console.warn('⚠️ 未找到任何点赞按钮，请确保页面已加载动态');
+                    
+                    // 调试信息
+                    console.log('🔍 详细调试信息:');
+                    console.log('- 页面中的.moment_button元素:', $('.moment_button'));
+                    console.log('- 页面中的.user_moment元素:', $('.user_moment'));
+                    console.log('- 页面中的data-moment-id属性:', $('[data-moment-id]'));
                 }
                 
                 triggerSlash('/echo ✅ 点赞功能测试完成，请查看控制台详细结果');
