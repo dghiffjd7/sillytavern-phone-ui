@@ -20973,17 +20973,70 @@ ${index + 1}. ${space.name}
                 let count = QQ_NewMsg["moment"] || 0;
                 let currentMomentData = null; // *** 新增：当前动态的数据对象 ***
                 
+                // *** 新增：在评论上下文中，直接处理评论并添加到现有动态 ***
+                if (isCommentContext) {
+                    console.log('🎯 评论上下文模式：将评论添加到现有动态');
+                    const commentLines = [];
+                    
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine) continue;
+                        
+                        // 跳过完整动态格式
+                        const fullMomentMatch = trimmedLine.match(/\s*(.+?)--(.+?)--(.+?)--(.+?)--(.+)/);
+                        if (fullMomentMatch) {
+                            console.log('⚠️ 评论上下文中跳过完整动态格式:', trimmedLine);
+                            continue;
+                        }
+                        
+                        // 处理评论格式
+                        const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
+                        if (commentMatch) {
+                            commentLines.push({
+                                name: commentMatch[1],
+                                content: commentMatch[2],
+                                timestamp: new Date().toISOString()
+                            });
+                        }
+                    }
+                    
+                    // 将评论添加到最新的动态中
+                    if (commentLines.length > 0 && QQ_MomentsData.length > 0) {
+                        const latestMoment = QQ_MomentsData[0]; // 最新的动态
+                        const latestMomentDiv = $("#space_contents").find('.user_moment').first();
+                        const latestCommentsList = latestMomentDiv.find('.user_leave_message_list');
+                        
+                        for (const comment of commentLines) {
+                            // 添加到数据对象
+                            latestMoment.comments.push(comment);
+                            
+                            // 保持评论数量上限（50条）
+                            if (latestMoment.comments.length > 50) {
+                                latestMoment.comments = latestMoment.comments.slice(-50);
+                            }
+                            
+                            console.log(`✅ 评论已添加到现有动态: ${comment.name} - ${comment.content}`);
+                        }
+                        
+                        // 重新渲染评论区域
+                        QQ_Render_Comments(latestMoment, latestCommentsList);
+                        
+                        // 保存动态数据
+                        setTimeout(async () => {
+                            await QQ_Save_Moments();
+                            console.log('评论上下文处理完成，动态已保存');
+                        }, 500);
+                    }
+                    
+                    return; // 评论上下文处理完成，直接返回
+                }
+                
                 for (const line of lines) {
                     //console.log(`line:${line}`);
                     let match = line.match(
                         /\s*(.+?)--(.+?)--(.+?)--(.+?)--(.+)/,
                     );
                     if (match) {
-                        // *** 新增：在评论上下文中跳过完整动态格式 ***
-                        if (isCommentContext) {
-                            console.log('在评论上下文中检测到完整动态格式，已跳过:', line);
-                            continue;
-                        }
                         
                         // 是新动态内容
                         console.log(`匹配到动态内容:${match[0]}`);
