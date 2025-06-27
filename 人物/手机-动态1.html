@@ -25554,16 +25554,23 @@ ${index + 1}. ${space.name}
              * 更新群聊元素中的头像显示
              */
             function updateGroupAvatarInElement(element, groupData) {
+                console.log('更新群聊元素头像:', groupData?.name);
+                
                 const avatarElement = element.querySelector('.QQ_home_head');
-                if (!avatarElement) return;
+                if (!avatarElement) {
+                    console.log('未找到头像元素');
+                    return;
+                }
                 
                 // 重置头像样式
                 avatarElement.style.backgroundImage = '';
                 avatarElement.style.background = '';
                 avatarElement.textContent = '';
+                avatarElement.innerHTML = '';
                 
-                // 应用头像
-                applyGroupAvatar(avatarElement, groupData.avatar);
+                // *** 修复：传递完整的群聊数据对象而不仅仅是avatar字段 ***
+                applyGroupAvatar(avatarElement, groupData);
+                console.log('群聊头像已更新:', groupData?.name);
             }
             
             /**
@@ -25738,9 +25745,11 @@ ${index + 1}. ${space.name}
             }
             
             /**
-             * *** 新增：应用群聊头像到元素 - 修复群聊头像显示问题 ***
+             * *** 修复：应用群聊头像到元素 - 支持多种头像格式（base64、URL、预设）***
              */
-            function applyGroupAvatar(element, avatarUrl) {
+            function applyGroupAvatar(element, groupData) {
+                console.log('应用群聊头像:', groupData?.name, '头像数据类型:', typeof groupData?.avatar, '头像值:', groupData?.avatar?.substring?.(0, 50) + '...');
+                
                 // 设置基础样式
                 element.style.borderRadius = '50%';
                 element.style.display = 'flex';
@@ -25754,18 +25763,51 @@ ${index + 1}. ${space.name}
                 element.style.backgroundRepeat = 'no-repeat';
                 element.style.flexShrink = '0';
                 
-                if (avatarUrl && avatarUrl.trim() !== '') {
-                    // 使用真实头像URL
-                    element.style.backgroundImage = `url("${avatarUrl}")`;
-                    element.style.background = '';
-                    element.textContent = '';
-                    console.log('应用群聊头像:', avatarUrl);
+                // 重置背景样式
+                element.style.backgroundImage = '';
+                element.style.background = '';
+                element.innerHTML = '';
+                
+                if (!groupData) {
+                    console.log('群聊数据为空，使用默认头像');
+                    element.style.background = 'linear-gradient(135deg, #ff7b7b, #667eea)';
+                    element.textContent = '群';
+                    return;
+                }
+                
+                // 获取头像数据，优先使用avatarData，备选avatar
+                const avatarSrc = groupData.avatarData || groupData.avatar;
+                
+                if (avatarSrc && avatarSrc.trim() !== '') {
+                    // 检查头像类型
+                    if (avatarSrc.startsWith('data:image/')) {
+                        // base64图片数据 - 使用img元素
+                        console.log('使用base64头像数据');
+                        element.innerHTML = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    } else if (avatarSrc.startsWith('http://') || avatarSrc.startsWith('https://')) {
+                        // URL链接 - 使用img元素
+                        console.log('使用URL头像:', avatarSrc);
+                        element.innerHTML = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+                    } else if (avatarSrc.length === 1 || avatarSrc.length === 2) {
+                        // 预设文字头像（单个字符或emoji）
+                        console.log('使用预设文字头像:', avatarSrc);
+                        element.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+                        element.textContent = avatarSrc;
+                    } else if (avatarSrc.startsWith('#') && avatarSrc.length === 7) {
+                        // 颜色代码
+                        console.log('使用颜色头像:', avatarSrc);
+                        element.style.background = avatarSrc;
+                        element.textContent = groupData.name ? groupData.name.charAt(0) : '群';
+                    } else {
+                        // 其他情况当作图片URL处理
+                        console.log('当作图片URL处理:', avatarSrc);
+                        element.innerHTML = `<img src="${avatarSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" onerror="this.style.display='none'; this.parentElement.style.background='linear-gradient(135deg, #ff7b7b, #667eea)'; this.parentElement.textContent='群';">`;
+                    }
                 } else {
                     // 使用默认群聊头像
-                    element.style.background = 'linear-gradient(135deg, #ff7b7b, #667eea)';
-                    element.style.backgroundImage = '';
-                    element.textContent = '群';
                     console.log('使用默认群聊头像');
+                    element.style.background = 'linear-gradient(135deg, #ff7b7b, #667eea)';
+                    element.textContent = '群';
                 }
             }
             
