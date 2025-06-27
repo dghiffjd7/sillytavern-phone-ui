@@ -19801,62 +19801,146 @@ ${index + 1}. ${space.name}
                 QQ_MomentGenerating = true;
 
                 try {
-                    // 1. 保留：获取DOM元素和用户输入
+                    // 1. 获取DOM元素和用户输入
                     const $closest = $(event.currentTarget).closest('.user_moment');
-                const message = $closest.find(".moment_message").text();
-                const input = $closest.find("input[type='text']");
-                const name = $closest.find(".moment_sender").text();
-                const list = $closest.find(".user_leave_message_list");
-                const value = input.val()?.trim();
-                
-                if (!value || !message) {
-                    console.log('输入内容为空或无法获取动态信息');
-                    return;
-                }
-                
-                    // 2. 保留：在UI上实时显示用户自己的评论
-                    // ... (您现有的显示评论、滚动、保存评论到 MomentsData 的逻辑不变) ...
+                    const message = $closest.find(".moment_message").text();
+                    const input = $closest.find("input[type='text']");
+                    const name = $closest.find(".moment_sender").text();
+                    const list = $closest.find(".user_leave_message_list");
+                    const value = input.val()?.trim();
+                    
+                    if (!value || !message) {
+                        console.log('输入内容为空或无法获取动态信息');
+                        return;
+                    }
+                    
+                    // 2. 【重要修复】立即在UI上显示用户自己的评论
+                    const currentComments = list.find('.user_leave_message').length;
+                    if (currentComments >= 8) {
+                        // 删除最早的评论为新评论腾出空间
+                        list.find('.user_leave_message').first().remove();
+                    }
+                    
+                    // 添加用户评论到界面
+                    let messageDiv = $("<div>", { class: "user_leave_message" });
+                    messageDiv.html(
+                        `<span><strong>${UserName}</strong>：${value}</span>`,
+                    );
+                    list.append(messageDiv);
+                    input.val("");
+                    
+                    // 平滑滚动到新评论
+                    if (list.length > 0) {
+                        list.scrollTop(list[0].scrollHeight);
+                    }
+                    
+                    // 3. 【重要修复】将用户回复添加到对应动态的评论数据中并保存
+                    const userComment = {
+                        name: UserName,
+                        content: value,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    // 查找对应的动态并添加评论
+                    const momentId = $closest.attr('data-moment-id');
+                    const targetMoment = QQ_MomentsData.find(moment => moment.id === momentId);
+                    
+                    if (targetMoment) {
+                        targetMoment.comments.push(userComment);
+                        
+                        // 保持评论数量上限（50条）
+                        if (targetMoment.comments.length > 50) {
+                            targetMoment.comments = targetMoment.comments.slice(-50);
+                        }
+                        
+                        console.log('用户回复已添加到动态数据:', userComment);
+                        
+                        // 立即保存更新后的动态数据
+                        await QQ_Save_Moments();
+                    } else {
+                        console.warn('未找到对应的动态数据，无法添加用户回复');
+                    }
 
-                    // 3. 【全新核心逻辑】分析本次的所有任务
+                    // 4. 分析本次的所有任务
                     let tasks = {
                         momentComment: { author: name, content: value },
                         privateChats: [],
                         groupChats: [],
                         interactiveTask: null
                     };
-                    const cachedActions = QQ_GetValueName(QQ_CacheSendMsg);
-                    if (cachedActions) {
-                        for (const action of cachedActions) {
-                            if (QQ_Groups.includes(action.name)) {
-                                if (!tasks.groupChats.some(g => g[action.name])) tasks.groupChats.push({ [action.name]: [] });
-                } else {
-                                if (!tasks.privateChats.includes(action.name)) tasks.privateChats.push(action.name);
+                    
+                    // 5. 处理缓存消息并整合到任务中
+                    if (QQ_CacheSendMsg && QQ_CacheSendMsg.trim()) {
+                        const cachedActions = QQ_GetValueName(QQ_CacheSendMsg);
+                        if (cachedActions) {
+                            for (const action of cachedActions) {
+                                if (QQ_Groups.includes(action.name)) {
+                                    if (!tasks.groupChats.some(g => g[action.name])) tasks.groupChats.push({ [action.name]: [] });
+                                } else {
+                                    if (!tasks.privateChats.includes(action.name)) tasks.privateChats.push(action.name);
+                                }
+                            }
+                        }
+                        
+                        // 保存缓存消息到对应的聊天记录
+                        for (const match of cachedActions || []) {
+                            let localname = match.name;
+                            let localmsg = match.value;
+                            
+                            if (QQ_Groups.includes(localname)) {
+                                // 群聊消息保存
+                                QQ_msgjson.群聊[localname] = QQ_msgjson.群聊[localname] || {};
+                                QQ_msgjson.群聊[localname].msgs = QQ_msgjson.群聊[localname].msgs || [];
+                                QQ_msgjson.群聊[localname].msgs.push(`${UserName}--${localmsg}`);
+                                console.log(`缓存群聊消息已保存: ${UserName}--${localmsg}`);
+                                User_LastMsgMap.群聊[localname] = `${UserName}--${localmsg}`;
+                                
+                                // 同步保存到群聊专用存储
+                                const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                                const groupsForSync = await loadGroupChatsFromWorldbook();
+                                const targetGroup = groupsForSync.find(g => g.name === localname);
+                                if (targetGroup) {
+                                    const messageObj = {
+                                        sender: UserName,
+                                        content: localmsg,
+                                        timestamp: currentTime
+                                    };
+                                    saveGroupMessage(targetGroup.id, messageObj);
+                                    await updateGroupLastMessage(targetGroup.id, localmsg);
+                                    console.log(`缓存群聊消息已同步保存到专用存储: ${localname}`);
+                                }
+                            } else {
+                                // 私聊消息保存
+                                const key = `${UserName}和${localname}的聊天`;
+                                QQ_msgjson.私聊[key] = QQ_msgjson.私聊[key] || [];
+                                QQ_msgjson.私聊[key].push(`${UserName}--${localmsg}`);
+                                console.log(`缓存私聊消息已保存: ${UserName}--${localmsg}`);
+                                User_LastMsgMap.私聊[localname] = `${UserName}--${localmsg}`;
                             }
                         }
                     }
                     
-                    // 4. 【全新核心逻辑】保留并整合互动意图检测
+                    // 6. 整合互动意图检测
                     const interactiveResult = QQ_DetectInteractiveIntent(value);
                     if (interactiveResult && interactiveResult.isInteractive) {
                         tasks.interactiveTask = interactiveResult;
-                    QQ_UserTriggeredInteractive = true;
+                        QQ_UserTriggeredInteractive = true;
                     } else {
-                    QQ_UserTriggeredInteractive = false;
-                }
-                
-                    // 5. 【全新核心逻辑】调用动态指令生成器
+                        QQ_UserTriggeredInteractive = false;
+                    }
+                    
+                    // 7. 调用动态指令生成器
                     const finalPrompt = buildDynamicPrompt(tasks);
 
-                    // 6. 组合最终发送内容
+                    // 8. 组合最终发送内容
                     let sendvalue = (QQ_CacheSendMsg ? `${QQ_CacheSendMsg.trim()}\n\n` : '') + `用户在${name}的动态下评论：${value}`;
                     const finalPayload = `${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
                     QQ_CacheSendMsg = ""; // 清空缓存
 
-                    // 7. 发送请求
+                    // 9. 发送请求
                     console.log('发送给AI的最终Payload:\n', finalPayload);
                     const result = await QQ_Gen(finalPayload);
                     await ResultHandle(result);
-                    // 移除冗余调用：ResultHandle函数内部已经调用了QQ_Save_Chat_Backup
                     
                 } catch (error) {
                     console.error('动态评论AI生成过程中出错:', error);
