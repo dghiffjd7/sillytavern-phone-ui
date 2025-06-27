@@ -15782,10 +15782,6 @@ ${index + 1}. ${space.name}
                 // 阶段二：从独立条目增强群聊元数据
                 await QQ_Enhance_Group_Metadata();
                 console.log('两阶段数据加载完成。');
-
-                // *** 关键修复：在数据加载后，调用UI同步函数来渲染群聊列表 ***
-                await ensureGroupsInContactList();
-                console.log('群聊列表UI已同步');
                 
                 // *** 新增：初始化时加载已读状态 ***
                 console.log('开始加载已读状态...');
@@ -17100,7 +17096,7 @@ ${index + 1}. ${space.name}
             /**
              * *** 新增：从worldbook加载聊天消息备份 ***
              */
-             async function QQ_Load_Chat_Backup() {
+            async function QQ_Load_Chat_Backup() {
                 if (!worldbook || !entries) {
                     console.log('聊天备份加载跳过：缺少worldbook或entries');
                     return false;
@@ -17150,10 +17146,10 @@ ${index + 1}. ${space.name}
                             }
                             
                             console.log('✅ 成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
-                            return true;
-                        } else {
+                                return true;
+                            } else {
                              console.log('🟡 聊天备份数据格式不正确或为空');
-                             return false;
+                                return false;
                         }
                     } else {
                         console.log('ℹ️ 未在世界书中找到聊天备份条目');
@@ -18500,66 +18496,77 @@ ${index + 1}. ${space.name}
             }
             
             async function QQ_UpdateMessageList() {
-                console.log("开始更新消息列表 (增强版)");
+                console.log("开始更新消息列表");
+                
+                // 不再自动重新加载群聊，避免重复循环
+                console.log('当前QQ_Groups状态:', QQ_Groups.length, '个群聊');
                 
                 const $messageChars = $("#QQ_message_list_chars");
+                const $homeChars = $("#QQ_home_chars");
+                
+                // 清空消息页面的联系人列表
                 $messageChars.empty();
                 
-                // 1. 收集所有有消息记录的私聊和群聊
-                let allChats = [];
+                // 只复制联系人项目，不复制搜索框
+                const $homeContacts = $homeChars.find('.QQ_home_usermsg');
                 
-                // 处理私聊
-                if (QQ_msgjson.私聊) {
-                    for (const chatKey in QQ_msgjson.私聊) {
-                        if (QQ_msgjson.私聊[chatKey].length > 0) {
-                            const contactName = chatKey.replace(`${UserName}和`, '').replace('的聊天', '');
-                            const lastMessageRaw = QQ_msgjson.私聊[chatKey][QQ_msgjson.私聊[chatKey].length - 1];
-                            const lastMessageParts = lastMessageRaw.split('--');
-                            allChats.push({
-                                name: contactName,
-                                lastMessage: lastMessageParts.length > 1 ? lastMessageParts.slice(1).join('--') : lastMessageRaw,
-                                timestamp: new Date().getTime(), // 使用时间戳排序
-                                isGroup: false
-                            });
-                        }
+                // 然后过滤，只显示有真实消息沟通过的联系人
+                const contactedUsers = [];
+                let firstContact = null;
+                
+                $homeContacts.each(function() {
+                    const $contact = $(this);
+                    const name = $contact.attr('data-name');
+                    const $newMsgBadge = $contact.find('.QQ_home_usermsg_new');
+                    const hasNewMessages = $newMsgBadge.is(':visible') && parseInt($newMsgBadge.text()) > 0;
+                    const lastMsg = $contact.find('.QQ_home_lastmsg').text().trim();
+                    const isGroup = $contact.attr('data-group-type') === 'true';
+                    
+                    if (!firstContact) {
+                        firstContact = $contact.clone(true);
                     }
-                }
-                
-                // 处理群聊
-                if (QQ_msgjson.群聊) {
-                    for (const groupName in QQ_msgjson.群聊) {
-                        if (QQ_msgjson.群聊[groupName].msgs && QQ_msgjson.群聊[groupName].msgs.length > 0) {
-                            const lastMessageRaw = QQ_msgjson.群聊[groupName].msgs[QQ_msgjson.群聊[groupName].msgs.length - 1];
-                            const lastMessageParts = lastMessageRaw.split('--');
-                            allChats.push({
-                                name: groupName,
-                                lastMessage: lastMessageParts.length > 1 ? lastMessageParts.slice(1).join('--') : lastMessageRaw,
-                                timestamp: new Date().getTime(), // 使用时间戳排序
-                                isGroup: true
-                            });
-                        }
+                    
+                    // 检查是否有真实的消息记录
+                    let hasRealMessageRecord = false;
+                    
+                    // 检查私聊记录
+                    const privateChatKey = `${UserName}和${name}的聊天`;
+                    if (QQ_msgjson && QQ_msgjson.私聊 && QQ_msgjson.私聊[privateChatKey] && QQ_msgjson.私聊[privateChatKey].length > 0) {
+                        hasRealMessageRecord = true;
                     }
-                }
-                
-                // 2. 按时间戳降序排序 (模拟真实消息列表)
-                allChats.sort((a, b) => b.timestamp - a.timestamp);
-                
-                // 3. 从联系人列表获取模板并填充数据
-                const $homeChars = $("#QQ_home_chars");
-                allChats.forEach(chat => {
-                    const $contactTemplate = $homeChars.find(`.QQ_home_usermsg[data-name='${chat.name}']`);
-                    if ($contactTemplate.length > 0) {
-                        const $newContact = $contactTemplate.clone(true);
-                        
-                        // *** 关键修复：主动从数据更新最后消息和时间 ***
-                        $newContact.find('.QQ_home_lastmsg').text(chat.lastMessage);
-                        $newContact.find('.QQ_home_lasttime').text(new Date(chat.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-                        
-                        $messageChars.append($newContact);
+                    
+                    // 检查群聊记录
+                    if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs && QQ_msgjson.群聊[name].msgs.length > 0) {
+                        hasRealMessageRecord = true;
+                    }
+                    
+                    // 检查未读消息数量（必须大于0且可见）
+                    const hasUnreadCount = hasNewMessages && parseInt($newMsgBadge.text()) > 0;
+                    
+                    // 群聊特殊处理：如果是群聊且在QQ_Groups中，则显示
+                    if (isGroup) {
+                        if (QQ_Groups.includes(name)) {
+                            console.log('添加群聊到消息列表:', name);
+                            contactedUsers.push($contact.clone(true));
+                        }
+                    } else {
+                        // 只有真正有消息记录或未读消息才显示
+                    if (hasRealMessageRecord || hasUnreadCount) {
+                        contactedUsers.push($contact.clone(true));
+                        }
                     }
                 });
-
-                console.log("消息列表更新完成 (增强版)");
+                
+                // 如果没有任何联系过的用户，只显示第一个联系人（贝尔法斯特）
+                if (contactedUsers.length === 0 && firstContact) {
+                    $messageChars.append(firstContact);
+                } else {
+                    contactedUsers.forEach(function($contact) {
+                        $messageChars.append($contact);
+                    });
+                }
+                
+                console.log("消息列表更新完成");
             }
             function QQ_HideAllChat() {
                 // for (let name of QQ_pages) {
@@ -22597,6 +22604,24 @@ ${index + 1}. ${space.name}
                     
                     console.log(`✅ 群聊元数据增强完成，QQ_Groups 包含 ${QQ_Groups.length} 个群聊`);
                     
+                    // *** 关键修复：在元数据加载后，更新现有UI元素的头像 ***
+                    console.log('开始用加载的元数据更新群聊UI...');
+                    detailedGroups.forEach(groupData => {
+                        if (groupData && groupData.name) {
+                            // 更新联系人列表中的头像
+                            const contactElement = document.querySelector(`#QQ_home_chars .QQ_home_usermsg[data-name='${groupData.name}']`);
+                            if (contactElement) {
+                                updateGroupAvatarInElement(contactElement, groupData);
+                            }
+
+                            // 更新消息列表中的头像
+                            const messageElement = document.querySelector(`#QQ_message_list_chars .QQ_home_usermsg[data-name='${groupData.name}']`);
+                            if (messageElement) {
+                                updateGroupAvatarInElement(messageElement, groupData);
+                            }
+                        }
+                    });
+                    
                 } catch (error) {
                     console.error('群聊元数据增强失败:', error);
                 }
@@ -22657,7 +22682,7 @@ ${index + 1}. ${space.name}
                     console.warn('QQ_Groups不是数组，重新初始化');
                     QQ_Groups = [];
                 }
-            } 
+            }
             
             // 启动保护机制
             protectQQGroups();
@@ -26130,7 +26155,7 @@ ${index + 1}. ${space.name}
                     initContactGroups();
                 }
                 
-                                    // *** 修复：在初始化完成后更新所有群聊的最后消息显示 ***
+                // *** 修复：在初始化完成后更新所有群聊的最后消息显示 ***
                 setTimeout(async () => {
                     console.log('开始更新所有群聊的最后消息显示...');
                     try {
@@ -26146,6 +26171,11 @@ ${index + 1}. ${space.name}
                         } else {
                             console.warn('群聊数据无效，跳过最后消息显示更新');
                         }
+
+                        // *** 新增：同时更新整个消息列表，确保私聊信息也显示 ***
+                        console.log('刷新整个消息列表以显示私聊和群聊的最后消息...');
+                        await QQ_UpdateMessageList();
+
                     } catch (error) {
                         console.error('更新群聊最后消息显示时出错:', error);
                     }
@@ -32853,7 +32883,7 @@ MiPhone_JSON_END`;
                             if (Array.isArray(groupsResult)) {
                                 // 检查缓存的群聊数据
                                 console.log('✅ 群聊数据缓存正常，数量:', groupsResult.length);
-                            } else {
+                                    } else {
                                 console.warn('⚠️ 群聊数据缓存无效:', typeof groupsResult);
                             }
                         } catch (e) {
