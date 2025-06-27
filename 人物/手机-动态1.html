@@ -25158,9 +25158,37 @@ ${index + 1}. ${space.name}
                         console.log('在QQ_msgjson.群聊中初始化群聊数据:', groupName);
                     }
                     
-                    // *** 修复：使用两阶段加载机制重新加载群聊元数据 ***
-                    console.log('立即重新加载群聊元数据以显示新创建的群聊');
+                    // *** 修复：先创建界面，再增强元数据 ***
+                    console.log('立即创建群聊界面并加载元数据');
+                    
+                    // *** 关键修复：对于新创建的群聊，确保不被误认为已初始化 ***
+                    // 临时移除初始化标记，确保新群聊能正确添加初始消息
+                    if (QQ_GroupInitializedSet.has(groupName)) {
+                        console.log(`新创建群聊 ${groupName} 被误标记为已初始化，临时移除标记`);
+                        QQ_GroupInitializedSet.delete(groupName);
+                    }
+                    
+                    // 首先调用AddNewGroup创建界面元素和初始消息
+                    const avatarData = groupData.avatar;
+                    let avatarUrl = '';
+                    if (avatarData && avatarData.imageData) {
+                        avatarUrl = avatarData.imageData;
+                    } else if (avatarData && typeof avatarData === 'string') {
+                        avatarUrl = avatarData;
+                    } else {
+                        avatarUrl = 'https://files.catbox.moe/skngqq.jpg';
+                    }
+                    
+                    AddNewGroup(groupName, avatarUrl, members || [], '');
+                    
+                    // 然后调用元数据增强来更新头像等详细信息
                     await QQ_Enhance_Group_Metadata();
+                    
+                    // *** 修复：创建群聊后立即刷新联系人界面，确保新群聊立即显示 ***
+                    setTimeout(() => {
+                        QQ_UpdateMessageList();
+                        console.log('✅ 群聊创建后界面已刷新');
+                    }, 200);
                     
                     console.log('群聊创建成功:', groupName);
                     console.log('当前QQ_Groups数组:', QQ_Groups);
