@@ -17140,13 +17140,24 @@ ${index + 1}. ${space.name}
                                             AddNewGroup(groupName, defaultAvatar, members, '');
                                         } else {
                                             console.log(`群聊 "${groupName}" 的界面入口已存在，跳过创建`);
+                                            // 界面存在时也要标记为已初始化，防止后续重复添加初始消息
+                                            QQ_GroupInitializedSet.add(groupName);
                                         }
                                     }
                                 }
                             }
                             
                             console.log('✅ 成功恢复聊天备份数据:', Object.keys(QQ_msgjson.私聊 || {}).length, '个私聊,', Object.keys(QQ_msgjson.群聊 || {}).length, '个群聊');
-                                return true;
+                            
+                            // *** 修复：恢复数据后立即刷新消息列表显示，确保私聊最后消息正确显示 ***
+                            try {
+                                await QQ_UpdateMessageList();
+                                console.log('✅ 私聊和群聊最后消息显示已更新');
+                            } catch (error) {
+                                console.error('更新消息列表显示失败:', error);
+                            }
+                            
+                            return true;
                             } else {
                              console.log('🟡 聊天备份数据格式不正确或为空');
                                 return false;
@@ -17161,106 +17172,7 @@ ${index + 1}. ${space.name}
                 }
             }
 
-            /**
-             * *** 新增：增强群聊元数据 - 从独立的群聊条目中读取详细信息并更新现有群聊 ***
-             */
-            async function QQ_Enhance_Group_Metadata() {
-                console.log('=== 开始增强群聊元数据 ===');
-                
-                if (!worldbook || !entries) {
-                    console.warn('世界书功能不可用，跳过群聊元数据增强');
-                    return;
-                }
-                
-                try {
-                    // 查找所有群聊条目
-                    const groupEntries = entries.filter(e => e.comment && e.comment.startsWith("手机-群聊-"));
-                    console.log('找到的群聊元数据条目数量:', groupEntries.length);
-                    
-                    for (const entry of groupEntries) {
-                        if (entry && entry.content) {
-                            const lines = entry.content.split('\n');
-                            let groupData = null;
-                            
-                            // 解析群聊元数据
-                            for (const line of lines) {
-                                const trimmed = line.trim();
-                                if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-                                    const name = trimmed.slice(1, -1);
-                                    groupData = { name };
-                                } else if (groupData && trimmed.startsWith('成员=')) {
-                                    groupData.members = trimmed.substring(3).split(/[,，]/).map(m => m.trim()).filter(m => m);
-                                } else if (groupData && trimmed.startsWith('描述=')) {
-                                    groupData.description = trimmed.substring(3);
-                                } else if (groupData && trimmed.startsWith('头像=')) {
-                                    groupData.avatar = trimmed.substring(3);
-                                }
-                            }
-                            
-                            if (groupData && groupData.name) {
-                                // 检查这个群聊是否已经在我们的系统中存在
-                                if (QQ_Groups.includes(groupData.name) && QQ_msgjson.群聊[groupData.name]) {
-                                    console.log(`增强现有群聊 "${groupData.name}" 的元数据`);
-                                    
-                                    // 更新成员列表
-                                    if (groupData.members) {
-                                        QQ_msgjson.群聊[groupData.name].members = groupData.members;
-                                    }
-                                    
-                                    // 更新界面上的头像（如果提供了新头像）
-                                    if (groupData.avatar) {
-                                        const groupElement = $(`.QQ_home_usermsg[data-name='${groupData.name}'][data-group-type='true']`);
-                                        if (groupElement.length > 0) {
-                                            const avatarElement = groupElement.find('.head');
-                                            if (avatarElement.length > 0) {
-                                                avatarElement.css('background-image', `url('${groupData.avatar}')`);
-                                                console.log(`更新群聊 "${groupData.name}" 的头像`);
-                                            }
-                                        }
-                                        
-                                        // 同时更新消息页面的头像
-                                        const messageGroupElement = $(`.QQ_message_list_chars .QQ_home_usermsg[data-name='${groupData.name}'][data-group-type='true']`);
-                                        if (messageGroupElement.length > 0) {
-                                            const messageAvatarElement = messageGroupElement.find('.head');
-                                            if (messageAvatarElement.length > 0) {
-                                                messageAvatarElement.css('background-image', `url('${groupData.avatar}')`);
-                                            }
-                                        }
-                                    }
-                                    
-                                    // 更新最后消息显示
-                                    setTimeout(() => {
-                                        updateGroupLastMessageDisplay(groupData.name);
-                                    }, 200);
-                                    
-                                } else {
-                                    // 这是一个在主备份中不存在的新群聊，创建它
-                                    console.log(`发现新群聊 "${groupData.name}"，创建界面入口`);
-                                    
-                                    if (!QQ_Groups.includes(groupData.name)) {
-                                        QQ_Groups.push(groupData.name);
-                                    }
-                                    
-                                    if (!QQ_msgjson.群聊[groupData.name]) {
-                                        QQ_msgjson.群聊[groupData.name] = {
-                                            members: groupData.members || [],
-                                            msgs: []
-                                        };
-                                    }
-                                    
-                                    const defaultAvatar = groupData.avatar || 'https://files.catbox.moe/skngqq.jpg';
-                                    AddNewGroup(groupData.name, defaultAvatar, groupData.members || [], groupData.description || '');
-                                }
-                            }
-                        }
-                    }
-                    
-                    console.log('✅ 群聊元数据增强完成');
-                    
-                } catch (error) {
-                    console.error('增强群聊元数据时发生错误:', error);
-                }
-            }
+            
 
             /**
              * *** 新增：渲染动态内容到界面 (支持分页) ***
@@ -22604,6 +22516,37 @@ ${index + 1}. ${space.name}
                     
                     console.log(`✅ 群聊元数据增强完成，QQ_Groups 包含 ${QQ_Groups.length} 个群聊`);
                     
+                    // *** 关键修复：在元数据加载后，更新现有UI元素的头像 ***
+                    console.log('开始用加载的元数据更新群聊UI...');
+                    detailedGroups.forEach(groupData => {
+                        if (groupData && groupData.name) {
+                            // 更新联系人列表中的头像
+                            const contactElement = document.querySelector(`#QQ_home_chars .QQ_home_usermsg[data-name='${groupData.name}']`);
+                            if (contactElement) {
+                                updateGroupAvatarInElement(contactElement, groupData);
+                            }
+
+                            // 更新消息列表中的头像
+                            const messageElement = document.querySelector(`#QQ_message_list_chars .QQ_home_usermsg[data-name='${groupData.name}']`);
+                            if (messageElement) {
+                                updateGroupAvatarInElement(messageElement, groupData);
+                            }
+                            
+                            // *** 修复：在加载群聊后立即更新最后消息显示 ***
+                            setTimeout(() => {
+                                updateGroupLastMessageDisplay(groupData.name);
+                            }, 300);
+                        }
+                    });
+                    
+                    // *** 修复：元数据增强完成后最终刷新一次消息列表，确保所有界面更新生效 ***
+                    try {
+                        await QQ_UpdateMessageList();
+                        console.log('✅ 群聊元数据增强后消息列表已刷新');
+                    } catch (error) {
+                        console.error('刷新消息列表失败:', error);
+                    }
+                    
                 } catch (error) {
                     console.error('群聊元数据增强失败:', error);
                 }
@@ -26153,6 +26096,11 @@ ${index + 1}. ${space.name}
                         } else {
                             console.warn('群聊数据无效，跳过最后消息显示更新');
                         }
+
+                        // *** 新增：同时更新整个消息列表，确保私聊信息也显示 ***
+                        console.log('刷新整个消息列表以显示私聊和群聊的最后消息...');
+                        await QQ_UpdateMessageList();
+
                     } catch (error) {
                         console.error('更新群聊最后消息显示时出错:', error);
                     }
