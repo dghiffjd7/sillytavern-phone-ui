@@ -17111,10 +17111,20 @@ ${index + 1}. ${space.name}
                         if (backupData.data && (backupData.data.私聊 || backupData.data.群聊)) {
                             console.log('✅ 找到聊天备份，准备恢复...');
                             
+                            // *** 修复：安全恢复聊天数据，防止数据丢失 ***
+                            const originalPrivateChats = QQ_msgjson?.私聊 ? Object.keys(QQ_msgjson.私聊).length : 0;
+                            const originalGroupChats = QQ_msgjson?.群聊 ? Object.keys(QQ_msgjson.群聊).length : 0;
+                            
                             QQ_msgjson = JSON.parse(JSON.stringify(backupData.data));
                             QQ_ChatBackup = backupData; 
                             window.QQ_msgjson = QQ_msgjson; 
-                            window.QQ_ChatBackup = QQ_ChatBackup; 
+                            window.QQ_ChatBackup = QQ_ChatBackup;
+                            
+                            // 标记数据已恢复，防止后续被意外清空
+                            window.QQ_ChatDataRestored = true;
+                            window.QQ_ChatDataRestoreTime = new Date().toISOString();
+                            
+                            console.log(`📊 聊天数据恢复对比: 私聊 ${originalPrivateChats} → ${Object.keys(QQ_msgjson.私聊 || {}).length}, 群聊 ${originalGroupChats} → ${Object.keys(QQ_msgjson.群聊 || {}).length}`); 
 
                             // [新增] 恢复成功后，立即根据恢复的数据同步群聊列表
                             if (QQ_msgjson.群聊) {
@@ -17126,9 +17136,21 @@ ${index + 1}. ${space.name}
                                 
                                 // [新增] 为恢复的群聊创建基础界面入口
                                 console.log('开始为恢复的群聊创建界面入口...');
+                                
+                                // *** 修复：先标记所有恢复的群聊为已初始化，防止重复系统消息 ***
+                                if (!window.QQ_GroupInitializedSet) {
+                                    window.QQ_GroupInitializedSet = new Set();
+                                }
+                                
                                 for (const groupName of groupNames) {
                                     const groupData = QQ_msgjson.群聊[groupName];
                                     if (groupData) {
+                                        // *** 关键修复：恢复的群聊已有消息历史，标记为已初始化 ***
+                                        if (groupData.msgs && groupData.msgs.length > 0) {
+                                            window.QQ_GroupInitializedSet.add(groupName);
+                                            console.log(`群聊 "${groupName}" 有 ${groupData.msgs.length} 条历史消息，标记为已初始化`);
+                                        }
+                                        
                                         // 使用默认头像创建群聊入口，详细元数据将在第二阶段补充
                                         const defaultAvatar = 'https://files.catbox.moe/skngqq.jpg';
                                         const members = groupData.members || [];
@@ -17141,7 +17163,7 @@ ${index + 1}. ${space.name}
                                         } else {
                                             console.log(`群聊 "${groupName}" 的界面入口已存在，跳过创建`);
                                             // 界面存在时也要标记为已初始化，防止后续重复添加初始消息
-                                            QQ_GroupInitializedSet.add(groupName);
+                                            window.QQ_GroupInitializedSet.add(groupName);
                                         }
                                     }
                                 }
@@ -22784,9 +22806,14 @@ ${index + 1}. ${space.name}
                     QQ_Groups.push(groupName);
                 }
                 
-                // 确保QQ_msgjson中有该群聊的数据结构
+                // *** 修复：安全初始化群聊数据结构，防止清空已恢复的数据 ***
                 if (!QQ_msgjson.群聊) {
+                    if (window.QQ_ChatDataRestored) {
+                        console.warn('⚠️ 检测到聊天数据已从备份恢复，但群聊数据为空，这可能表示数据丢失');
+                        console.log('恢复时间:', window.QQ_ChatDataRestoreTime);
+                    }
                     QQ_msgjson.群聊 = {};
+                    console.log('🔧 初始化空的群聊数据结构');
                 }
                 if (!QQ_msgjson.群聊[groupName]) {
                     console.log(`在QQ_msgjson.群聊中初始化群聊数据: ${groupName}`);
@@ -25179,16 +25206,27 @@ ${index + 1}. ${space.name}
                         avatarUrl = 'https://files.catbox.moe/skngqq.jpg';
                     }
                     
+                    // *** 修复：确保AddNewGroup完成后再刷新界面 ***
                     AddNewGroup(groupName, avatarUrl, members || [], '');
+                    
+                    // 等待界面元素创建完成
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     
                     // 然后调用元数据增强来更新头像等详细信息
                     await QQ_Enhance_Group_Metadata();
                     
-                    // *** 修复：创建群聊后立即刷新联系人界面，确保新群聊立即显示 ***
-                    setTimeout(() => {
-                        QQ_UpdateMessageList();
-                        console.log('✅ 群聊创建后界面已刷新');
-                    }, 200);
+                    // *** 修复：确保新创建的群聊立即显示在消息列表中 ***
+                    // 不使用QQ_UpdateMessageList，而是直接复制新创建的元素到消息列表
+                    const newGroupElement = $(`.QQ_home_usermsg[data-name='${groupName}'][data-group-type='true']`);
+                    if (newGroupElement.length > 0) {
+                        const $messageChars = $("#QQ_message_list_chars");
+                        // 检查消息列表中是否已有该群聊
+                        const existingInMessageList = $messageChars.find(`.QQ_home_usermsg[data-name='${groupName}'][data-group-type='true']`);
+                        if (existingInMessageList.length === 0) {
+                            $messageChars.append(newGroupElement.clone(true));
+                            console.log('✅ 新群聊已立即添加到消息列表');
+                        }
+                    }
                     
                     console.log('群聊创建成功:', groupName);
                     console.log('当前QQ_Groups数组:', QQ_Groups);
@@ -25265,9 +25303,14 @@ ${index + 1}. ${space.name}
                 try {
                     // *** 修复：实际保存群聊消息到QQ_msgjson.群聊 ***
                     
-                    // 确保QQ_msgjson.群聊结构存在
+                    // *** 修复：安全初始化群聊数据结构，防止清空已恢复的数据 ***
                     if (!QQ_msgjson.群聊) {
+                        if (window.QQ_ChatDataRestored) {
+                            console.warn('⚠️ 在saveGroupMessage中检测到群聊数据为空，但聊天数据已从备份恢复');
+                            console.log('这可能表示数据在某处被意外清空，恢复时间:', window.QQ_ChatDataRestoreTime);
+                        }
                         QQ_msgjson.群聊 = {};
+                        console.log('🔧 在saveGroupMessage中初始化空的群聊数据结构');
                     }
                     
                     // 根据groupId找到对应的群聊名称
