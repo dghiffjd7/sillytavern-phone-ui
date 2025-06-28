@@ -17259,7 +17259,8 @@ ${index + 1}. ${space.name}
                                 imgcontent: momentData.imgcontent || '',
                                 id: momentData.id, // 修正：使用id而不是momentId以匹配模板
                                 momentId: momentData.id, // 保留momentId以防其他地方使用
-                                // 新增：点赞相关数据
+                                // 修复：点赞相关数据，使用模板中正确的变量名
+                                likes: momentData.likes ? momentData.likes.count : 0,  // 修复：模板使用的是${likes}变量
                                 likeCount: momentData.likes ? momentData.likes.count : 0,
                                 likedByUser: momentData.likes ? momentData.likes.userLiked : false
                             })
@@ -19938,7 +19939,9 @@ ${index + 1}. ${space.name}
                     const finalPayload = `${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
                     QQ_CacheSendMsg = ""; // 清空缓存
 
-                    // 9. 发送请求
+                    // 9. 设置请求上下文并发送请求
+                    QQ_LastRequest = finalPayload;
+                    QQ_LastRequestName = name;
                     console.log('发送给AI的最终Payload:\n', finalPayload);
                     const result = await QQ_Gen(finalPayload);
                     await ResultHandle(result);
@@ -21100,7 +21103,8 @@ ${index + 1}. ${space.name}
                                 imgcontent: fakeimg,
                                 id: momentId, // 修正：使用id而不是momentId以匹配模板
                                 momentId: momentId, // 保留momentId以防其他地方使用
-                                // 新增：点赞相关数据
+                                // 修复：点赞相关数据，使用模板中正确的变量名
+                                likes: currentMomentData.likes.count,  // 修复：模板使用的是${likes}变量
                                 likeCount: currentMomentData.likes.count,
                                 likedByUser: currentMomentData.likes.userLiked
                             }),
@@ -32723,7 +32727,31 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         }
                     });
                     
-                    console.log('✅ 动态点赞功能已初始化（支持多种点赞按钮类型）');
+                    // 类型4：绑定Discord动态模板中的点赞区域 
+                    $(document).off('click', '.discord-thread-content-likes').on('click', '.discord-thread-content-likes', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        // 查找动态ID - 向上查找包含data-moment-id的元素或包含ID的父元素
+                        const momentElement = $(this).closest('[data-moment-id]');
+                        let momentId = momentElement.data('moment-id');
+                        
+                        // 如果没找到data-moment-id，尝试从discord-thread的data-id获取
+                        if (!momentId) {
+                            const discordThread = $(this).closest('.discord-thread[data-id]');
+                            momentId = discordThread.data('id');
+                        }
+                        
+                        console.log('点击了Discord点赞区域，动态ID:', momentId);
+                        
+                        if (momentId) {
+                            QQ_LikeMoment(momentId);
+                        } else {
+                            console.warn('无法找到动态ID，请检查动态元素结构');
+                        }
+                    });
+                    
+                    console.log('✅ 动态点赞功能已初始化（支持多种点赞按钮类型，包括Discord模板）');
                 } catch (error) {
                     console.error('初始化动态点赞功能失败:', error);
                 }
