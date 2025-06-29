@@ -16076,9 +16076,12 @@ ${index + 1}. ${space.name}
                     if (typeof initContactGroups === 'function') {
                         initContactGroups();
                     }
-                    if (typeof QQ_InitMomentLikes === 'function') {
-                        QQ_InitMomentLikes();
-                    }
+                    // 延迟初始化点赞功能，确保不与优先级逻辑冲突
+                    setTimeout(() => {
+                        if (typeof QQ_InitMomentLikes === 'function') {
+                            QQ_InitMomentLikes();
+                        }
+                    }, 800);
                 }, 500);
             }
             //space_init();
@@ -32698,102 +32701,49 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
              * 专门针对新版本优先级逻辑导致的点赞无响应问题
              */
             window.QQ_InitMomentLikes = function() {
-                console.log('🚑 启动点赞按钮终极修复方案...');
+                console.log('🎯 初始化点赞功能...');
                 
                 try {
-                    // ========== 第一步：清理所有旧的事件绑定 ==========
-                    console.log('🧹 清理旧的事件绑定...');
-                    $(document).off('click', '.moment-like-button');
-                    $(document).off('click', '.moment_button svg');  
-                    $(document).off('click', 'span:contains("人已赞")');
-                    $(document).off('click', '.moment_button');
+                    // 清理旧的事件绑定
+                    $(document).off('click.momentLike');
                     
-                    // ========== 第二步：多重策略事件绑定 ==========
-                    console.log('🔧 使用多重策略进行事件绑定...');
-                    
-                    // 策略1：基础事件委托（针对.moment-like-button类）
-                    $(document).on('click.momentLike', '.moment-like-button', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log('🎯 策略1触发：.moment-like-button被点击');
-                        
-                        const momentId = $(this).attr('data-moment-id') || $(this).data('moment-id');
-                        console.log('获取到momentId:', momentId);
-                        
-                        if (momentId && typeof QQ_LikeMoment === 'function') {
-                            console.log('✅ 执行点赞操作');
-                            QQ_LikeMoment(momentId);
-                        } else {
-                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
-                        }
-                        return false;
-                    });
-                    
-                    // 策略2：广泛SVG点击捕获（针对所有SVG元素）
-                    $(document).on('click.momentLike', 'svg', function(e) {
-                        // 检查是否为点赞相关的SVG
-                        const $svg = $(this);
-                        const hasLikeClass = $svg.hasClass('moment-like-button');
-                        const hasLikePath = $svg.find('path[d*="471.411583"]').length > 0;
-                        const inMomentButton = $svg.closest('.moment_button').length > 0;
-                        
-                        if (hasLikeClass || hasLikePath || inMomentButton) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            console.log('🎯 策略2触发：点赞SVG被点击');
-                            
-                            // 多种方式获取momentId
-                            let momentId = $svg.attr('data-moment-id') || $svg.data('moment-id');
-                            if (!momentId) {
-                                const parentMoment = $svg.closest('[data-moment-id]');
-                                momentId = parentMoment.attr('data-moment-id') || parentMoment.data('moment-id');
-                            }
-                            
-                            console.log('获取到momentId:', momentId);
-                            
-                            if (momentId && typeof QQ_LikeMoment === 'function') {
-                                console.log('✅ 执行点赞操作');
-                                QQ_LikeMoment(momentId);
-                            } else {
-                                console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
-                            }
-                            return false;
-                        }
-                    });
-                    
-                    // 策略3：点赞文本区域点击
-                    $(document).on('click.momentLike', 'span:contains("人已赞")', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log('🎯 策略3触发："人已赞"文本被点击');
-                        
-                        const momentElement = $(this).closest('[data-moment-id]');
-                        const momentId = momentElement.attr('data-moment-id') || momentElement.data('moment-id');
-                        
-                        console.log('获取到momentId:', momentId);
-                        
-                        if (momentId && typeof QQ_LikeMoment === 'function') {
-                            console.log('✅ 执行点赞操作');
-                            QQ_LikeMoment(momentId);
-                        } else {
-                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
-                        }
-                        return false;
-                    });
-                    
-                    // 策略4：广泛的.moment_button点击捕获
-                    $(document).on('click.momentLike', '.moment_button', function(e) {
-                        // 检查点击的是否为点赞相关区域
+                    // 使用简单可靠的事件委托 - 捕获所有点赞相关点击
+                    $(document).on('click.momentLike', function(e) {
                         const $target = $(e.target);
-                        if ($target.is('svg') || $target.closest('svg').length > 0) {
+                        let $likeElement = null;
+                        let momentId = null;
+                        
+                        // 检查点击的是否为点赞按钮或其子元素
+                        if ($target.hasClass('moment-like-button')) {
+                            $likeElement = $target;
+                        } else if ($target.closest('.moment-like-button').length > 0) {
+                            $likeElement = $target.closest('.moment-like-button');
+                        } else if ($target.closest('.moment_button').length > 0) {
+                            // 检查是否为点赞按钮区域中的第一个SVG（点赞按钮）
+                            const $momentButton = $target.closest('.moment_button');
+                            const $firstSvg = $momentButton.find('svg').first();
+                            if ($target.is('svg') && $target.is($firstSvg)) {
+                                $likeElement = $target;
+                            } else if ($target.closest('svg').length > 0 && $target.closest('svg').is($firstSvg)) {
+                                $likeElement = $target.closest('svg');
+                            }
+                        } else if ($target.is('span') && $target.text().includes('人已赞')) {
+                            $likeElement = $target;
+                        }
+                        
+                        // 如果找到了点赞元素，执行点赞操作
+                        if ($likeElement) {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('🎯 策略4触发：.moment_button区域被点击');
                             
-                            const momentElement = $(this).closest('[data-moment-id]');
-                            const momentId = momentElement.attr('data-moment-id') || momentElement.data('moment-id');
+                            // 获取momentId
+                            momentId = $likeElement.attr('data-moment-id') || $likeElement.data('moment-id');
+                            if (!momentId) {
+                                const $momentContainer = $likeElement.closest('[data-moment-id]');
+                                momentId = $momentContainer.attr('data-moment-id') || $momentContainer.data('moment-id');
+                            }
                             
-                            console.log('获取到momentId:', momentId);
+                            console.log('🎯 点赞按钮被点击，momentId:', momentId);
                             
                             if (momentId && typeof QQ_LikeMoment === 'function') {
                                 console.log('✅ 执行点赞操作');
@@ -32801,114 +32751,32 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                             } else {
                                 console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
                             }
+                            
                             return false;
                         }
                     });
                     
-                    // ========== 第三步：动态内容监控和强制绑定 ==========
-                    console.log('👁️ 设置动态内容监控...');
-                    
-                    // 使用MutationObserver监控DOM变化
-                    if (window.momentLikeObserver) {
-                        window.momentLikeObserver.disconnect();
-                    }
-                    
-                    window.momentLikeObserver = new MutationObserver(function(mutations) {
-                        let hasNewMoments = false;
-                        mutations.forEach(function(mutation) {
-                            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                                for (let node of mutation.addedNodes) {
-                                    if (node.nodeType === 1) { // Element node
-                                        const $node = $(node);
-                                        if ($node.find('.moment-like-button, .moment_button').length > 0 ||
-                                            $node.hasClass('moment-like-button') || 
-                                            $node.hasClass('moment_button')) {
-                                            hasNewMoments = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                        
-                        if (hasNewMoments) {
-                            console.log('🔄 检测到新的动态内容，重新强化事件绑定...');
-                            setTimeout(() => {
-                                QQ_ForceLikeButtonBinding();
-                            }, 100);
-                        }
-                    });
-                    
-                    // 监控动态容器
-                    const spaceContents = document.getElementById('space_contents');
-                    if (spaceContents) {
-                        window.momentLikeObserver.observe(spaceContents, {
-                            childList: true,
-                            subtree: true
-                        });
-                    }
-                    
-                    // ========== 第四步：延迟检测和强化绑定 ==========
-                    setTimeout(() => {
-                        console.log('🔍 延迟检测当前页面点赞按钮...');
-                        QQ_ForceLikeButtonBinding();
-                        QQ_DiagnoseLikeButtons();
-                    }, 300);
-                    
-                    console.log('✅ 点赞按钮终极修复方案初始化完成');
+                    console.log('✅ 点赞功能初始化完成');
                     
                 } catch (error) {
-                    console.error('❌ 点赞按钮修复失败:', error);
+                    console.error('❌ 点赞功能初始化失败:', error);
                 }
             };
             
             /**
-             * 🔨 强制点赞按钮绑定函数
+             * 🔨 强制点赞按钮绑定函数（已简化，现在由统一事件委托处理）
              */
             window.QQ_ForceLikeButtonBinding = function() {
-                console.log('🔨 开始强制绑定点赞按钮...');
+                console.log('🔨 点赞按钮绑定检查...');
                 
-                // 直接为所有现有的点赞按钮添加点击事件
-                $('.moment-like-button').each(function(index) {
-                    const $btn = $(this);
-                    const momentId = $btn.attr('data-moment-id') || $btn.data('moment-id');
-                    
-                    // 移除旧的点击事件，添加新的
-                    $btn.off('click.forceLike').on('click.forceLike', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log(`🎯 强制绑定触发：按钮${index + 1}被点击，momentId=${momentId}`);
-                        
-                        if (momentId && typeof QQ_LikeMoment === 'function') {
-                            QQ_LikeMoment(momentId);
-                        }
-                        return false;
-                    });
-                    
-                    console.log(`📌 强制绑定按钮${index + 1}，momentId=${momentId}`);
-                });
+                // 检查点赞按钮数量（用于调试）
+                const momentButtons = $('.moment-like-button');
+                const svgButtons = $('.moment_button svg');
                 
-                // 为.moment_button中的SVG元素强制绑定
-                $('.moment_button svg').each(function(index) {
-                    const $svg = $(this);
-                    const momentElement = $svg.closest('[data-moment-id]');
-                    const momentId = momentElement.attr('data-moment-id') || momentElement.data('moment-id');
-                    
-                    $svg.off('click.forceLike').on('click.forceLike', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log(`🎯 强制绑定触发：SVG${index + 1}被点击，momentId=${momentId}`);
-                        
-                        if (momentId && typeof QQ_LikeMoment === 'function') {
-                            QQ_LikeMoment(momentId);
-                        }
-                        return false;
-                    });
-                    
-                    console.log(`📌 强制绑定SVG${index + 1}，momentId=${momentId}`);
-                });
+                console.log(`📊 找到 ${momentButtons.length} 个 .moment-like-button 和 ${svgButtons.length} 个 .moment_button svg`);
                 
-                console.log('✅ 强制绑定完成');
+                // 由于现在使用统一的事件委托，不需要单独绑定
+                console.log('✅ 点赞功能由统一事件委托处理，无需额外绑定');
             };
             
             /**
@@ -33113,66 +32981,25 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             };
 
             /**
-             * 🔧 点赞按钮专项调试和修复工具 🔧
+             * 🔧 点赞按钮调试工具（简化版）
              */
             window.QQ_Debug_Like_Button = function() {
-                console.log('🔧 ========== 点赞按钮专项调试开始 ==========');
+                console.log('🔧 ========== 点赞按钮调试开始 ==========');
                 
-                // 1. 检查基础函数
-                console.log('1️⃣ 检查基础函数存在性:');
-                console.log(`- QQ_LikeMoment: ${typeof QQ_LikeMoment}`);
-                console.log(`- QQ_InitMomentLikes: ${typeof QQ_InitMomentLikes}`);
-                console.log(`- QQ_ForceLikeButtonBinding: ${typeof QQ_ForceLikeButtonBinding}`);
-                console.log(`- QQ_DiagnoseLikeButtons: ${typeof QQ_DiagnoseLikeButtons}`);
-                console.log(`- QQ_Emergency_Fix_Like: ${typeof QQ_Emergency_Fix_Like}`);
-                console.log(`- QQ_UpdateLikeUI: ${typeof QQ_UpdateLikeUI}`);
-                
-                // 2. 检查页面元素
-                console.log('2️⃣ 检查页面元素:');
+                // 检查页面元素
                 const likeButtons = $('.moment-like-button');
                 const svgButtons = $('.moment_button svg');
                 const textButtons = $('span:contains("人已赞")');
                 const userMoments = $('.user_moment');
                 
+                console.log(`📊 页面元素统计:`);
                 console.log(`- .moment-like-button: ${likeButtons.length}个`);
                 console.log(`- .moment_button svg: ${svgButtons.length}个`);
                 console.log(`- span包含"人已赞": ${textButtons.length}个`);
                 console.log(`- .user_moment: ${userMoments.length}个`);
                 
-                // 3. 检查每个按钮的详细信息
-                if (likeButtons.length > 0) {
-                    console.log('3️⃣ 检查每个.moment-like-button的详细信息:');
-                    likeButtons.each(function(index) {
-                        const $btn = $(this);
-                        const momentId = $btn.data('moment-id') || $btn.attr('data-moment-id');
-                        const liked = $btn.data('liked') || $btn.attr('data-liked');
-                        console.log(`  按钮 ${index + 1}:`);
-                        console.log(`    - momentId: ${momentId}`);
-                        console.log(`    - liked: ${liked}`);
-                        console.log(`    - 类名: ${$btn.attr('class')}`);
-                        console.log(`    - HTML: ${$btn[0].outerHTML.substring(0, 150)}...`);
-                    });
-                }
-                
-                // 4. 检查SVG按钮
-                if (svgButtons.length > 0) {
-                    console.log('4️⃣ 检查每个SVG按钮:');
-                    svgButtons.each(function(index) {
-                        const $svg = $(this);
-                        const parentMoment = $svg.closest('.user_moment[data-moment-id]');
-                        const momentId = parentMoment.data('moment-id');
-                        const svgPath = $svg.find('path').attr('d');
-                        const isLikeButton = svgPath && svgPath.includes('471.411583');
-                        
-                        console.log(`  SVG ${index + 1}:`);
-                        console.log(`    - 所属动态ID: ${momentId}`);
-                        console.log(`    - 是点赞按钮: ${isLikeButton}`);
-                        console.log(`    - Path: ${svgPath ? svgPath.substring(0, 50) + '...' : '无'}`);
-                    });
-                }
-                
-                // 5. 强制重新初始化
-                console.log('5️⃣ 强制重新初始化点赞功能...');
+                // 强制重新初始化
+                console.log('🔄 强制重新初始化点赞功能...');
                 try {
                     QQ_InitMomentLikes();
                     console.log('✅ 重新初始化成功');
@@ -33180,93 +33007,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     console.log('❌ 重新初始化失败:', error);
                 }
                 
-                // 6. 添加额外的事件监听器（强制模式）
-                console.log('6️⃣ 添加强制事件监听器...');
-                
-                // 移除所有可能的冲突事件
-                $(document).off('click.force-debug');
-                
-                // 强制绑定所有可能的点赞元素
-                $('.moment-like-button, .moment_button svg, span:contains("人已赞")').off('click.force-debug').on('click.force-debug', function(e) {
-                    console.log('🎯 强制调试事件触发！');
-                    console.log('触发元素:', this);
-                    console.log('元素类名:', $(this).attr('class'));
-                    
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // 查找momentId
-                    let momentId = null;
-                    
-                    if ($(this).hasClass('moment-like-button')) {
-                        momentId = $(this).data('moment-id') || $(this).attr('data-moment-id');
-                        console.log('从.moment-like-button获取momentId:', momentId);
-                    } else if ($(this).is('svg') || $(this).closest('svg').length) {
-                        const parentMoment = $(this).closest('.user_moment[data-moment-id]');
-                        momentId = parentMoment.data('moment-id');
-                        console.log('从SVG父级获取momentId:', momentId);
-                    } else {
-                        const parentMoment = $(this).closest('.user_moment[data-moment-id]');
-                        momentId = parentMoment.data('moment-id');
-                        console.log('从文本父级获取momentId:', momentId);
-                    }
-                    
-                    if (momentId && typeof QQ_LikeMoment === 'function') {
-                        console.log(`✅ 调用 QQ_LikeMoment(${momentId})`);
-                        QQ_LikeMoment(momentId);
-                    } else {
-                        console.log('❌ 无法调用点赞功能');
-                        console.log('momentId:', momentId);
-                        console.log('QQ_LikeMoment类型:', typeof QQ_LikeMoment);
-                    }
-                });
-                
-                // 7. 手动测试第一个按钮
-                if (likeButtons.length > 0) {
-                    console.log('7️⃣ 手动测试第一个按钮...');
-                    const firstButton = likeButtons.first();
-                    const momentId = firstButton.data('moment-id') || firstButton.attr('data-moment-id');
-                    
-                    if (momentId) {
-                        console.log(`准备手动点击按钮，momentId: ${momentId}`);
-                        
-                        // 模拟点击
-                        setTimeout(() => {
-                            console.log('🖱️ 模拟点击事件...');
-                            firstButton.trigger('click');
-                        }, 1000);
-                        
-                        // 直接调用函数
-                        setTimeout(() => {
-                            console.log('📞 直接调用函数...');
-                            if (typeof QQ_LikeMoment === 'function') {
-                                QQ_LikeMoment(momentId);
-                            }
-                        }, 2000);
-                    }
-                } else if (svgButtons.length > 0) {
-                    console.log('7️⃣ 没有.moment-like-button，测试第一个SVG按钮...');
-                    const firstSvg = svgButtons.first();
-                    const parentMoment = firstSvg.closest('.user_moment[data-moment-id]');
-                    const momentId = parentMoment.data('moment-id');
-                    
-                    if (momentId) {
-                        console.log(`准备手动点击SVG，momentId: ${momentId}`);
-                        setTimeout(() => {
-                            console.log('🖱️ 模拟点击SVG...');
-                            firstSvg.trigger('click');
-                        }, 1000);
-                    }
-                }
-                
-                console.log('🔧 ========== 点赞按钮专项调试完成 ==========');
-                console.log('💡 如果问题仍然存在，请：');
-                console.log('1. 检查是否有其他JavaScript错误');
-                console.log('2. 确认动态数据是否正确加载');
-                console.log('3. 检查CSS样式是否影响点击事件');
-                console.log('4. 尝试刷新页面重新加载');
-                
-                return '调试完成，请查看控制台详细输出';
+                console.log('✅ 点赞功能调试完成');
             };
 
             /**
