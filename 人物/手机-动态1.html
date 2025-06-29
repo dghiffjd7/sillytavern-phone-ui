@@ -18270,62 +18270,31 @@ ${index + 1}. ${space.name}
                 
                 const groupData = QQ_msgjson.群聊[groupName];
                 
-                // *** 第二层检查：强化的系统初始消息检测机制 ***
+                // *** 第二层检查：简化的系统初始消息检测机制 ***
                 const hasInitialMessages = groupData.msgs.some(msg => {
-                    if (typeof msg !== 'string') return false;
-                    
-                    // 检查是否为系统消息格式
                     if (!msg.startsWith('系统消息--')) return false;
                     
-                    // 分割消息格式：系统消息--时间--内容
+                    // 检查消息内容部分（第二个--分隔的部分）
                     const parts = msg.split('--');
-                    if (parts.length < 3) return false;
+                    if (parts.length < 2) return false;
                     
-                    const content = parts[2]; // 内容部分
-                    
-                    // 检查是否包含初始系统消息的关键内容
+                    const content = parts[1];
                     return content.includes('创建成功') || 
                            content.includes('加入了群聊') ||
-                           content.includes('开始聊天吧') ||
                            /^\d{2}:\d{2}$/.test(content); // 纯时间消息格式
                 });
                 
-                // *** 第三层检查：消息数量和内容综合判断 ***
-                const hasSystemMessages = groupData.msgs.some(msg => 
-                    typeof msg === 'string' && msg.startsWith('系统消息--')
-                );
-                
-                // 如果已有初始消息或系统消息，立即标记并跳过
-                if (hasInitialMessages || hasSystemMessages) {
+                if (hasInitialMessages) {
                     console.log(`群聊 ${groupName} 已有系统初始消息，跳过添加`);
-                    console.log(`现有消息列表 (前5条):`, groupData.msgs.slice(0, 5));
-                    
-                    // 立即标记为已初始化，防止后续重复检查
+                    console.log(`现有消息列表:`, groupData.msgs.slice(0, 5)); // 显示前5条消息便于调试
+                    // 标记为已初始化，避免后续重复检查
                     QQ_GroupInitializedSet.add(groupName);
                     return;
                 }
                 
-                // *** 第四层检查：防止在有非系统消息时重复添加初始消息 ***
-                const hasUserMessages = groupData.msgs.some(msg => 
-                    typeof msg === 'string' && !msg.startsWith('系统消息--') && msg.includes('--')
-                );
-                
-                if (hasUserMessages && groupData.msgs.length > 0) {
-                    console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条用户消息，但缺少初始系统消息，谨慎添加`);
-                    
-                    // 在有用户消息但没有系统消息的情况下，仍然要检查是否真的需要添加
-                    const firstMessage = groupData.msgs[0];
-                    if (firstMessage && typeof firstMessage === 'string') {
-                        // 如果第一条消息看起来像是旧的初始消息格式，跳过添加
-                        if (firstMessage.includes('群聊') || firstMessage.includes('创建') || firstMessage.includes('加入')) {
-                            console.log(`群聊 ${groupName} 第一条消息疑似初始消息，跳过添加:`, firstMessage);
-                            QQ_GroupInitializedSet.add(groupName);
-                            return;
-                        }
-                    }
+                if (groupData.msgs.length > 0) {
+                    console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条非系统消息，但缺少初始消息，将添加`);
                 }
-
-                console.log(`群聊 ${groupName} 确认需要添加初始系统消息`);
 
                 const currentTime = new Date().toLocaleTimeString('zh-CN', { 
                     hour12: false, 
@@ -18345,17 +18314,17 @@ ${index + 1}. ${space.name}
                     });
                 }
                 
-                // 添加时间系统消息
+                // *** 修复：在所有加入消息后添加时间系统消息，而不是用户消息 ***
                 const timeMsg = `系统消息--${currentTime}--${currentTime}`;
                 groupData.msgs.push(timeMsg);
                 
-                // *** 立即标记为已初始化，防止任何后续的重复添加 ***
-                QQ_GroupInitializedSet.add(groupName);
-                
-                // *** 立即更新群聊的最后消息和时间显示 ***
+                // *** 新增：立即更新群聊的最后消息和时间显示 ***
                 updateGroupLastMessageDisplay(groupName);
                 
-                console.log(`为群聊 ${groupName} 成功添加了初始系统消息，当前消息总数: ${groupData.msgs.length}`);
+                // *** 新增：标记群聊已初始化，避免重复添加 ***
+                QQ_GroupInitializedSet.add(groupName);
+                
+                console.log(`为群聊 ${groupName} 生成了 ${groupData.msgs.length} 条新的初始消息。`);
             }
             
             /**
