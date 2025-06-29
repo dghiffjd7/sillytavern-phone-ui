@@ -32707,52 +32707,92 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     // 清理旧的事件绑定
                     $(document).off('click.momentLike');
                     
-                    // 使用简单可靠的事件委托 - 捕获所有点赞相关点击
-                    $(document).on('click.momentLike', function(e) {
-                        const $target = $(e.target);
-                        let $likeElement = null;
-                        let momentId = null;
+                    // 使用专门的点赞按钮事件委托
+                    $(document).on('click.momentLike', '.moment-like-button', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
                         
-                        // 检查点击的是否为点赞按钮或其子元素
-                        if ($target.hasClass('moment-like-button')) {
-                            $likeElement = $target;
-                        } else if ($target.closest('.moment-like-button').length > 0) {
-                            $likeElement = $target.closest('.moment-like-button');
-                        } else if ($target.closest('.moment_button').length > 0) {
-                            // 检查是否为点赞按钮区域中的第一个SVG（点赞按钮）
-                            const $momentButton = $target.closest('.moment_button');
-                            const $firstSvg = $momentButton.find('svg').first();
-                            if ($target.is('svg') && $target.is($firstSvg)) {
-                                $likeElement = $target;
-                            } else if ($target.closest('svg').length > 0 && $target.closest('svg').is($firstSvg)) {
-                                $likeElement = $target.closest('svg');
-                            }
-                        } else if ($target.is('span') && $target.text().includes('人已赞')) {
-                            $likeElement = $target;
+                        console.log('🎯 点赞按钮直接点击 - .moment-like-button');
+                        
+                        const momentId = $(this).attr('data-moment-id') || $(this).data('moment-id');
+                        console.log('momentId:', momentId);
+                        
+                        if (momentId && typeof QQ_LikeMoment === 'function') {
+                            console.log('✅ 执行点赞操作');
+                            QQ_LikeMoment(momentId);
+                        } else {
+                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在', {
+                                momentId: momentId,
+                                QQ_LikeMoment: typeof QQ_LikeMoment
+                            });
                         }
                         
-                        // 如果找到了点赞元素，执行点赞操作
-                        if ($likeElement) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            
-                            // 获取momentId
-                            momentId = $likeElement.attr('data-moment-id') || $likeElement.data('moment-id');
-                            if (!momentId) {
-                                const $momentContainer = $likeElement.closest('[data-moment-id]');
-                                momentId = $momentContainer.attr('data-moment-id') || $momentContainer.data('moment-id');
-                            }
-                            
-                            console.log('🎯 点赞按钮被点击，momentId:', momentId);
-                            
-                            if (momentId && typeof QQ_LikeMoment === 'function') {
-                                console.log('✅ 执行点赞操作');
-                                QQ_LikeMoment(momentId);
-                            } else {
-                                console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
-                            }
-                            
-                            return false;
+                        return false;
+                    });
+                    
+                    // 添加SVG path点击支持（点击SVG内部的path元素）
+                    $(document).on('click.momentLike', '.moment-like-button path', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        console.log('🎯 点赞按钮path点击 - .moment-like-button path');
+                        
+                        const $svg = $(this).closest('.moment-like-button');
+                        const momentId = $svg.attr('data-moment-id') || $svg.data('moment-id');
+                        console.log('momentId:', momentId);
+                        
+                        if (momentId && typeof QQ_LikeMoment === 'function') {
+                            console.log('✅ 执行点赞操作');
+                            QQ_LikeMoment(momentId);
+                        } else {
+                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在', {
+                                momentId: momentId,
+                                QQ_LikeMoment: typeof QQ_LikeMoment
+                            });
+                        }
+                        
+                        return false;
+                    });
+                    
+                    // 添加点赞文本点击支持
+                    $(document).on('click.momentLike', 'span:contains("人已赞")', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        console.log('🎯 点赞文本点击 - span:contains("人已赞")');
+                        
+                        const $momentContainer = $(this).closest('[data-moment-id]');
+                        const momentId = $momentContainer.attr('data-moment-id') || $momentContainer.data('moment-id');
+                        console.log('momentId:', momentId);
+                        
+                        if (momentId && typeof QQ_LikeMoment === 'function') {
+                            console.log('✅ 执行点赞操作');
+                            QQ_LikeMoment(momentId);
+                        } else {
+                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在', {
+                                momentId: momentId,
+                                QQ_LikeMoment: typeof QQ_LikeMoment
+                            });
+                        }
+                        
+                        return false;
+                    });
+                    
+                    // 调试：添加全局点击监听器来查看点击事件
+                    $(document).on('click.debugClick', function(e) {
+                        const $target = $(e.target);
+                        if ($target.hasClass('moment-like-button') || 
+                            $target.closest('.moment-like-button').length > 0 ||
+                            $target.closest('.moment_button').length > 0 ||
+                            ($target.is('span') && $target.text().includes('人已赞'))) {
+                            console.log('🔍 调试：检测到点赞区域点击', {
+                                target: e.target,
+                                tagName: e.target.tagName,
+                                className: e.target.className,
+                                hasLikeClass: $target.hasClass('moment-like-button'),
+                                closestLikeButton: $target.closest('.moment-like-button').length,
+                                closestMomentButton: $target.closest('.moment_button').length
+                            });
                         }
                     });
                     
@@ -33008,6 +33048,65 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                 }
                 
                 console.log('✅ 点赞功能调试完成');
+            };
+            
+            /**
+             * 🔴 紧急点赞修复和测试函数
+             */
+            window.QQ_Emergency_Fix_Like = function() {
+                console.log('🚑 紧急点赞修复开始...');
+                
+                // 1. 检查页面中的点赞按钮
+                const $likeButtons = $('.moment-like-button');
+                const $momentButtons = $('.moment_button');
+                const $likeTexts = $('span:contains("人已赞")');
+                
+                console.log('📊 元素统计:');
+                console.log(`- .moment-like-button: ${$likeButtons.length}个`);
+                console.log(`- .moment_button: ${$momentButtons.length}个`);
+                console.log(`- 包含"人已赞"的span: ${$likeTexts.length}个`);
+                
+                if ($likeButtons.length > 0) {
+                    console.log('🔍 检查第一个.moment-like-button:');
+                    const $first = $likeButtons.first();
+                    console.log('- momentId:', $first.attr('data-moment-id'));
+                    console.log('- liked:', $first.attr('data-liked'));
+                    console.log('- HTML:', $first[0].outerHTML.substring(0, 200) + '...');
+                }
+                
+                // 2. 清除所有旧的事件绑定
+                console.log('🧹 清除旧的事件绑定...');
+                $(document).off('.momentLike');
+                $(document).off('.debugClick');
+                
+                // 3. 重新绑定事件
+                console.log('🔧 重新绑定事件...');
+                QQ_InitMomentLikes();
+                
+                // 4. 测试点击第一个按钮
+                if ($likeButtons.length > 0) {
+                    const $testButton = $likeButtons.first();
+                    const momentId = $testButton.attr('data-moment-id');
+                    
+                    console.log(`🧪 测试点击第一个按钮 (momentId: ${momentId})...`);
+                    
+                    // 模拟点击事件
+                    setTimeout(() => {
+                        console.log('🖱️ 触发模拟点击...');
+                        $testButton.trigger('click');
+                        
+                        // 如果模拟点击没有响应，直接调用函数
+                        setTimeout(() => {
+                            console.log('📞 直接调用QQ_LikeMoment...');
+                            if (momentId && typeof QQ_LikeMoment === 'function') {
+                                QQ_LikeMoment(momentId);
+                            }
+                        }, 1000);
+                    }, 500);
+                }
+                
+                console.log('✅ 紧急修复完成，请尝试点击点赞按钮');
+                return '紧急修复完成';
             };
 
             /**
