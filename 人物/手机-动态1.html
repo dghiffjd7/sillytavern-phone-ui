@@ -18253,7 +18253,9 @@ ${index + 1}. ${space.name}
             }
 
             /**
-             * 为群聊添加初始欢迎消息 (强化防重复版本)
+             * 为新群聊添加欢迎和系统消息（已修复）
+             * @param {string} groupName - 群组名称
+             * @param {string[]} members - 成员列表
              */
             function addGroupWelcomeMessages(groupName, members) {
                 console.log(`addGroupWelcomeMessages 被调用: ${groupName}`);
@@ -18264,14 +18266,14 @@ ${index + 1}. ${space.name}
                     return;
                 }
                 
-                if (!QQ_msgjson.群聊[groupName]) {
-                    QQ_msgjson.群聊[groupName] = { msgs: [], members: members || [] };
+                const groupData = QQ_msgjson.msg.find(g => g.name === groupName && g.type === '群聊');
+                if (!groupData) {
+                    console.error(`无法找到名为 "${groupName}" 的群聊数据。`);
+                    return;
                 }
-                
-                const groupData = QQ_msgjson.群聊[groupName];
-                
+                            
                 // *** 第二层检查：简化的系统初始消息检测机制 ***
-                const hasInitialMessages = groupData.msgs.some(msg => {
+                const hasInitialMessages = groupData.message.some(msg => {
                     if (!msg.startsWith('系统消息--')) return false;
                     
                     // 检查消息格式：系统消息--时间--内容
@@ -18293,7 +18295,7 @@ ${index + 1}. ${space.name}
                     return;
                 }
                 
-                if (groupData.msgs.length > 0) {
+                if (groupData.message.length > 0) {
                     console.log(`群聊 ${groupName} 已有 ${groupData.msgs.length} 条非系统消息，但缺少初始消息，将添加`);
                 }
 
@@ -18305,19 +18307,19 @@ ${index + 1}. ${space.name}
                 
                 // 添加群聊创建系统消息
                 const systemMsg = `系统消息--${currentTime}--群聊"${groupName}"创建成功，开始聊天吧！`;
-                groupData.msgs.push(systemMsg);
+                groupData.message.push(systemMsg);
                 
                 // 添加成员加入消息
                 if (members && members.length > 0) {
                     members.forEach(member => {
                         const joinMsg = `系统消息--${currentTime}--${member} 加入了群聊`;
-                        groupData.msgs.push(joinMsg);
+                        groupData.message.push(joinMsg);
                     });
                 }
                 
                 // *** 修复：在所有加入消息后添加时间系统消息，而不是用户消息 ***
                 const timeMsg = `系统消息--${currentTime}--${currentTime}`;
-                groupData.msgs.push(timeMsg);
+                groupData.message.push(timeMsg);
                 
                 // *** 新增：立即更新群聊的最后消息和时间显示 ***
                 updateGroupLastMessageDisplay(groupName);
@@ -18325,7 +18327,7 @@ ${index + 1}. ${space.name}
                 // *** 新增：标记群聊已初始化，避免重复添加 ***
                 QQ_GroupInitializedSet.add(groupName);
                 
-                console.log(`为群聊 ${groupName} 生成了 ${groupData.msgs.length} 条新的初始消息。`);
+                console.log(`为群聊 ${groupName} 生成了 ${groupData.message.length} 条新的初始消息。`);
             }
             
             /**
@@ -32652,7 +32654,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             /**
              * 初始化动态点赞功能
              */
-            window.QQ_InitMomentLikes = function() {
+             window.QQ_InitMomentLikes = function() {
                 try {
                     // 类型1：绑定Discord卡片中的点赞按钮
                     $(document).off('click', '.moment-like-button').on('click', '.moment-like-button', function(e) {
@@ -32675,14 +32677,11 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         const momentId = momentElement.data('moment-id');
                         
                         if (momentId) {
-                            // 判断这是否是点赞按钮（通过父元素的类名判断）
-                            const parentButton = $(this).closest('.moment_button');
-                            if (parentButton.length > 0) {
-                                // 确认这是点赞按钮（第一个按钮通常是点赞）
-                                const buttonIndex = parentButton.index('.moment_button');
-                                if (buttonIndex === 0 || parentButton.parent().find('.moment_button').first().is(parentButton)) {
-                                    QQ_LikeMoment(momentId);
-                                }
+                            // 判断这是否是点赞按钮（通过路径内容或父元素判断）
+                            const svgPath = $(this).find('path').attr('d');
+                            // 检查是否是👍按钮（根据SVG path特征判断）
+                            if (svgPath && svgPath.includes('471.411583')) { // 这是👍按钮的path特征
+                                QQ_LikeMoment(momentId);
                             }
                         }
                     });
