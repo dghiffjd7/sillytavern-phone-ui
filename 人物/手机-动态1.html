@@ -4485,7 +4485,7 @@
             ## 任务：回应动态评论
             - **情景**: 用户评论了【${authorName}】的动态，评论内容是：“${userComment}”。
             - **要求**:
-                1.  **动态评论**: 【${authorName}】本人必须回复，同时另有至少2名角色参与评论，仅输出评论内容，不要创建新的动态。
+                1.  **动态评论**: 【${authorName}】本人必须回复，同时另有至少2名角色参与评论。
                 2.  **私聊延伸**: 至少1-2名角色因该动态与用户发起【私聊】，进行更深入的讨论。
             - **输出格式**: 评论使用 \`moment_start\`, 私聊使用 \`<私聊:角色名>\`。
                 `,
@@ -17257,10 +17257,8 @@ ${index + 1}. ${space.name}
                                 randomPhone: momentData.randomPhone,
                                 extraContent: momentData.likes ? momentData.likes.count : 0, // 修正：点赞数用于extraContent
                                 imgcontent: momentData.imgcontent || '',
-                                id: momentData.id, // 修正：使用id而不是momentId以匹配模板
-                                momentId: momentData.id, // 保留momentId以防其他地方使用
-                                // 修复：点赞相关数据，使用模板中正确的变量名
-                                likes: momentData.likes ? momentData.likes.count : 0,  // 修复：模板使用的是${likes}变量
+                                momentId: momentData.id, // 传递动态ID到模板
+                                // 新增：点赞相关数据
                                 likeCount: momentData.likes ? momentData.likes.count : 0,
                                 likedByUser: momentData.likes ? momentData.likes.userLiked : false
                             })
@@ -19939,9 +19937,7 @@ ${index + 1}. ${space.name}
                     const finalPayload = `${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
                     QQ_CacheSendMsg = ""; // 清空缓存
 
-                    // 9. 设置请求上下文并发送请求
-                    QQ_LastRequest = finalPayload;
-                    QQ_LastRequestName = name;
+                    // 9. 发送请求
                     console.log('发送给AI的最终Payload:\n', finalPayload);
                     const result = await QQ_Gen(finalPayload);
                     await ResultHandle(result);
@@ -20977,70 +20973,17 @@ ${index + 1}. ${space.name}
                 let count = QQ_NewMsg["moment"] || 0;
                 let currentMomentData = null; // *** 新增：当前动态的数据对象 ***
                 
-                // *** 新增：在评论上下文中，直接处理评论并添加到现有动态 ***
-                if (isCommentContext) {
-                    console.log('🎯 评论上下文模式：将评论添加到现有动态');
-                    const commentLines = [];
-                    
-                    for (const line of lines) {
-                        const trimmedLine = line.trim();
-                        if (!trimmedLine) continue;
-                        
-                        // 跳过完整动态格式
-                        const fullMomentMatch = trimmedLine.match(/\s*(.+?)--(.+?)--(.+?)--(.+?)--(.+)/);
-                        if (fullMomentMatch) {
-                            console.log('⚠️ 评论上下文中跳过完整动态格式:', trimmedLine);
-                            continue;
-                        }
-                        
-                        // 处理评论格式
-                        const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
-                        if (commentMatch) {
-                            commentLines.push({
-                                name: commentMatch[1],
-                                content: commentMatch[2],
-                                timestamp: new Date().toISOString()
-                            });
-                        }
-                    }
-                    
-                    // 将评论添加到最新的动态中
-                    if (commentLines.length > 0 && QQ_MomentsData.length > 0) {
-                        const latestMoment = QQ_MomentsData[0]; // 最新的动态
-                        const latestMomentDiv = $("#space_contents").find('.user_moment').first();
-                        const latestCommentsList = latestMomentDiv.find('.user_leave_message_list');
-                        
-                        for (const comment of commentLines) {
-                            // 添加到数据对象
-                            latestMoment.comments.push(comment);
-                            
-                            // 保持评论数量上限（50条）
-                            if (latestMoment.comments.length > 50) {
-                                latestMoment.comments = latestMoment.comments.slice(-50);
-                            }
-                            
-                            console.log(`✅ 评论已添加到现有动态: ${comment.name} - ${comment.content}`);
-                        }
-                        
-                        // 重新渲染评论区域
-                        QQ_Render_Comments(latestMoment, latestCommentsList);
-                        
-                        // 保存动态数据
-                        setTimeout(async () => {
-                            await QQ_Save_Moments();
-                            console.log('评论上下文处理完成，动态已保存');
-                        }, 500);
-                    }
-                    
-                    return; // 评论上下文处理完成，直接返回
-                }
-                
                 for (const line of lines) {
                     //console.log(`line:${line}`);
                     let match = line.match(
                         /\s*(.+?)--(.+?)--(.+?)--(.+?)--(.+)/,
                     );
                     if (match) {
+                        // *** 新增：在评论上下文中跳过完整动态格式 ***
+                        if (isCommentContext) {
+                            console.log('在评论上下文中检测到完整动态格式，已跳过:', line);
+                            continue;
+                        }
                         
                         // 是新动态内容
                         console.log(`匹配到动态内容:${match[0]}`);
@@ -21101,10 +21044,8 @@ ${index + 1}. ${space.name}
                                 randomPhone: randomPhone,
                                 extraContent: match[5],
                                 imgcontent: fakeimg,
-                                id: momentId, // 修正：使用id而不是momentId以匹配模板
-                                momentId: momentId, // 保留momentId以防其他地方使用
-                                // 修复：点赞相关数据，使用模板中正确的变量名
-                                likes: currentMomentData.likes.count,  // 修复：模板使用的是${likes}变量
+                                momentId: momentId, // 传递动态ID到模板
+                                // 新增：点赞相关数据
                                 likeCount: currentMomentData.likes.count,
                                 likedByUser: currentMomentData.likes.userLiked
                             }),
@@ -32727,60 +32668,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                         }
                     });
                     
-                    // 类型4：绑定Discord动态模板中的点赞区域 
-                    $(document).off('click', '.discord-thread-content-likes').on('click', '.discord-thread-content-likes', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        // 查找动态ID - 向上查找包含data-moment-id的元素或包含ID的父元素
-                        const momentElement = $(this).closest('[data-moment-id]');
-                        let momentId = momentElement.data('moment-id');
-                        
-                        // 如果没找到data-moment-id，尝试从discord-thread的data-id获取
-                        if (!momentId) {
-                            const discordThread = $(this).closest('.discord-thread[data-id]');
-                            momentId = discordThread.data('id');
-                        }
-                        
-                        console.log('点击了Discord点赞区域，动态ID:', momentId);
-                        
-                        if (momentId) {
-                            QQ_LikeMoment(momentId);
-                        } else {
-                            console.warn('无法找到动态ID，请检查动态元素结构');
-                        }
-                    });
-                    
-                    // 类型5：绑定包含"人已赞"文本的所有元素（通用绑定）
-                    $(document).off('click', '*:contains("人已赞")').on('click', '*:contains("人已赞")', function(e) {
-                        // 避免重复触发
-                        if ($(this).hasClass('discord-thread-content-likes') || $(this).hasClass('moment-like-button')) {
-                            return;
-                        }
-                        
-                        // 只处理直接包含"人已赞"的元素，不处理父级元素
-                        if ($(this).children(':contains("人已赞")').length > 0) {
-                            return;
-                        }
-                        
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        const momentElement = $(this).closest('.user_moment[data-moment-id]');
-                        const momentId = momentElement.data('moment-id');
-                        
-                        console.log('通用人已赞点击:', {
-                            element: this,
-                            text: $(this).text(),
-                            momentId: momentId
-                        });
-                        
-                        if (momentId) {
-                            QQ_LikeMoment(momentId);
-                        }
-                    });
-                    
-                    console.log('✅ 动态点赞功能已初始化（支持多种点赞按钮类型，包括Discord模板+通用绑定）');
+                    console.log('✅ 动态点赞功能已初始化（支持多种点赞按钮类型）');
                 } catch (error) {
                     console.error('初始化动态点赞功能失败:', error);
                 }
