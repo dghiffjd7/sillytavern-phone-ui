@@ -7595,6 +7595,12 @@
              * *** MSG标签自动补全 ***
              */
             function QQ_AutoCompleteMsgTags(content) {
+                // 如果内容包含moment_start，说明是动态内容，应该保持原格式不变
+                if (content.includes('moment_start')) {
+                    console.log("🔧 检测到moment内容，跳过msg标签自动补全");
+                    return content;
+                }
+                
                 if (content.indexOf("msg_start") < 0) {
                     let start = content.match(/<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/);
                     if (start) {
@@ -7609,10 +7615,8 @@
                     if (endMatches.length > 0) {
                         const lastEnd = endMatches[endMatches.length - 1][0];
                         content = content.replace(lastEnd, `${lastEnd}\nmsg_end`);
-                    } else if (!content.includes('moment_start')) {
-                        content = `${content}\nmsg_end`;
                     } else {
-                        content = content.replace('moment_start', 'msg_end\nmoment_start');
+                        content = `${content}\nmsg_end`;
                     }
                 }
                 
@@ -17122,6 +17126,43 @@ ${index + 1}. ${space.name}
                         }
                     }
                 }
+                
+                // 添加私聊消息（新格式：<私聊:角色名>）
+                matches = content.matchAll(
+                    /<私聊[:：](.+?)>([\s\S]+?)<\/私聊[:：](.+?)>/g,
+                );
+                if (matches) {
+                    for (const match of matches) {
+                        if (match[1] != match[3]) {
+                            console.warn("私聊标签闭合异常:", match[1], "!=", match[3]);
+                        }
+                        // 使用当前用户名构建聊天键
+                        const currentUser = QQ_GetUserName() || "用户";
+                        const key = `${currentUser}和${match[1]}的聊天`;
+                        
+                        if (!json.私聊[key]) {
+                            json.私聊[key] = [];
+                        }
+                        
+                        for (let line of match[2].split(/\r?\n/)) {
+                            line = line.trim();
+                            if (line) {
+                                let m = line.match(
+                                    /(.+?)\s*(?:--|:|：)\s*(.+)/,
+                                );
+                                if (!m) {
+                                    continue;
+                                }
+                                let message = m[2];
+                                if (message.split("--").length >= 2) {
+                                    message = message.split("--")[0];
+                                }
+                                json.私聊[key].push(`${m[1]}--${m[2]}`);
+                            }
+                        }
+                    }
+                }
+                
                 // 添加群聊消息
                 matches = content.matchAll(
                     /<群聊[:：](.+?)>([\s\S]+?)<\/群聊[:：](.+?)>/g,
