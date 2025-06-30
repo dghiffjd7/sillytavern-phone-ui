@@ -7102,6 +7102,7 @@
                         QQ_UserTriggeredInteractive = true;
                         } else {
                         QQ_UserTriggeredInteractive = false;
+                        console.log('✅ 未检测到互动意图，保持标准请求模式');
                 }
                 
                 // 6. 【全新核心逻辑】调用动态指令生成器，创建量身定制的Prompt
@@ -7310,9 +7311,10 @@
                     return { success: false, shouldRetry: false };
                 }
                 
+                // 修复：多个格式匹配时，优先处理第一个，而不是直接重传
                 if (matches.length > 1) {
-                    console.log("❌ 严格格式检查失败：找到多个格式");
-                    return { success: false, shouldRetry: true };
+                    console.log("⚠️ 检测到多个格式，优先处理第一个");
+                    matches = [matches[0]]; // 只保留第一个匹配
                 }
                 
                 // 成功找到单一严格格式，立即处理
@@ -7463,12 +7465,17 @@
             async function QQ_ProcessValidExtraction(result) {
                 console.log("🎯 开始智能提取有效信息");
                 
-                    const extractedInfo = QQ_ExtractValidInfo(result);
-                    if (extractedInfo.hasValidInfo) {
+                const extractedInfo = QQ_ExtractValidInfo(result);
+                if (extractedInfo.hasValidInfo) {
                     console.log("✅ 智能提取成功，转换为标准格式");
-                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
-                        if (convertedResult) {
-                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                    console.log(`📊 提取统计: 群聊${extractedInfo.messages.length}条, 私聊${extractedInfo.privateMessages.length}条, 动态${extractedInfo.dynamics.length}条`);
+                    
+                    const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                    if (convertedResult) {
+                        await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                        return { success: true };
+                    } else {
+                        console.warn('⚠️ 转换为标准格式失败，但已提取到有效信息');
                         return { success: true };
                     }
                 }
@@ -9093,7 +9100,7 @@ PCM (Plot Construction Mode)
                 const interactiveSettings = QQ_GetInteractiveSettings();
                 
                 if (!interactiveSettings.enableKeywordTrigger) {
-                    console.log('⚙️ 关键词触发已被用户禁用');
+                    console.log('⚙️ 关键词触发已被用户禁用，跳过关键词检测');
                     return false;
                 }
                 
