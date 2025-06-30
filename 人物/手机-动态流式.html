@@ -19186,24 +19186,45 @@ ${index + 1}. ${space.name}
                     return [messageContent || ''];
                 }
                 
-                // *** 检查是否包含\\n标记 ***
-                if (!messageContent.includes('\\n')) {
+                // *** 检查是否包含流式分割标记 ***
+                const hasRealNewline = messageContent.includes('\n');
+                const hasLiteralNewline = messageContent.includes('\\n');
+                const hasPause = messageContent.includes('[PAUSE]');
+                
+                if (!hasRealNewline && !hasLiteralNewline && !hasPause) {
                     return [messageContent];
                 }
                 
-                console.log(`🔍 检测到长消息包含\\n标记: "${messageContent}"`);
+                console.log(`🔍 检测到流式消息分割标记 - 换行符: ${hasRealNewline}, \\n: ${hasLiteralNewline}, [PAUSE]: ${hasPause}`);
                 
-                // *** 按\\n拆分消息 ***
-                const parts = messageContent
-                    .split('\\n')
+                // *** 按多种分割符拆分消息 ***
+                let parts = [messageContent];
+                
+                // 支持真正的换行符 \n
+                if (hasRealNewline) {
+                    parts = parts.flatMap(part => part.split('\n'));
+                }
+                
+                // 支持字面量 \\n（向后兼容）
+                if (hasLiteralNewline) {
+                    parts = parts.flatMap(part => part.split('\\n'));
+                }
+                
+                // 支持 [PAUSE] 标记
+                if (hasPause) {
+                    parts = parts.flatMap(part => part.split('[PAUSE]'));
+                }
+                
+                // 清理和过滤
+                parts = parts
                     .map(part => part.trim())
-                    .filter(part => part.length > 0); // 过滤空白部分
+                    .filter(part => part.length > 0);
                 
                 if (parts.length <= 1) {
                     return [messageContent];
                 }
                 
-                console.log(`✅ 长消息拆分成功: ${parts.length}条子消息`, parts);
+                console.log(`✅ 流式消息拆分成功: ${parts.length}条子消息`, parts);
                 
                 // *** 智能拆分优化 ***
                 const optimizedParts = QQ_OptimizeSplitMessages(parts);
@@ -19253,6 +19274,183 @@ ${index + 1}. ${space.name}
                 
                 console.log(`🔧 消息拆分优化完成: ${parts.length} -> ${optimized.length}条`, optimized);
                 return optimized;
+            }
+            
+            /**
+             * *** 阶段一核心：流式消息显示系统 ***
+             * 实现伪实时流式聊天，打破一问一答循环的关键组件
+             */
+            
+            /**
+             * 生成随机延迟时间（模拟真人打字节奏）
+             * @param {number} baseDelay - 基础延迟时间（毫秒）
+             * @param {number} variance - 变化范围（0-1）
+             * @returns {number} 随机延迟时间
+             */
+            function QQ_GenerateRandomDelay(baseDelay = 1200, variance = 0.6) {
+                const min = baseDelay * (1 - variance);
+                const max = baseDelay * (1 + variance);
+                return Math.floor(Math.random() * (max - min) + min);
+            }
+            
+            /**
+             * 显示"正在输入..."动画
+             * @param {Element} chatContainer - 聊天容器
+             * @param {string} senderName - 发送者名称
+             * @returns {Element} 输入指示器元素
+             */
+            function QQ_ShowTypingIndicator(chatContainer, senderName) {
+                // 移除已存在的输入指示器
+                const existingIndicator = chatContainer.querySelector('.typing-indicator');
+                if (existingIndicator) {
+                    existingIndicator.remove();
+                }
+                
+                // 创建输入指示器
+                const typingIndicator = document.createElement('div');
+                typingIndicator.className = 'typing-indicator';
+                typingIndicator.style.cssText = `
+                    display: flex;
+                    align-items: center;
+                    padding: 8px 12px;
+                    margin: 5px 10px 5px 50px;
+                    background: #f0f0f0;
+                    border-radius: 18px;
+                    opacity: 0.8;
+                    animation: fadeIn 0.3s ease-in;
+                `;
+                
+                // 创建头像
+                const avatar = document.createElement('img');
+                avatar.style.cssText = `
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    margin-right: 8px;
+                `;
+                avatar.src = QQ_GetUserAvatar(senderName);
+                
+                // 创建动画点点
+                const dots = document.createElement('div');
+                dots.style.cssText = `
+                    display: flex;
+                    gap: 3px;
+                `;
+                
+                for (let i = 0; i < 3; i++) {
+                    const dot = document.createElement('div');
+                    dot.style.cssText = `
+                        width: 6px;
+                        height: 6px;
+                        background: #999;
+                        border-radius: 50%;
+                        animation: typingDot 1.5s infinite;
+                        animation-delay: ${i * 0.2}s;
+                    `;
+                    dots.appendChild(dot);
+                }
+                
+                // 添加CSS动画（只添加一次）
+                if (!document.querySelector('#typing-animation-styles')) {
+                    const styles = document.createElement('style');
+                    styles.id = 'typing-animation-styles';
+                    styles.textContent = `
+                        @keyframes typingDot {
+                            0%, 60%, 100% { opacity: 0.3; transform: scale(1); }
+                            30% { opacity: 1; transform: scale(1.2); }
+                        }
+                        @keyframes fadeIn {
+                            from { opacity: 0; transform: translateY(10px); }
+                            to { opacity: 0.8; transform: translateY(0); }
+                        }
+                    `;
+                    document.head.appendChild(styles);
+                }
+                
+                typingIndicator.appendChild(avatar);
+                typingIndicator.appendChild(dots);
+                
+                // 添加到聊天容器
+                chatContainer.appendChild(typingIndicator);
+                
+                // 滚动到底部
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                
+                return typingIndicator;
+            }
+            
+            /**
+             * 移除"正在输入..."指示器
+             * @param {Element} typingIndicator - 输入指示器元素
+             */
+            function QQ_HideTypingIndicator(typingIndicator) {
+                if (typingIndicator) {
+                    typingIndicator.style.animation = 'fadeOut 0.3s ease-out';
+                    setTimeout(() => {
+                        if (typingIndicator.parentNode) {
+                            typingIndicator.parentNode.removeChild(typingIndicator);
+                        }
+                    }, 300);
+                }
+            }
+            
+            /**
+             * 流式消息显示主函数
+             * @param {Element} chatContainer - 聊天容器DOM
+             * @param {Array} messageParts - 分割后的消息数组
+             * @param {string} sender - 发送者
+             * @param {string} chatName - 聊天名称
+             * @param {boolean} isNew - 是否为新消息
+             * @param {boolean} skipScrollAndCount - 是否跳过滚动和计数
+             */
+            function QQ_DisplayStreamingMessages(chatContainer, messageParts, sender, chatName, isNew, skipScrollAndCount) {
+                console.log(`🌊 开始流式显示 ${messageParts.length} 条消息 - 发送者: ${sender}`);
+                
+                let currentIndex = 0;
+                let currentTypingIndicator = null;
+                
+                function displayNextMessage() {
+                    // 移除当前的输入指示器
+                    if (currentTypingIndicator) {
+                        QQ_HideTypingIndicator(currentTypingIndicator);
+                        currentTypingIndicator = null;
+                    }
+                    
+                    if (currentIndex >= messageParts.length) {
+                        console.log(`✅ 流式显示完成 - 共显示 ${messageParts.length} 条消息`);
+                        return;
+                    }
+                    
+                    const part = messageParts[currentIndex];
+                    const timestamp = new Date().toLocaleTimeString('zh-CN', { 
+                        hour12: false, 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                    });
+                    const partContent = `${sender}--${part}--${timestamp}`;
+                    
+                    // 显示当前消息
+                    QQ_Chat_AddMsg(chatContainer, partContent, chatName, isNew && currentIndex === 0, skipScrollAndCount);
+                    
+                    currentIndex++;
+                    
+                    // 如果还有更多消息，显示输入指示器并设置下一次显示
+                    if (currentIndex < messageParts.length) {
+                        // 短暂延迟后显示输入指示器
+                        setTimeout(() => {
+                            currentTypingIndicator = QQ_ShowTypingIndicator(chatContainer, sender);
+                        }, 200);
+                        
+                        // 生成随机延迟时间
+                        const delay = QQ_GenerateRandomDelay(1000, 0.5); // 500ms-1500ms
+                        
+                        console.log(`⏱️ 下一条消息将在 ${delay}ms 后显示`);
+                        setTimeout(displayNextMessage, delay + 800); // 额外800ms用于输入动画
+                    }
+                }
+                
+                // 开始显示第一条消息
+                displayNextMessage();
             }
             
             /**
@@ -21278,28 +21476,15 @@ ${index + 1}. ${space.name}
                     
                     console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
                     
-                    // *** 新增：处理\\n拆分长消息逻辑 ***
+                    // *** 阶段一：流式消息分割与智能显示 ***
                     const messageParts = QQ_SplitLongMessage(messageContent);
                     if (messageParts.length > 1) {
-                        console.log(`🔄 检测到长消息拆分：${messageParts.length}条子消息`);
+                        console.log(`🌊 检测到流式消息分割：${messageParts.length}条子消息，启动流式显示`);
                         
-                        // 递归处理每个拆分的消息部分
-                        messageParts.forEach((part, index) => {
-                            const partContent = `${sender}--${part}--${timestamp}`;
-                            
-                            // 为拆分的消息添加适当的延迟，模拟真实的聊天节奏
-                            if (index === 0) {
-                                // 第一条消息立即显示
-                                QQ_Chat_AddMsg(dom, partContent, name, isNew, skipScrollAndCount);
-                            } else {
-                                // 后续消息有延迟显示，营造连续发送的感觉
-                                setTimeout(() => {
-                                    QQ_Chat_AddMsg(dom, partContent, name, false, skipScrollAndCount);
-                                }, index * 800); // 每条消息间隔800ms
-                            }
-                        });
+                        // 使用新的流式显示系统，支持随机延迟和"正在输入..."动画
+                        QQ_DisplayStreamingMessages(dom, messageParts, sender, name, isNew, skipScrollAndCount);
                         
-                        // 拆分消息处理完成，直接返回
+                        // 流式消息处理完成，直接返回
                         return;
                     }
                     
@@ -22664,6 +22849,20 @@ ${index + 1}. ${space.name}
                 const hours = now.getHours().toString().padStart(2, '0');
                 const minutes = now.getMinutes().toString().padStart(2, '0');
                 return `${hours}:${minutes}`;
+            }
+            
+            /**
+             * *** 阶段一：实时时间戳生成 ***
+             * 统一的实时时间戳生成函数，确保所有时间戳都是真实的系统时间
+             * @returns {string} 格式化的时间戳 (HH:MM)
+             */
+            function QQ_GetTime() {
+                // 使用与全局一致的时间戳格式
+                return new Date().toLocaleTimeString('zh-CN', { 
+                    hour12: false, 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
             }
             
             // 注意：addGroupToContactList和addGroupToMessageList函数已删除

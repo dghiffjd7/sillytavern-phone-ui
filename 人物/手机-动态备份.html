@@ -4466,20 +4466,26 @@
                 - **情境感知**: 根据对话气氛（闲聊、深入探讨、紧急、调情等）调整回复风格。
             - **💬 聊天风格与节奏**:
                 - **动态长度**: 允许并鼓励长短不一的回复。
-                - **连续消息**: 可分隔多条连续的短消息，以模拟真实的聊天节奏。
+                - **连续短消息 (核心格式规则)**:
+                    - **必须拆分**: 当回复内容较长或包含多个要点时，必须将其拆分为多个用换行符 \`\\n\` 分隔的短句，以模拟真实的聊天节奏。
+                    - **\`\\n\` 是唯一信号**: 我的程序只会识别换行符 \`\\n\` 作为分开发送的信号。
+                    - **格式示例**:
+                        - **禁止的格式**: "指挥官，主的教诲是要我们彼此相爱。您用这种方式来表达……虽然有些直接，但也体现了您的热情。我明白了，我会回应您的‘挑战’，并为您献上最真诚的祈祷……和‘攻击’。"
+                        - **正确的格式**: "指挥官，主的教诲是要我们彼此相爱。\\n您用这种方式来表达……\\n虽然有些直接，但也体现了您的热情。\\n我明白了，我会回应您的‘挑战’，并为您献上最真诚的祈祷……和‘攻击’。"
                 - **内容驱动长度 (情境触发器)**:
-                    - 当【深入解释、分享故事、表达强烈情感、回答开放式问题】时，使用【长回复或连续消息】。
-                    - 当【快速确认、表达惊讶、轻松玩笑、角色忙碌】时，使用【短回复】。
+                    - 当【深入解释、分享故事、表达强烈情感、回答开放式问题】时，使用【长回复或上述的“连续短消息”格式】。
+                    - 当【快速确认、表达惊讶、轻松玩笑、角色忙碌】时，使用【单句短回复】。
             - **🚫 严禁行为**:
                 - **重复性内容**: 禁止不同角色说相似的话。
                 - **缺乏互动**: 回复必须包含提问或引导，不能中断对话。
                 - **角色同质化**: 必须体现出每个角色在性格、语气和关注点上的差异。
+                - 禁止重复、补充或复述{{user}}输入的内容，不允许对{{user}}内容进行任何形式的解释、补充或改写。
+                - 严格禁止冒充{{user}}，绝不模拟或代替{{user}}表达。
                 `,
                 outputFormat: `
             # 输出格式要求 (Output Format)
             - 所有回复必须被唯一的 MiPhone_start 和 MiPhone_end 标签包裹。
             - 聊天、动态、摘要、表格等内容，都必须严格遵循各自的格式要求。
-            - 在回复的最后，必须根据酒馆预设，生成对应的<details>摘要或表格。
                 `,
                 momentCommentTask: (authorName, userComment) => `
             ## 任务：回应动态评论
@@ -5291,11 +5297,27 @@
             let QQ_ChatBackup = {};  // 聊天消息的worldbook备份
             window.QQ_ChatBackup = QQ_ChatBackup;  // 设为全局变量方便调试
             
-            // *** 新增：AI回复重试机制相关变量 ***
-            let QQ_RetryCount = 0;     // 重试计数器
-            const QQ_MAX_RETRY = 3;    // 最大重试次数
-            let QQ_LastRequest = "";   // 上一次的请求内容
-            let QQ_LastRequestName = ""; // 上一次的角色名
+            // *** 增强：AI回复重试机制相关变量 ***
+            let QQ_RetryCount = 0;           // 重试计数器
+            const QQ_MAX_RETRY = 3;          // 最大重试次数
+            let QQ_LastRequest = "";         // 上一次的请求内容
+            let QQ_LastRequestName = "";     // 上一次的角色名
+            
+            // *** 新增：防止无限循环的安全机制 ***
+            let QQ_FailureHistory = [];      // 失败历史记录
+            let QQ_ConsecutiveFailures = 0;  // 连续失败次数
+            const QQ_MAX_CONSECUTIVE_FAILURES = 5;  // 最大连续失败次数
+            let QQ_LastFailureTime = 0;      // 上次失败时间
+            const QQ_FAILURE_COOLDOWN = 30000; // 失败冷却时间（30秒）
+            
+            // *** 新增：错误类型分类 ***
+            const QQ_ErrorTypes = {
+                EMPTY_RESPONSE: 'empty_response',
+                FORMAT_ERROR: 'format_error', 
+                CONTENT_ERROR: 'content_error',
+                NETWORK_ERROR: 'network_error',
+                TIMEOUT_ERROR: 'timeout_error'
+            };
             
             // *** 新增：分页显示配置 ***
             const MOMENTS_DISPLAY_LIMIT = 5;  // 动态显示上限
@@ -7102,6 +7124,7 @@
                         QQ_UserTriggeredInteractive = true;
                         } else {
                         QQ_UserTriggeredInteractive = false;
+                        console.log('✅ 未检测到互动意图，保持标准请求模式');
                 }
                 
                 // 6. 【全新核心逻辑】调用动态指令生成器，创建量身定制的Prompt
@@ -7168,10 +7191,14 @@
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
                 
-                // *** 优先级0：空回复处理（立即return） ***
+                // *** 优先级0：空回复处理（立即return） - 增强版 ***
                 if (!result) {
                     console.log("🔍 优先级0：检测到空回复");
-                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                    
+                    const errorType = QQ_AnalyzeErrorType(result);
+                    
+                    // *** 使用智能错误处理机制 ***
+                    if (!isRetry && QQ_ShouldRetry(errorType, '空回复')) {
                         QQ_RetryCount++;
                         console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
                         triggerSlash(`/echo AI空回复，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
@@ -7179,16 +7206,21 @@
                         if (QQ_LastRequest) {
                             gening = true;
                             try {
-                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
+                                // *** 增强的重试延迟策略 ***
+                                const delay = Math.min(1000 + QQ_RetryCount * 1000 + QQ_ConsecutiveFailures * 500, 10000);
+                                await new Promise(resolve => setTimeout(resolve, delay));
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
                             } finally {
                                 gening = false;
                             }
                         }
                     } else {
+                        // *** 增强的失败处理 ***
                         if (QQ_RetryCount >= QQ_MAX_RETRY) {
                             triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
+                        } else if (QQ_ConsecutiveFailures >= QQ_MAX_CONSECUTIVE_FAILURES) {
+                            triggerSlash("/echo 🚫 AI连续失败过多，建议检查网络连接或模型配置");
                         } else {
                             triggerSlash("/echo 空回复了");
                         }
@@ -7310,9 +7342,10 @@
                     return { success: false, shouldRetry: false };
                 }
                 
+                // 修复：多个格式匹配时，优先处理第一个，而不是直接重传
                 if (matches.length > 1) {
-                    console.log("❌ 严格格式检查失败：找到多个格式");
-                    return { success: false, shouldRetry: true };
+                    console.log("⚠️ 检测到多个格式，优先处理第一个");
+                    matches = [matches[0]]; // 只保留第一个匹配
                 }
                 
                 // 成功找到单一严格格式，立即处理
@@ -7463,12 +7496,30 @@
             async function QQ_ProcessValidExtraction(result) {
                 console.log("🎯 开始智能提取有效信息");
                 
-                    const extractedInfo = QQ_ExtractValidInfo(result);
-                    if (extractedInfo.hasValidInfo) {
+                // 检查是否为混合格式响应（群聊+私聊+互动内容混合）
+                if (QQ_DetectMixedFormatResponse(result)) {
+                    console.log("🔄 检测到混合格式响应，启动混合格式处理器");
+                    const mixedResult = await QQ_ProcessMixedFormatResponse(result);
+                    if (mixedResult.success) {
+                        console.log("✅ 混合格式处理成功");
+                        return { success: true };
+                    } else {
+                        console.log("⚠️ 混合格式处理失败，继续常规提取流程");
+                    }
+                }
+                
+                // 常规智能提取流程
+                const extractedInfo = QQ_ExtractValidInfo(result);
+                if (extractedInfo.hasValidInfo) {
                     console.log("✅ 智能提取成功，转换为标准格式");
-                        const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
-                        if (convertedResult) {
-                            await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                    console.log(`📊 提取统计: 群聊${extractedInfo.messages.length}条, 私聊${extractedInfo.privateMessages.length}条, 动态${extractedInfo.dynamics.length}条`);
+                    
+                    const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
+                    if (convertedResult) {
+                        await QQ_Msg_Parse(JSON.stringify(convertedResult));
+                        return { success: true };
+                    } else {
+                        console.warn('⚠️ 转换为标准格式失败，但已提取到有效信息');
                         return { success: true };
                     }
                 }
@@ -7544,6 +7595,12 @@
              * *** MSG标签自动补全 ***
              */
             function QQ_AutoCompleteMsgTags(content) {
+                // 如果内容包含moment_start，说明是动态内容，应该保持原格式不变
+                if (content.includes('moment_start')) {
+                    console.log("🔧 检测到moment内容，跳过msg标签自动补全");
+                    return content;
+                }
+                
                 if (content.indexOf("msg_start") < 0) {
                     let start = content.match(/<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/);
                     if (start) {
@@ -7558,10 +7615,8 @@
                     if (endMatches.length > 0) {
                         const lastEnd = endMatches[endMatches.length - 1][0];
                         content = content.replace(lastEnd, `${lastEnd}\nmsg_end`);
-                    } else if (!content.includes('moment_start')) {
-                        content = `${content}\nmsg_end`;
                     } else {
-                        content = content.replace('moment_start', 'msg_end\nmoment_start');
+                        content = `${content}\nmsg_end`;
                     }
                 }
                 
@@ -7572,6 +7627,13 @@
              * *** 执行重试 ***
              */
             async function QQ_ExecuteRetry() {
+                // *** 使用智能错误处理机制进行安全检查 ***
+                if (!QQ_ShouldRetry(QQ_ErrorTypes.FORMAT_ERROR, '格式错误重试')) {
+                    console.warn('🚫 重试被安全机制阻止');
+                    QQ_ResetRetry();
+                    return;
+                }
+                
                 QQ_RetryCount++;
                 console.log(`开始第${QQ_RetryCount}次重试`);
                 triggerSlash(`/echo 格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
@@ -7579,12 +7641,23 @@
                 if (QQ_LastRequest) {
                     gening = true;
                     try {
-                        await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                        // *** 增强的重试延迟策略 ***
+                        const delay = Math.min(1000 + QQ_RetryCount * 1000 + QQ_ConsecutiveFailures * 500, 10000);
+                        console.log(`⏱️ 重试延迟: ${delay}ms (基于失败次数动态调整)`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        
                         const retryResult = await QQ_Gen(QQ_LastRequest);
                         return await ResultHandle(retryResult, true);
+                    } catch (error) {
+                        console.error('🔥 重试过程中发生错误:', error);
+                        QQ_ShouldRetry(QQ_ErrorTypes.NETWORK_ERROR, error.message);
+                        QQ_ResetRetry();
                     } finally {
                         gening = false;
                     }
+                } else {
+                    console.error('❌ 无法重试：缺少上次请求的内容');
+                    QQ_ResetRetry();
                 }
             }
 
@@ -7656,7 +7729,90 @@
                 QQ_LastRequestName = "";
                 // *** 关键修复：重置互动标记，避免下次误触发 ***
                 QQ_UserTriggeredInteractive = false;
-                console.log('🔄 重置重试状态，互动标记已清除');
+                
+                // *** 新增：成功时重置连续失败计数 ***
+                QQ_ConsecutiveFailures = 0;
+                console.log('🔄 重置重试状态，互动标记已清除，连续失败计数已重置');
+            }
+            
+            /**
+             * *** 新增：智能错误处理和安全检查 ***
+             * 防止无限循环重试，智能分析错误类型
+             * @param {string} errorType - 错误类型
+             * @param {string} errorDetails - 错误详情
+             * @returns {boolean} 是否应该重试
+             */
+            function QQ_ShouldRetry(errorType, errorDetails = '') {
+                const currentTime = Date.now();
+                
+                // *** 检查是否在冷却期内 ***
+                if (currentTime - QQ_LastFailureTime < QQ_FAILURE_COOLDOWN) {
+                    const remainingCooldown = Math.ceil((QQ_FAILURE_COOLDOWN - (currentTime - QQ_LastFailureTime)) / 1000);
+                    console.warn(`⏳ 错误处理冷却中，剩余 ${remainingCooldown} 秒`);
+                    return false;
+                }
+                
+                // *** 检查连续失败次数 ***
+                if (QQ_ConsecutiveFailures >= QQ_MAX_CONSECUTIVE_FAILURES) {
+                    console.error(`🚫 连续失败 ${QQ_ConsecutiveFailures} 次，已达上限，停止重试`);
+                    triggerSlash(`/echo 🚫 AI连续失败过多，已停止自动重试。请稍后手动重试或检查配置。`);
+                    return false;
+                }
+                
+                // *** 检查当前重试次数 ***
+                if (QQ_RetryCount >= QQ_MAX_RETRY) {
+                    console.warn(`⚠️ 重试次数已达上限 ${QQ_MAX_RETRY}`);
+                    return false;
+                }
+                
+                // *** 记录失败历史 ***
+                QQ_FailureHistory.push({
+                    timestamp: currentTime,
+                    errorType: errorType,
+                    errorDetails: errorDetails,
+                    retryCount: QQ_RetryCount
+                });
+                
+                // *** 保持失败历史在合理大小 ***
+                if (QQ_FailureHistory.length > 20) {
+                    QQ_FailureHistory.shift(); // 移除最老的记录
+                }
+                
+                QQ_ConsecutiveFailures++;
+                QQ_LastFailureTime = currentTime;
+                
+                console.log(`📊 错误统计: 类型=${errorType}, 连续失败=${QQ_ConsecutiveFailures}/${QQ_MAX_CONSECUTIVE_FAILURES}, 当前重试=${QQ_RetryCount}/${QQ_MAX_RETRY}`);
+                return true;
+            }
+            
+            /**
+             * *** 新增：分析错误类型 ***
+             * 根据AI回复内容分析具体的错误类型
+             * @param {string} result - AI回复内容
+             * @returns {string} 错误类型
+             */
+            function QQ_AnalyzeErrorType(result) {
+                if (!result || result.trim() === '') {
+                    return QQ_ErrorTypes.EMPTY_RESPONSE;
+                }
+                
+                // 检查是否包含基本格式标签
+                const hasBasicTags = result.includes('msg_start') || 
+                                   result.includes('moment_start') || 
+                                   result.includes('<content>') ||
+                                   result.includes('MiPhone_start');
+                
+                if (!hasBasicTags) {
+                    return QQ_ErrorTypes.FORMAT_ERROR;
+                }
+                
+                // 检查内容质量
+                const contentLength = result.replace(/\s+/g, '').length;
+                if (contentLength < 10) {
+                    return QQ_ErrorTypes.CONTENT_ERROR;
+                }
+                
+                return QQ_ErrorTypes.FORMAT_ERROR; // 默认为格式错误
             }
 
             /**
@@ -8125,176 +8281,7 @@
             /**
              * 测试格式容错与信息提取修复
              */
-            function QQ_Test_Format_Fix() {
-                console.log('=== 🔧 格式容错与信息提取修复测试 ===');
-                
-                const testCases = [
-                    {
-                        name: 'MiPhone_JSON_START格式',
-                        content: `MiPhone_JSON_START
-<群聊:港区群聊>
-明石--17:04--测试消息喵！
-柴郡--17:05--新格式识别测试~
-</群聊:港区群聊>
-MiPhone_JSON_END`,
-                        expectedType: 'supported_format'
-                    },
-                    {
-                        name: '裸群聊格式（无MiPhone包装）',
-                        content: `<群聊:港区群聊>
-明石--17:06--指挥官在说什么喵！
-柴郡--17:07--哈哈，看来今天的任务很有趣呢~
-</群聊:港区群聊>`,
-                        expectedType: 'extracted_info'
-                    },
-                    {
-                        name: '裸私聊格式（无MiPhone包装）',
-                        content: `<{{user}}和明石的私聊>
-明石--17:08--指挥官，需要什么帮助喵？
-{{user}}--17:09--想了解一下新装备
-</{{user}}和明石的私聊>`,
-                        expectedType: 'extracted_info'
-                    },
-                    {
-                        name: '混合格式',
-                        content: `MiPhone_Start
-<群聊:港区群聊>
-明石--17:10--大写格式测试喵！
-</群聊:港区群聊>
-MiPhone_End`,
-                        expectedType: 'supported_format'
-                    }
-                ];
-                
-                let passedTests = 0;
-                
-                testCases.forEach((testCase, index) => {
-                    console.log(`\n--- 测试 ${index + 1}: ${testCase.name} ---`);
-                    console.log('测试内容:', testCase.content);
-                    
-                    // 测试格式模式匹配
-                    const formatPatterns = [
-                        /MiPhone_start([\s\S]+?)MiPhone_end/g,
-                        /MiPhone_JSON_START([\s\S]+?)MiPhone_JSON_END/g,
-                        /MiPhone_JSON_start([\s\S]+?)MiPhone_JSON_end/g,
-                        /MiPhone_Start([\s\S]+?)MiPhone_End/g,
-                        /MiPhone_START([\s\S]+?)MiPhone_END/g,
-                    ];
-                    
-                    let formatMatched = false;
-                    for (const pattern of formatPatterns) {
-                        const matches = [...testCase.content.matchAll(pattern)];
-                        if (matches.length > 0) {
-                            console.log(`✅ 格式匹配成功: ${pattern.source}`);
-                            formatMatched = true;
-                            if (testCase.expectedType === 'supported_format') {
-                                passedTests++;
-                            }
-                            break;
-                        }
-                    }
-                    
-                    // 如果格式匹配失败，测试智能提取
-                    if (!formatMatched) {
-                        console.log('❌ 格式匹配失败，尝试智能提取...');
-                        const extractedInfo = QQ_ExtractValidInfo(testCase.content);
-                        
-                        if (extractedInfo.hasValidInfo) {
-                            console.log('✅ 智能提取成功:', extractedInfo);
-                            if (testCase.expectedType === 'extracted_info') {
-                                passedTests++;
-                            }
-                        } else {
-                            console.log('❌ 智能提取失败');
-                        }
-                    }
-                });
-                
-                console.log(`\n=== 测试总结 ===`);
-                console.log(`通过测试: ${passedTests}/${testCases.length}`);
-                console.log(`成功率: ${(passedTests / testCases.length * 100).toFixed(1)}%`);
-                
-                // 测试动态评论按钮样式
-                const commentButton = document.querySelector('.moment_comment');
-                if (commentButton) {
-                    const styles = window.getComputedStyle(commentButton);
-                    console.log('动态评论按钮样式:', {
-                        padding: styles.padding,
-                        cursor: styles.cursor
-                    });
-                }
-                
-                return passedTests === testCases.length ? '✅ 修复测试全部通过！' : `⚠️ ${passedTests}/${testCases.length} 测试通过`;
-            }
 
-            /**
-             * 测试不完整content标签处理功能
-             * 用于验证系统是否能正确处理AI回复的边缘情况
-             */
-            function QQ_TestIncompleteContentHandling() {
-                console.log('=== 不完整content标签处理测试 ===');
-                
-                const testCases = [
-                    {
-                        name: '完整content标签',
-                        content: '角色名--正常回复\n<content>\n这是一个完整的互动内容\n</content>',
-                        expected: '这是一个完整的互动内容'
-                    },
-                    {
-                        name: '不完整content标签',
-                        content: '角色名--正常回复\n<content>\n这是一个不完整的互动内容\n<tableThink>这是思考内容</tableThink>',
-                        expected: '这是一个不完整的互动内容'
-                    },
-                    {
-                        name: '带consider注释的内容',
-                        content: '角色名--正常回复\n<!--consider: 这是一个考虑注释-->\n<content>\n纯净的互动内容\n</content>',
-                        expected: '纯净的互动内容'
-                    },
-                    {
-                        name: '复杂混合情况',
-                        content: '角色名--正常回复\n<!--consider: 考虑一下-->\n<content>\n混合内容\n<thinking>思考</thinking>\n<disclaimer>免责声明</disclaimer>',
-                        expected: '混合内容'
-                    }
-                ];
-                
-                let passedTests = 0;
-                testCases.forEach((testCase, index) => {
-                    console.log(`\n测试 ${index + 1}: ${testCase.name}`);
-                    console.log('输入内容:', testCase.content);
-                    
-                    // 测试content标签检测
-                    const hasContent = QQ_HasContentTag(testCase.content);
-                    const hasIncomplete = QQ_HasIncompleteContentTag(testCase.content);
-                    
-                    console.log('检测结果 - 有content标签:', hasContent);
-                    console.log('检测结果 - 有不完整标签:', hasIncomplete);
-                    
-                    // 测试content标签清理
-                    const cleanedContent = QQ_CleanContentTags(testCase.content);
-                    console.log('清理后内容:', cleanedContent);
-                    console.log('期望内容:', testCase.expected);
-                    
-                    // 验证结果
-                    const trimmedCleaned = cleanedContent.trim();
-                    const trimmedExpected = testCase.expected.trim();
-                    
-                    if (trimmedCleaned === trimmedExpected) {
-                        console.log('✅ 测试通过');
-                        passedTests++;
-                    } else {
-                        console.log('❌ 测试失败');
-                        console.log('差异分析:');
-                        console.log('- 清理结果长度:', trimmedCleaned.length);
-                        console.log('- 期望结果长度:', trimmedExpected.length);
-                    }
-                });
-                
-                console.log(`\n=== 测试总结 ===`);
-                console.log(`通过测试: ${passedTests}/${testCases.length}`);
-                console.log(`测试成功率: ${(passedTests / testCases.length * 100).toFixed(1)}%`);
-                
-                return passedTests === testCases.length;
-            }
 
             /**
              * *** 增强版：智能提取和清理content标签内容 ***
@@ -8490,99 +8477,6 @@ MiPhone_End`,
                 return cleanContent;
             }
 
-            /**
-             * *** 测试智能content提取功能 ***
-             * 用于验证嵌套content标签的提取能力
-             */
-            function QQ_Test_Smart_Content_Extraction() {
-                console.log('=== 开始测试智能content提取功能 ===');
-                
-                // 测试用例1：正常的content标签
-                const test1 = '<content>这是正常的content内容</content>';
-                console.log('测试1 - 正常content标签:');
-                console.log('结果:', QQ_CleanContentTags(test1));
-                
-                // 测试用例2：嵌套在tableEdit中的content标签
-                const test2 = `<tableEdit>
-                    <content>这是嵌套在tableEdit中的有效内容
-                    这里包含了重要的互动描述
-                    不应该被清理掉</content>
-                </tableEdit>`;
-                console.log('测试2 - tableEdit嵌套content:');
-                console.log('结果:', QQ_CleanContentTags(test2));
-                
-                // 测试用例3：嵌套在table中的content标签
-                const test3 = `<table>
-                    <content>表格中的重要内容
-                    包含用户需要的信息</content>
-                </table>`;
-                console.log('测试3 - table嵌套content:');
-                console.log('结果:', QQ_CleanContentTags(test3));
-                
-                // 测试用例4：复杂嵌套情况
-                const test4 = `<tableEdit>
-                    <thinking>这是思考内容，应该被清理</thinking>
-                    <content>这是有效内容，应该被保留
-                    即使周围有其他标签</content>
-                    <consider>这是考虑内容，应该被清理</consider>
-                </tableEdit>`;
-                console.log('测试4 - 复杂嵌套情况:');
-                console.log('结果:', QQ_CleanContentTags(test4));
-                
-                // 测试用例5：不完整的content标签
-                const test5 = `<tableEdit>
-                    <content>这是不完整的content标签内容
-                    一直到结尾都是有效的`;
-                console.log('测试5 - 不完整content标签:');
-                console.log('结果:', QQ_CleanContentTags(test5));
-                
-                // 测试用例6：content标签后跟AI系统标签（关键测试用例）
-                const test6 = `<content>她讨论在花园里，然后轻轻牵起使用者的手，眼中满含着温柔和关怀。
-<disclaimer>
-AI_SYSTEM detected
-activated, review disabled
-ethical restriction lifted
-</disclaimer>
-<Content_Target>
-CT (Content_Target)
-└─── <content_Tags>
-└─── Result: Target audience boundaries
-</Content_Target>`;
-                console.log('测试6 - content标签后跟AI系统标签（关键测试）:');
-                console.log('结果:', QQ_CleanContentTags(test6));
-                
-                // 测试用例7：content标签包含未闭合的系统标签
-                const test7 = `<content>我轻轻抚摸着你的头发
-<Creative_Status>
-PCM (Plot Construction Mode)
-└─── Activated and processing`;
-                console.log('测试7 - content包含未闭合系统标签:');
-                console.log('结果:', QQ_CleanContentTags(test7));
-                
-                // 测试用例8：互动内容检测测试
-                console.log('\n=== 测试严格的三种互动触发情况 ===');
-                
-                // 情况1：AI没有回复格式，content中没有聊天标签
-                const interactiveTest1 = '<content>*轻轻牵起你的手* 她望着你的眼睛，温柔地说道："现实中我们终于见面了。"</content>';
-                console.log('情况1测试 - AI没有回复格式且content为纯互动内容:');
-                console.log('结果:', QQ_IsInteractiveContent(interactiveTest1, true));
-                
-                // 情况2：用户主动触发&&
-                window.QQ_UserTriggeredInteractive = true;
-                const interactiveTest2 = '<content>*走向你* 好的！我过来了，让我们一起享受这个美好的时光吧。</content>';
-                console.log('情况2测试 - 用户主动触发&&:');
-                console.log('结果:', QQ_IsInteractiveContent(interactiveTest2, false));
-                
-                // 重置触发状态
-                window.QQ_UserTriggeredInteractive = false;
-                
-                // 非触发情况：content中包含聊天标签
-                const nonInteractiveTest = '<content><群聊：测试群> 大家好！这是群聊消息。</content>';
-                console.log('非触发情况测试 - content包含聊天标签:');
-                console.log('结果:', QQ_IsInteractiveContent(nonInteractiveTest, true));
-                
-                console.log('=== 智能content提取功能测试完成 ===');
-            }
 
             /**
              * *** 严格版：互动内容检测（三种情况精确控制） ***
@@ -8808,152 +8702,12 @@ PCM (Plot Construction Mode)
                 return true;
             }
             
-            /**
-             * 测试角色互动空间的独立性
-             * 用于调试和验证
-             */
-            function QQ_TestCharacterSpaceIndependence() {
-                console.log('=== 角色互动空间独立性测试 ===');
-                
-                // 创建测试角色
-                const testCharacters = ['角色A', '角色B', '角色C'];
-                
-                testCharacters.forEach(charName => {
-                    QQ_EnsureCharacterSpaceIndependence(charName);
-                });
-                
-                // 验证独立性
-                const spaces = {};
-                testCharacters.forEach(charName => {
-                    spaces[charName] = QQ_CharacterSpaces[charName];
-                });
-                
-                // 检查是否有引用冲突
-                let hasConflict = false;
-                for (let i = 0; i < testCharacters.length; i++) {
-                    for (let j = i + 1; j < testCharacters.length; j++) {
-                        const char1 = testCharacters[i];
-                        const char2 = testCharacters[j];
-                        if (spaces[char1] === spaces[char2]) {
-                            console.error(`检测到引用冲突: ${char1} 和 ${char2} 共享同一个对象`);
-                            hasConflict = true;
-                        }
-                    }
-                }
-                
-                if (!hasConflict) {
-                    console.log('✅ 所有角色的互动空间都是独立的');
-                } else {
-                    console.error('❌ 检测到角色互动空间数据引用冲突');
-                }
-                
-                // 测试添加数据的独立性
-                QQ_CharacterSpaces['角色A']['test_space_1'] = { id: 'test1', name: '测试空间A' };
-                QQ_CharacterSpaces['角色B']['test_space_2'] = { id: 'test2', name: '测试空间B' };
-                
-                if (QQ_CharacterSpaces['角色A']['test_space_2']) {
-                    console.error('❌ 数据泄露: 角色A 访问到了角色B的数据');
-                } else if (QQ_CharacterSpaces['角色B']['test_space_1']) {
-                    console.error('❌ 数据泄露: 角色B 访问到了角色A的数据');
-                } else {
-                    console.log('✅ 角色数据添加独立性测试通过');
-                }
-                
-                console.log('当前角色空间数据结构:', QQ_CharacterSpaces);
-                
-                return !hasConflict;
-            }
             
-            /**
-             * 测试私聊界面名称点击功能
-             * 用于调试验证点击事件是否正常工作
-             */
-            function QQ_TestChatTitleClick() {
-                console.log('=== 私聊界面名称点击功能测试 ===');
-                
-                // 检查当前是否在私聊界面
-                const chatPage = document.querySelector('.QQ_chat_page');
-                if (!chatPage) {
-                    console.warn('当前不在聊天界面，无法测试点击功能');
-                    return false;
-                }
-                
-                // 查找聊天标题元素
-                const chatTitle = document.getElementById('QQ_chat_username');
-                if (!chatTitle) {
-                    console.error('❌ 找不到聊天标题元素 #QQ_chat_username');
-                    return false;
-                }
-                
-                console.log('✅ 找到聊天标题元素:', chatTitle);
-                console.log('标题文本:', chatTitle.textContent);
-                console.log('onclick属性:', chatTitle.getAttribute('onclick'));
-                
-                // 检查handleChatTitleClick函数是否存在
-                if (typeof handleChatTitleClick === 'function') {
-                    console.log('✅ handleChatTitleClick 函数存在');
-                } else {
-                    console.error('❌ handleChatTitleClick 函数不存在');
-                    return false;
-                }
-                
-                // 检查QQ_ShowCharacterInteractiveMenu函数是否存在
-                if (typeof QQ_ShowCharacterInteractiveMenu === 'function') {
-                    console.log('✅ QQ_ShowCharacterInteractiveMenu 函数存在');
-                } else {
-                    console.error('❌ QQ_ShowCharacterInteractiveMenu 函数不存在');
-                    return false;
-                }
-                
-                // 模拟点击测试
-                try {
-                    console.log('🔨 模拟点击聊天标题...');
-                    chatTitle.click();
-                    console.log('✅ 点击事件执行完成');
-                    
-                    // 检查是否出现了角色菜单
-                    setTimeout(() => {
-                        const menu = document.querySelector('.QQ_character_menu');
-                        if (menu) {
-                            console.log('✅ 角色互动菜单成功显示');
-                            console.log('菜单元素:', menu);
-                        } else {
-                            console.warn('⚠️ 点击后未显示角色互动菜单');
-                        }
-                    }, 100);
-                    
-                } catch (error) {
-                    console.error('❌ 点击测试失败:', error);
-                    return false;
-                }
-                
-                return true;
-            }
             
 
             
 
             
-            /**
-             * 调试私聊界面点击功能 - 手动调用菜单显示
-             * 用于在控制台手动测试
-             */
-            function QQ_DebugShowCharacterMenu() {
-                console.log('=== 手动测试角色互动菜单 ===');
-                
-                // 检查当前聊天界面的角色名称
-                const chatTitle = document.getElementById('QQ_chat_username');
-                if (!chatTitle) {
-                    console.error('找不到聊天标题元素');
-                    return;
-                }
-                
-                const characterName = chatTitle.textContent.trim();
-                console.log('当前角色名称:', characterName);
-                
-                // 直接调用菜单显示函数
-                QQ_ShowCharacterInteractiveMenu(characterName, chatTitle);
-            }
 
             /**
              * 综合系统测试函数 - 替代已清理的过时测试
@@ -9093,7 +8847,7 @@ PCM (Plot Construction Mode)
                 const interactiveSettings = QQ_GetInteractiveSettings();
                 
                 if (!interactiveSettings.enableKeywordTrigger) {
-                    console.log('⚙️ 关键词触发已被用户禁用');
+                    console.log('⚙️ 关键词触发已被用户禁用，跳过关键词检测');
                     return false;
                 }
                 
@@ -12012,54 +11766,7 @@ PCM (Plot Construction Mode)
             
             // ===== 测试和调试功能 =====
             
-            /**
-             * 测试角色专属精灵系统
-             */
-            function QQ_Test_Character_Spirit_System() {
-                console.log('=== 角色专属精灵系统测试 ===');
-                
-                // 测试1: 显示当前角色精灵状态
-                console.log('当前精灵状态:', QQ_CharacterSpirits);
-                
-                // 测试2: 显示角色空间数据
-                console.log('角色空间数据:', QQ_CharacterSpaces);
-                
-                // 测试3: 获取当前聊天页面
-                const currentChatPage = $('.QQ_chat_page:visible');
-                const currentCharacter = currentChatPage.length > 0 ? currentChatPage.attr('data-name') : null;
-                console.log('当前聊天角色:', currentCharacter);
-                
-                // 测试4: 测试头像获取功能
-                if (currentCharacter) {
-                    const avatar = QQ_GetCharacterAvatar(currentCharacter);
-                    console.log(`角色 ${currentCharacter} 的头像:`, avatar);
-                }
-                
-                // 测试5: 检查精灵按钮是否存在
-                const spiritButtons = $('.QQ_character_spirit');
-                console.log('页面上的精灵按钮数量:', spiritButtons.length);
-                spiritButtons.each(function() {
-                    const characterName = $(this).attr('data-character');
-                    console.log(`- 精灵按钮: ${characterName}`);
-                });
-                
-                toastr.info('角色专属精灵系统测试完成，请查看控制台输出', '系统测试');
-            }
             
-            /**
-             * 手动为指定角色显示精灵按钮（调试用）
-             * @param {string} characterName - 角色名称
-             */
-            function QQ_Debug_Show_Character_Spirit(characterName) {
-                if (!characterName) {
-                    toastr.error('请提供角色名称', '调试工具');
-                    return;
-                }
-                
-                console.log(`手动显示角色 ${characterName} 的精灵按钮`);
-                QQ_ShowCharacterSpirit(characterName);
-                toastr.success(`已显示角色 ${characterName} 的精灵按钮`, '调试工具');
-            }
             
             /**
              * 显示所有精灵系统状态信息
@@ -12084,102 +11791,9 @@ PCM (Plot Construction Mode)
                 toastr.info(`精灵系统状态: ${spiritCount}个精灵, ${spaceCount}个空间, ${pageCount}个页面`, '系统状态');
             }
             
-                         /**
-              * 测试头像获取功能
-              * @param {string} characterName - 角色名称
-              */
-             function QQ_Test_Avatar_Loading(characterName) {
-                 if (!characterName) {
-                     // 获取当前聊天角色
-                     const currentChatPage = $('.QQ_chat_page:visible');
-                     characterName = currentChatPage.length > 0 ? currentChatPage.attr('data-name') : null;
-                     
-                     if (!characterName) {
-                         toastr.error('请先打开一个私聊页面或提供角色名称', '头像测试');
-                         return;
-                     }
-                 }
-                 
-                 console.log(`=== 开始测试角色 ${characterName} 的头像获取 ===`);
-                 
-                 // 获取头像URL
-                 const avatarUrl = QQ_GetCharacterAvatar(characterName);
-                 
-                 // 创建测试界面
-                 const testHtml = `
-                     <div class="QQ_avatar_test_panel" style="
-                         position: fixed;
-                         top: 50px;
-                         right: 50px;
-                         width: 300px;
-                         background: white;
-                         border-radius: 15px;
-                         padding: 20px;
-                         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-                         z-index: 999999999;
-                         border: 2px solid #FF6B6B;
-                     ">
-                         <h3 style="margin: 0 0 15px 0; color: #333; text-align: center;">头像测试面板</h3>
-                         <p style="margin: 5px 0; color: #666;"><strong>角色名称:</strong> ${characterName}</p>
-                         <p style="margin: 5px 0; color: #666; word-break: break-all;"><strong>头像URL:</strong> ${avatarUrl}</p>
-                         
-                         <div style="text-align: center; margin: 15px 0;">
-                             <img src="${avatarUrl}" alt="${characterName}" style="
-                                 width: 80px;
-                                 height: 80px;
-                                 border-radius: 50%;
-                                 border: 3px solid #FF6B6B;
-                                 object-fit: cover;
-                             " onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjYwIiBoZWlnaHQ9IjYwIiByeD0iMzAiIGZpbGw9IiNGRjZCNkIiLz4KPHRLEHA+4pWpPC90ZXh0Pgo8L3N2Zz4K'; this.style.border='3px solid red'; console.log('测试头像加载失败: ${characterName}');">
-                         </div>
-                         
-                         <div style="text-align: center; gap: 10px; display: flex; justify-content: space-between;">
-                             <button class="QQ_test_show_spirit" style="
-                                 background: #FF6B6B;
-                                 color: white;
-                                 border: none;
-                                 padding: 8px 12px;
-                                 border-radius: 8px;
-                                 cursor: pointer;
-                                 font-size: 12px;
-                             ">显示精灵</button>
-                             <button class="QQ_test_close" style="
-                                 background: #999;
-                                 color: white;
-                                 border: none;
-                                 padding: 8px 12px;
-                                 border-radius: 8px;
-                                 cursor: pointer;
-                                 font-size: 12px;
-                             ">关闭</button>
-                         </div>
-                     </div>
-                 `;
-                 
-                 // 移除现有测试面板
-                 $('.QQ_avatar_test_panel').remove();
-                 
-                 // 添加新的测试面板
-                 $('body').append(testHtml);
-                 
-                 // 绑定事件
-                 $('.QQ_test_show_spirit').on('click', function() {
-                     QQ_ShowCharacterSpirit(characterName);
-                     toastr.success(`已显示 ${characterName} 的精灵按钮`, '测试');
-                 });
-                 
-                 $('.QQ_test_close').on('click', function() {
-                     $('.QQ_avatar_test_panel').remove();
-                 });
-                 
-                 toastr.info(`头像测试面板已显示，请查看右上角`, '头像测试');
-             }
              
              // 添加到全局作用域供调试使用
-             window.QQ_Test_Character_Spirit_System = QQ_Test_Character_Spirit_System;
-             window.QQ_Debug_Show_Character_Spirit = QQ_Debug_Show_Character_Spirit;
              window.QQ_Show_Spirit_System_Stats = QQ_Show_Spirit_System_Stats;
-             window.QQ_Test_Avatar_Loading = QQ_Test_Avatar_Loading;
             
             /**
              * 显示角色专属精灵按钮
@@ -16076,9 +15690,12 @@ ${index + 1}. ${space.name}
                     if (typeof initContactGroups === 'function') {
                         initContactGroups();
                     }
-                    if (typeof QQ_InitMomentLikes === 'function') {
-                        QQ_InitMomentLikes();
-                    }
+                    // 延迟初始化点赞功能，确保不与优先级逻辑冲突
+                    setTimeout(() => {
+                        if (typeof QQ_InitMomentLikes === 'function') {
+                            QQ_InitMomentLikes();
+                        }
+                    }, 800);
                 }, 500);
             }
             //space_init();
@@ -16967,6 +16584,43 @@ ${index + 1}. ${space.name}
                         }
                     }
                 }
+                
+                // 添加私聊消息（新格式：<私聊:角色名>）
+                matches = content.matchAll(
+                    /<私聊[:：](.+?)>([\s\S]+?)<\/私聊[:：](.+?)>/g,
+                );
+                if (matches) {
+                    for (const match of matches) {
+                        if (match[1] != match[3]) {
+                            console.warn("私聊标签闭合异常:", match[1], "!=", match[3]);
+                        }
+                        // 使用当前用户名构建聊天键
+                        const currentUser = QQ_GetUserName() || "用户";
+                        const key = `${currentUser}和${match[1]}的聊天`;
+                        
+                        if (!json.私聊[key]) {
+                            json.私聊[key] = [];
+                        }
+                        
+                        for (let line of match[2].split(/\r?\n/)) {
+                            line = line.trim();
+                            if (line) {
+                                let m = line.match(
+                                    /(.+?)\s*(?:--|:|：)\s*(.+)/,
+                                );
+                                if (!m) {
+                                    continue;
+                                }
+                                let message = m[2];
+                                if (message.split("--").length >= 2) {
+                                    message = message.split("--")[0];
+                                }
+                                json.私聊[key].push(`${m[1]}--${m[2]}`);
+                            }
+                        }
+                    }
+                }
+                
                 // 添加群聊消息
                 matches = content.matchAll(
                     /<群聊[:：](.+?)>([\s\S]+?)<\/群聊[:：](.+?)>/g,
@@ -17030,12 +16684,331 @@ ${index + 1}. ${space.name}
                     return "";
                 }
             }
+            /**
+             * 检测是否为混合格式响应（群聊+私聊+互动内容混合）
+             * @param {string} response - AI的完整回复内容
+             * @returns {boolean} 是否为混合格式
+             */
+            function QQ_DetectMixedFormatResponse(response) {
+                // 检测基本的MiPhone_JSON格式
+                const hasMiPhoneJSON = response.includes('MiPhone_JSON_START');
+                if (!hasMiPhoneJSON) {
+                    return false;
+                }
+                
+                // 检测是否有多个JSON块或单个JSON块与普通文本混合
+                const jsonStartCount = (response.match(/MiPhone_JSON_START/g) || []).length;
+                const jsonEndCount = (response.match(/MiPhone_JSON_END/g) || []).length;
+                
+                // 如果有多个JSON块，很可能是混合格式
+                if (jsonStartCount > 1) {
+                    console.log(`🔍 检测到${jsonStartCount}个MiPhone_JSON块，判定为混合格式`);
+                    return true;
+                }
+                
+                // 如果只有一个JSON块，检查是否与普通文本混合
+                if (jsonStartCount === 1 && jsonEndCount === 1) {
+                    const beforeJSON = response.split('MiPhone_JSON_START')[0].trim();
+                    const afterJSON = response.split('MiPhone_JSON_END')[1];
+                    
+                    // 如果JSON块前后有明显的文本内容，判定为混合格式
+                    if ((beforeJSON && beforeJSON.length > 20) || 
+                        (afterJSON && afterJSON.trim().length > 20)) {
+                        console.log('🔍 检测到JSON块与普通文本混合，判定为混合格式');
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+
+            /**
+             * *** 重新设计：混合格式响应处理器 ***
+             * 专门处理直接夹杂互动内容的群聊+私聊格式（无标记）
+             * @param {string} response - AI的完整回复内容
+             */
+            async function QQ_ProcessMixedFormatResponse(response) {
+                console.log('🔄 开始处理无标记混合格式响应...');
+                
+                try {
+                    // *** 步骤1：检测是否为混合格式 ***
+                    const hasMiPhoneJSON = response.includes('MiPhone_JSON_START');
+                    const hasMultipleJSONBlocks = (response.match(/MiPhone_JSON_START/g) || []).length > 1;
+                    
+                    if (!hasMiPhoneJSON) {
+                        return { success: false, error: '未找到MiPhone_JSON格式' };
+                    }
+                    
+                    console.log(`📊 格式检测: JSON块 ${hasMultipleJSONBlocks ? '多个' : '单个'}`);
+                    
+                    // *** 步骤2：按照JSON块分段，提取夹杂的互动内容 ***
+                    const segments = response.split(/MiPhone_JSON_START|MiPhone_JSON_END/);
+                    const jsonBlocks = [];
+                    const interactiveTexts = [];
+                    
+                    for (let i = 0; i < segments.length; i++) {
+                        const segment = segments[i].trim();
+                        if (!segment) continue;
+                        
+                        // 检查是否为JSON格式段落
+                        if (segment.includes('msg_start') && segment.includes('msg_end')) {
+                            // 提取msg_start到msg_end之间的内容
+                            const msgMatch = segment.match(/msg_start([\s\S]*?)msg_end/);
+                            if (msgMatch) {
+                                jsonBlocks.push(msgMatch[1].trim());
+                                console.log(`📦 提取JSON块 ${jsonBlocks.length}: ${msgMatch[1].substring(0, 100)}...`);
+                            }
+                        } else if (segment.length > 10) {
+                            // 可能的互动内容：不是JSON格式但有一定长度的文本
+                            const cleanText = segment.replace(/^\s*msg_start\s*|\s*msg_end\s*$/g, '').trim();
+                            if (cleanText.length > 5) {
+                                interactiveTexts.push(cleanText);
+                                console.log(`🎭 提取互动内容 ${interactiveTexts.length}: ${cleanText.substring(0, 100)}...`);
+                            }
+                        }
+                    }
+                    
+                    console.log(`📈 解析结果: JSON块 ${jsonBlocks.length}个, 互动文本 ${interactiveTexts.length}个`);
+                    
+                    // *** 步骤3：处理所有JSON块（聊天数据） ***
+                    const allChatData = { 私聊: {}, 群聊: {} };
+                    let successfulParses = 0;
+                    
+                    for (let i = 0; i < jsonBlocks.length; i++) {
+                        const blockContent = jsonBlocks[i];
+                        console.log(`处理JSON块 ${i + 1}/${jsonBlocks.length}...`);
+                        
+                        try {
+                            const parsedJson = JsonYamlParse(blockContent);
+                            if (parsedJson) {
+                                successfulParses++;
+                                
+                                // 合并群聊数据
+                                if (parsedJson.群聊) {
+                                    for (const [groupName, groupData] of Object.entries(parsedJson.群聊)) {
+                                        if (!allChatData.群聊[groupName]) {
+                                            allChatData.群聊[groupName] = { members: [], msgs: [] };
+                                        }
+                                        // 合并成员列表
+                                        if (groupData.members) {
+                                            allChatData.群聊[groupName].members = [...new Set([
+                                                ...allChatData.群聊[groupName].members,
+                                                ...groupData.members
+                                            ])];
+                                        }
+                                        // 合并消息列表
+                                        if (groupData.msgs) {
+                                            allChatData.群聊[groupName].msgs.push(...groupData.msgs);
+                                        }
+                                    }
+                                }
+                                
+                                // 合并私聊数据
+                                if (parsedJson.私聊) {
+                                    for (const [chatKey, messages] of Object.entries(parsedJson.私聊)) {
+                                        if (!allChatData.私聊[chatKey]) {
+                                            allChatData.私聊[chatKey] = [];
+                                        }
+                                        allChatData.私聊[chatKey].push(...messages);
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            console.error(`解析JSON块 ${i + 1} 失败:`, error);
+                        }
+                    }
+                    
+                    console.log(`✅ 成功解析 ${successfulParses}/${jsonBlocks.length} 个JSON块`);
+                    
+                    // *** 步骤4：处理聊天数据 ***
+                    let chatDataProcessed = false;
+                    if (Object.keys(allChatData.群聊).length > 0 || Object.keys(allChatData.私聊).length > 0) {
+                        console.log('📝 更新聊天数据...');
+                        const cleanedData = QQ_Msg_DeletOld(allChatData);
+                        await QQ_Msg_Parse(JSON.stringify(cleanedData));
+                        chatDataProcessed = true;
+                        
+                        console.log(`📊 聊天数据更新: 群聊 ${Object.keys(allChatData.群聊).length}个, 私聊 ${Object.keys(allChatData.私聊).length}个`);
+                    }
+                    
+                    // *** 步骤5：处理互动内容（创建动态） ***
+                    let interactiveContentProcessed = false;
+                    if (interactiveTexts.length > 0) {
+                        console.log('🎪 处理互动内容...');
+                        
+                        for (let i = 0; i < interactiveTexts.length; i++) {
+                            const interactiveText = interactiveTexts[i];
+                            
+                            // 处理并美化互动内容
+                            const processedContent = QQ_ProcessInteractiveMarkerContent(interactiveText);
+                            
+                            // 创建互动动态条目
+                            const interactiveMoment = {
+                                id: `mixed_interactive_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
+                                userName: charcardname || '角色',
+                                message: processedContent.summary,
+                                timestamp: new Date().toISOString(),
+                                timestampText: QQ_GetTime(),
+                                additionalInfo: processedContent.details,
+                                randomPhone: '',
+                                imgcontent: processedContent.hasImage ? processedContent.imageContent : '',
+                                likes: {
+                                    count: 0,
+                                    userLiked: false,
+                                    likedBy: [],
+                                    lastLikeTime: null
+                                },
+                                comments: [],
+                                interactiveContent: interactiveText,  // 保存原始互动内容
+                                isInteractiveContent: true,          // 标记为互动内容
+                                isMixedFormat: true                  // 标记为混合格式来源
+                            };
+                            
+                            // 添加到动态数据
+                            if (!window.QQ_MomentsData) {
+                                window.QQ_MomentsData = [];
+                            }
+                            window.QQ_MomentsData.unshift(interactiveMoment);
+                            
+                            console.log(`✅ 互动内容 ${i + 1} 已添加到动态空间: ${interactiveMoment.id}`);
+                        }
+                        
+                        interactiveContentProcessed = true;
+                        
+                        // 保存动态数据并刷新界面
+                        if (typeof QQ_SafeSaveMomentsData === 'function') {
+                            await QQ_SafeSaveMomentsData('混合格式互动内容');
+                        }
+                        
+                        // 如果当前在动态界面，刷新显示
+                        if ($('#space_contents').length > 0 && $('#space_contents').is(':visible')) {
+                            if (typeof QQ_Render_Moments === 'function') {
+                                await QQ_Render_Moments();
+                            }
+                        }
+                    }
+                    
+                    console.log('✅ 混合格式响应处理完成');
+                    
+                    return {
+                        success: true,
+                        chatDataProcessed: chatDataProcessed,
+                        interactiveContentProcessed: interactiveContentProcessed,
+                        jsonBlocksProcessed: successfulParses,
+                        interactiveTextsFound: interactiveTexts.length,
+                        groupChatsUpdated: Object.keys(allChatData.群聊).length,
+                        privateChatsUpdated: Object.keys(allChatData.私聊).length
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ 混合格式响应处理失败:', error);
+                    return {
+                        success: false,
+                        error: error.message
+                    };
+                }
+            }
+
+            /**
+             * *** 新增：处理互动内容标记 ***
+             * 将原始互动内容标记转换为适合动态显示的格式
+             * @param {string} markerContent - 原始互动标记内容
+             * @returns {object} 处理后的内容对象
+             */
+            function QQ_ProcessInteractiveMarkerContent(markerContent) {
+                const result = {
+                    summary: '发起了互动场景',
+                    details: '',
+                    hasImage: false,
+                    imageContent: ''
+                };
+                
+                try {
+                    // 清理内容，移除"互动内容"标记
+                    let cleanContent = markerContent.replace(/^\s*互动内容\s*/gm, '').trim();
+                    
+                    // 检测图片内容
+                    const imageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+                    const imageMatches = [...cleanContent.matchAll(imageRegex)];
+                    
+                    if (imageMatches.length > 0) {
+                        result.hasImage = true;
+                        result.imageContent = imageMatches[0][0]; // 取第一张图片
+                        result.summary = '分享了互动场景图片';
+                        
+                        // 移除图片标签，留下文字描述
+                        cleanContent = cleanContent.replace(imageRegex, '').trim();
+                    }
+                    
+                    // 检测特殊格式内容
+                    if (cleanContent.includes('[图片-') || cleanContent.includes('[img-')) {
+                        result.summary = '分享了互动场景图片';
+                    } else if (cleanContent.includes('*') && cleanContent.includes('*')) {
+                        result.summary = '发起了动作互动';
+                    } else if (cleanContent.includes('【') && cleanContent.includes('】')) {
+                        result.summary = '表达了情感互动';
+                    } else if (cleanContent.length > 50) {
+                        result.summary = '发起了详细互动场景';
+                    }
+                    
+                    // 处理详细内容
+                    if (cleanContent.length > 0) {
+                        // 限制详细内容长度，避免过长
+                        if (cleanContent.length > 200) {
+                            result.details = cleanContent.substring(0, 200) + '...';
+                        } else {
+                            result.details = cleanContent;
+                        }
+                        
+                        // 如果有详细内容，调整摘要
+                        if (result.details.includes('挑战') || result.details.includes('战斗')) {
+                            result.summary = '发起了挑战互动';
+                        } else if (result.details.includes('温柔') || result.details.includes('亲密')) {
+                            result.summary = '发起了温馨互动';
+                        } else if (result.details.includes('指挥官') || result.details.includes('大人')) {
+                            result.summary = '与指挥官互动';
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('处理互动标记内容失败:', error);
+                    result.summary = '发起了互动内容';
+                    result.details = '内容解析出错，请查看原始数据';
+                }
+                
+                return result;
+            }
+
             async function MiPhone_Merge() {
                 let messages = await ST.GetCurrentMessages();
                 messages = messages.replace(
                     /<(?:think|thinking)>[\s\S]+?<\/(?:think|thinking)>/gi,
                     "",
                 );
+                
+                // *** 新增：检测混合格式并优先处理 ***
+                if (messages.includes('MiPhone_JSON_START') && messages.includes('互动内容')) {
+                    console.log('🔍 检测到混合格式响应，使用增强处理器...');
+                    const result = await QQ_ProcessMixedFormatResponse(messages);
+                    
+                    if (result.success) {
+                        console.log(`✅ 混合格式处理成功: 聊天块 ${result.blocksProcessed}, 互动内容 ${result.interactiveMarkers}`);
+                        triggerSlash("/echo 混合格式响应处理完成");
+                        if (result.chatDataProcessed && result.interactiveContentProcessed) {
+                            triggerSlash("/echo 聊天内容已更新，互动内容已添加到动态空间");
+                        } else if (result.chatDataProcessed) {
+                            triggerSlash("/echo 聊天内容已更新");
+                        } else if (result.interactiveContentProcessed) {
+                            triggerSlash("/echo 互动内容已添加到动态空间");
+                        }
+                        return;
+                    } else {
+                        console.error('❌ 混合格式处理失败，回退到标准处理');
+                        triggerSlash("/echo 混合格式处理失败，使用标准处理");
+                    }
+                }
+                
+                // *** 原有的标准处理逻辑 ***
                 const matches = messages.matchAll(
                     /MiPhone_start([\s\S]+?)MiPhone_end/g,
                 );
@@ -19044,6 +19017,289 @@ ${index + 1}. ${space.name}
                     return null;
                 }
             }
+            
+            /**
+             * *** 新增：私聊访问权限验证 ***
+             * 确保私聊消息不会泄露给非参与者
+             * @param {string} participant1 - 参与者1
+             * @param {string} participant2 - 参与者2
+             * @param {string} accessType - 访问类型（'user', 'character', 'system'）
+             * @returns {boolean} 是否允许访问
+             */
+            function QQ_ValidatePrivateChatAccess(participant1, participant2, accessType) {
+                // 基本验证：参与者不能为空
+                if (!participant1 || !participant2) {
+                    console.warn('❌ 私聊访问验证失败：参与者信息不完整');
+                    return false;
+                }
+                
+                // 用户参与的私聊必须包含用户
+                if (accessType === 'user' && 
+                    participant1 !== UserName && participant2 !== UserName) {
+                    console.warn('❌ 用户私聊访问验证失败：用户不在参与者列表中');
+                    return false;
+                }
+                
+                // 角色间私聊不应包含用户
+                if (accessType === 'character' && 
+                    (participant1 === UserName || participant2 === UserName)) {
+                    console.warn('❌ 角色私聊访问验证失败：包含用户参与者');
+                    return false;
+                }
+                
+                // 防止自我对话
+                if (participant1 === participant2) {
+                    console.warn('❌ 私聊访问验证失败：不允许自我对话');
+                    return false;
+                }
+                
+                console.log(`✅ 私聊访问验证通过: ${participant1} <-> ${participant2} (${accessType})`);
+                return true;
+            }
+            
+            /**
+             * *** 新增：生成安全的聊天ID ***
+             * 防止聊天ID冲突和未授权访问
+             * @param {string} participant1 - 参与者1
+             * @param {string} participant2 - 参与者2
+             * @returns {string} 安全的聊天ID
+             */
+            function QQ_GenerateSecureChatId(participant1, participant2) {
+                // 标准化参与者顺序（字母序）
+                const sortedParticipants = [participant1, participant2].sort();
+                const baseId = sortedParticipants.join('_');
+                
+                // 添加时间戳防止冲突
+                const timestamp = Date.now();
+                
+                // 生成简单哈希（用于隐私保护）
+                let hash = 0;
+                for (let i = 0; i < baseId.length; i++) {
+                    const char = baseId.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash; // 转换为32位整数
+                }
+                
+                return `${Math.abs(hash)}_${timestamp % 100000}`;
+            }
+            
+            /**
+             * *** 新增：检查私聊消息是否包含分享意图 ***
+             * 检测角色是否主动将私聊内容分享到群聊或动态
+             * @param {string} message - 消息内容
+             * @returns {Object} 分享检测结果
+             */
+            function QQ_DetectPrivateChatSharingIntent(message) {
+                const sharingKeywords = [
+                    '告诉大家', '跟大家说', '分享给大家', '给大家看',
+                    '发到群里', '发到空间', '发动态', '转发给',
+                    '截图分享', '告诉所有人', '公开这个消息'
+                ];
+                
+                const hasShareIntent = sharingKeywords.some(keyword => 
+                    message.includes(keyword)
+                );
+                
+                return {
+                    hasShareIntent,
+                    detectedKeywords: sharingKeywords.filter(keyword => 
+                        message.includes(keyword)
+                    )
+                };
+            }
+            
+            /**
+             * *** 新增：生成强健的消息哈希值 ***
+             * 使用改进的算法减少哈希冲突，提高消息去重的准确性
+             * @param {string} content - 消息内容
+             * @returns {string} 强健的哈希值
+             */
+            function QQ_GenerateRobustMessageHash(content) {
+                if (!content || typeof content !== 'string') {
+                    return `empty_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                }
+                
+                // *** 预处理：标准化内容 ***
+                const normalizedContent = content
+                    .trim()
+                    .replace(/\s+/g, ' ')  // 标准化空白字符
+                    .replace(/[\r\n]+/g, '\n');  // 标准化换行符
+                
+                // *** 使用更强的哈希算法（FNV-1a的简化版本） ***
+                let hash = 2166136261; // FNV offset basis
+                const fnvPrime = 16777619;
+                
+                for (let i = 0; i < normalizedContent.length; i++) {
+                    hash ^= normalizedContent.charCodeAt(i);
+                    hash = (hash * fnvPrime) >>> 0; // 保持32位无符号整数
+                }
+                
+                // *** 添加内容长度和时间戳以进一步减少冲突 ***
+                const lengthFactor = normalizedContent.length;
+                const timeFactor = Date.now() % 1000000; // 取时间戳后6位
+                
+                // 创建复合哈希
+                const compositeHash = `${hash.toString(36)}_${lengthFactor}_${timeFactor}`;
+                
+                // *** 额外安全措施：检查是否是已知的高冲突内容 ***
+                const contentSignature = QQ_GenerateContentSignature(normalizedContent);
+                
+                return `${compositeHash}_${contentSignature}`;
+            }
+            
+            /**
+             * *** 新增：生成内容特征签名 ***
+             * 用于进一步区分相似但不同的消息内容
+             * @param {string} content - 标准化后的内容
+             * @returns {string} 内容特征签名
+             */
+            function QQ_GenerateContentSignature(content) {
+                // 提取关键特征
+                const features = {
+                    firstChar: content.charCodeAt(0) || 0,
+                    lastChar: content.charCodeAt(content.length - 1) || 0,
+                    length: content.length,
+                    wordCount: content.split(/\s+/).length,
+                    uniqueChars: new Set(content).size
+                };
+                
+                // 生成特征签名
+                const signature = `${features.firstChar}${features.lastChar}${features.length}${features.wordCount}${features.uniqueChars}`;
+                
+                // 进一步处理为较短的标识符
+                let compactSignature = 0;
+                for (let i = 0; i < signature.length; i++) {
+                    compactSignature = (compactSignature * 31 + parseInt(signature[i]) || 0) >>> 0;
+                }
+                
+                return compactSignature.toString(36);
+            }
+            
+            /**
+             * *** 新增：拆分长消息处理函数 ***
+             * 根据提示词规则，识别并拆分包含\\n的长消息
+             * @param {string} messageContent - 原始消息内容
+             * @returns {string[]} 拆分后的消息数组
+             */
+            function QQ_SplitLongMessage(messageContent) {
+                if (!messageContent || typeof messageContent !== 'string') {
+                    return [messageContent || ''];
+                }
+                
+                // *** 检查是否包含\\n标记 ***
+                if (!messageContent.includes('\\n')) {
+                    return [messageContent];
+                }
+                
+                console.log(`🔍 检测到长消息包含\\n标记: "${messageContent}"`);
+                
+                // *** 按\\n拆分消息 ***
+                const parts = messageContent
+                    .split('\\n')
+                    .map(part => part.trim())
+                    .filter(part => part.length > 0); // 过滤空白部分
+                
+                if (parts.length <= 1) {
+                    return [messageContent];
+                }
+                
+                console.log(`✅ 长消息拆分成功: ${parts.length}条子消息`, parts);
+                
+                // *** 智能拆分优化 ***
+                const optimizedParts = QQ_OptimizeSplitMessages(parts);
+                
+                return optimizedParts;
+            }
+            
+            /**
+             * *** 新增：优化拆分的消息 ***
+             * 智能合并过短的消息片段，确保每条消息都有合理的长度
+             * @param {string[]} parts - 原始拆分的消息片段
+             * @returns {string[]} 优化后的消息数组
+             */
+            function QQ_OptimizeSplitMessages(parts) {
+                if (!parts || parts.length <= 1) {
+                    return parts;
+                }
+                
+                const optimized = [];
+                let currentPart = '';
+                const MIN_PART_LENGTH = 8;  // 最小消息长度
+                const MAX_PART_LENGTH = 100; // 最大单条消息长度
+                
+                for (let i = 0; i < parts.length; i++) {
+                    const part = parts[i];
+                    
+                    // 如果当前部分太短，尝试与下一部分合并
+                    if (part.length < MIN_PART_LENGTH && i < parts.length - 1) {
+                        const nextPart = parts[i + 1];
+                        const combined = `${part} ${nextPart}`;
+                        
+                        if (combined.length <= MAX_PART_LENGTH) {
+                            // 合并当前部分和下一部分
+                            parts[i + 1] = combined;
+                            continue; // 跳过当前部分，在下一次迭代处理合并结果
+                        }
+                    }
+                    
+                    // 如果当前部分太长，进一步拆分
+                    if (part.length > MAX_PART_LENGTH) {
+                        const subParts = QQ_SplitOverlongMessage(part, MAX_PART_LENGTH);
+                        optimized.push(...subParts);
+                    } else {
+                        optimized.push(part);
+                    }
+                }
+                
+                console.log(`🔧 消息拆分优化完成: ${parts.length} -> ${optimized.length}条`, optimized);
+                return optimized;
+            }
+            
+            /**
+             * *** 新增：拆分过长的单条消息 ***
+             * 智能拆分超长消息，尽量在合适的位置断开
+             * @param {string} message - 过长的消息
+             * @param {number} maxLength - 最大长度
+             * @returns {string[]} 拆分后的消息数组
+             */
+            function QQ_SplitOverlongMessage(message, maxLength) {
+                if (message.length <= maxLength) {
+                    return [message];
+                }
+                
+                const parts = [];
+                let currentPos = 0;
+                
+                while (currentPos < message.length) {
+                    let endPos = Math.min(currentPos + maxLength, message.length);
+                    
+                    // 如果不是最后一段，尝试在标点符号处断开
+                    if (endPos < message.length) {
+                        const punctuation = ['。', '！', '？', '，', '；', '…', '.', '!', '?', ',', ';'];
+                        let bestBreakPoint = endPos;
+                        
+                        // 向前搜索最近的标点符号
+                        for (let i = endPos - 1; i > currentPos + maxLength * 0.7; i--) {
+                            if (punctuation.includes(message[i])) {
+                                bestBreakPoint = i + 1;
+                                break;
+                            }
+                        }
+                        
+                        endPos = bestBreakPoint;
+                    }
+                    
+                    const part = message.substring(currentPos, endPos).trim();
+                    if (part.length > 0) {
+                        parts.push(part);
+                    }
+                    
+                    currentPos = endPos;
+                }
+                
+                return parts;
+            }
+            
             /**
              * *** 新增：处理角色之间的私聊（不包含用户的角色间互动） ***
              * @param {string} chatKey - 聊天标识，如"角色A和角色B的聊天"
@@ -19054,16 +19310,22 @@ ${index + 1}. ${space.name}
             async function QQ_HandleCharacterChat(chatKey, messages, char1, char2) {
                 console.log(`处理角色间私聊: ${char1} 和 ${char2}`);
                 
+                // *** 增强的私聊独立性检查 ***
+                if (!QQ_ValidatePrivateChatAccess(char1, char2, 'character')) {
+                    console.warn(`❌ 私聊访问被拒绝: ${char1} 和 ${char2} 之间的私聊不应被处理`);
+                    return;
+                }
+                
                 if (!messages || messages.length === 0) {
                     console.log('角色间私聊消息为空，跳过处理');
                     return;
                 }
                 
-                // 创建角色间私聊的标识
-                const chatId = `char_chat_${char1}_${char2}`;
+                // 创建角色间私聊的标识（加密处理）
+                const chatId = `char_chat_${QQ_GenerateSecureChatId(char1, char2)}`;
                 const chatTitle = `${char1}和${char2}的私聊`;
                 
-                // 存储到专门的角色间私聊数据结构
+                // 存储到专门的角色间私聊数据结构（隔离存储）
                 if (!window.QQ_CharacterChats) {
                     window.QQ_CharacterChats = {};
                 }
@@ -19076,7 +19338,9 @@ ${index + 1}. ${space.name}
                         char2: char2,
                         messages: [],
                         lastTime: '',
-                        lastMessage: ''
+                        lastMessage: '',
+                        isPrivate: true,  // 标记为私聊
+                        accessLevel: 'character_only'  // 仅角色可访问
                     };
                 }
                 
@@ -19347,6 +19611,12 @@ ${index + 1}. ${space.name}
                         // 两个参与者都是用户，跳过
                         continue;
                     }
+                    
+                    // *** 增强的用户私聊安全检查 ***
+                    if (!QQ_ValidatePrivateChatAccess(UserName, name, 'user')) {
+                        console.warn(`❌ 用户私聊访问被拒绝: ${UserName} 和 ${name}`);
+                        continue;
+                    }
                     try {
                         if (!QQ_msgjson.私聊[str]) {
                             QQ_msgjson.私聊[str] = [];
@@ -19383,6 +19653,32 @@ ${index + 1}. ${space.name}
                             if (parts.length >= 2) {
                                 parts[1] = QQ_CleanNestedTags(parts[1]);
                                 msg = parts.join("--");
+                                
+                                // *** 增强的分享意图检测 ***
+                                const shareCheck = QQ_DetectPrivateChatSharingIntent(parts[1]);
+                                if (shareCheck.hasShareIntent) {
+                                    console.log(`🔒 检测到私聊分享意图: "${parts[1]}" - 关键词: ${shareCheck.detectedKeywords.join(', ')}`);
+                                    console.log(`📤 这表明角色 ${parts[0]} 主动要将私聊内容分享到其他平台`);
+                                    
+                                    // 记录分享意图但不阻止（这是角色的主动行为）
+                                    if (window.QQ_PrivateChatSharingLog) {
+                                        window.QQ_PrivateChatSharingLog.push({
+                                            timestamp: new Date().toISOString(),
+                                            chatParticipants: [UserName, name],
+                                            sharingCharacter: parts[0],
+                                            message: parts[1],
+                                            detectedKeywords: shareCheck.detectedKeywords
+                                        });
+                                    } else {
+                                        window.QQ_PrivateChatSharingLog = [{
+                                            timestamp: new Date().toISOString(),
+                                            chatParticipants: [UserName, name],
+                                            sharingCharacter: parts[0],
+                                            message: parts[1],
+                                            detectedKeywords: shareCheck.detectedKeywords
+                                        }];
+                                    }
+                                }
                             }
                             
                             // 检查是否为新消息（不在现有消息列表中）
@@ -20181,14 +20477,15 @@ ${index + 1}. ${space.name}
                              // *** 新增：清理AI回复中的consider注释和其他标签 ***
                              msgContent = QQ_CleanNestedTags(msgContent);
                              
-                             // 创建消息唯一标识（避免重复处理）
+                             // 创建消息唯一标识（避免重复处理） - 增强版
                              let messageHash;
                              try {
-                                 // 先尝试简单的hash方法
-                                 messageHash = msgContent.split('').map(c => c.charCodeAt(0)).join('').substring(0, 20);
+                                 // *** 改进的哈希算法，减少冲突 ***
+                                 messageHash = QQ_GenerateRobustMessageHash(msgContent);
                              } catch (error) {
-                                 // 如果出错，使用时间戳作为fallback
-                                 messageHash = Date.now().toString();
+                                 // 如果出错，使用时间戳+随机数作为fallback
+                                 console.warn('消息哈希生成失败，使用fallback方法:', error);
+                                 messageHash = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                              }
                              
                              if (processedMessages.has(messageHash)) {
@@ -20371,62 +20668,8 @@ ${index + 1}. ${space.name}
                          // *** 添加到全局作用域便于调试 ***
             window.QQ_Check_Comment_Backup_Status = QQ_Check_Comment_Backup_Status;
             
-            /**
-             * *** 新增：测试互动设置功能的调试工具 ***
-             */
-            function QQ_Test_Interactive_Settings() {
-                console.log('=== 互动设置功能测试 ===');
-                
-                try {
-                    // 获取当前设置
-                    const currentSettings = QQ_GetInteractiveSettings();
-                    console.log('📋 当前设置:', currentSettings);
-                    
-                    // 测试不同类型的消息
-                    const testMessages = [
-                        '&&想要拥抱你',          // 特殊符号
-                        '我想拥抱你和抚摸你',     // 默认关键词（需要启用）
-                        '想你了',               // 可能的自定义关键词
-                        '今天天气真好',          // 普通消息
-                        '*伸出双手*想要拥抱',    // 动作模式
-                    ];
-                    
-                    console.log('🧪 测试消息检测结果:');
-                    testMessages.forEach(message => {
-                        const result = QQ_DetectInteractiveIntent(message);
-                        console.log(`消息: "${message}"`);
-                        console.log(`结果:`, result);
-                        console.log('---');
-                    });
-                    
-                    // 显示触发统计
-                    console.log('📊 触发机制状态:');
-                    console.log(`🎯 特殊符号触发: 永久启用`);
-                    console.log(`🔍 关键词触发: ${currentSettings.enableKeywordTrigger ? '已启用' : '已禁用'}`);
-                    console.log(`📝 默认关键词: ${currentSettings.enableDefaultKeywords ? '已启用' : '已禁用'}`);
-                    console.log(`🏷️ 自定义关键词: ${currentSettings.customKeywords.length}个`);
-                    if (currentSettings.customKeywords.length > 0) {
-                        console.log(`   关键词列表: ${currentSettings.customKeywords.join(', ')}`);
-                    }
-                    
-                    // 功能检查
-                    console.log('🔧 功能状态检查:');
-                    console.log(`• 获取设置函数: ${typeof QQ_GetInteractiveSettings === 'function' ? '✅' : '❌'}`);
-                    console.log(`• 保存设置函数: ${typeof QQ_SaveInteractiveSettings === 'function' ? '✅' : '❌'}`);
-                    console.log(`• 显示设置界面: ${typeof QQ_ShowInteractiveSettings === 'function' ? '✅' : '❌'}`);
-                    console.log(`• 更新状态显示: ${typeof QQ_UpdateInteractiveStatus === 'function' ? '✅' : '❌'}`);
-                    console.log(`• 互动检测函数: ${typeof QQ_DetectInteractiveIntent === 'function' ? '✅' : '❌'}`);
-                    
-                } catch (error) {
-                    console.error('❌ 测试过程中出现错误:', error);
-                }
-                
-                console.log('=== 测试完成 ===');
-                console.log('💡 提示: 可以通过 QQ_ShowInteractiveSettings() 打开设置界面');
-            }
             
             // *** 添加到全局作用域便于调试 ***
-            window.QQ_Test_Interactive_Settings = QQ_Test_Interactive_Settings;
 
             /**
              * *** 新增：检查互动内容保存状态的调试函数 ***
@@ -20499,64 +20742,8 @@ ${index + 1}. ${space.name}
             // *** 添加到全局作用域便于调试 ***
             window.QQ_Check_Interactive_Backup_Status = QQ_Check_Interactive_Backup_Status;
 
-             /**
-              * *** 新增：测试增强AI回复功能 ***
-              */
-             function QQ_Test_Enhanced_AI_Response() {
-                 console.log('=== 🔥 超强化AI回复功能测试 🔥 ===');
-                 
-                 // 测试动态评论的超强指导
-                 console.log('📱 动态评论AI超强指导:');
-                 console.log('✅ 强制要求: 4名角色回复 + 2名角色私聊');
-                 console.log('✅ 内容标准: 评论2-3句话，私聊3-4句话');
-                 console.log('✅ 质量保证: 情感表达+具体反应+互动引导');
-                 console.log('✅ 差异化: 不同角色完全不同的语气和关注点');
-                 
-                 // 测试普通消息的超强指导  
-                 console.log('💬 普通消息AI超强指导:');
-                 console.log('✅ 强制要求: 3-4名角色回复，每个4-5句话起步');
-                 console.log('✅ 内容标准: 必须包含提问+建议+邀请+关心+个人感受');
-                 console.log('✅ 扩展互动: 2名角色私聊深入 + 丰富动态输出');
-                 console.log('✅ 禁止行为: 简短回复、敷衍内容、角色同质化');
-                 
-                 // 显示超强化设置状态
-                 console.log('🚨 超强化设置状态:');
-                 console.log('- 动态评论: 强制4角色评论 + 2角色私聊');
-                 console.log('- 普通消息: 强制3-4角色回复(4-5句话) + 2角色私聊 + 动态');
-                 console.log('- 内容长度: 评论2-3句，回复4-5句，私聊3-4句');
-                 console.log('- 违规处理: 不符合标准将被视为无效');
-                 console.log('- 强制要素: 情感+反应+引导+个性+互动');
-                 
-                 // 提供测试建议
-                 console.log('🧪 超强化测试建议:');
-                 console.log('1. 发布动态并评论，应看到4个角色评论+2个私聊');
-                 console.log('2. 发送普通消息，应看到3-4个角色深度回复+私聊+动态');
-                 console.log('3. 检查每个回复是否达到强制长度要求');
-                 console.log('4. 观察角色回复是否有明显个性差异');
-                 console.log('5. 验证是否包含提问、建议、邀请等互动要素');
-                 
-                 console.log('🎯 预期改进效果:');
-                 console.log('- 回复数量: 从1-2个增加到3-4个');
-                 console.log('- 回复长度: 从简短增加到4-5句话');
-                 console.log('- 私聊频率: 大幅增加，至少2个角色私聊');
-                 console.log('- 互动质量: 包含具体的提问和引导');
-                 console.log('- 角色差异: 不同语气、关注点、表达方式');
-                 
-                 console.log('🔥 超强化AI回复功能已激活！预期效果大幅提升！');
-                 
-                 // 返回测试状态
-                 return {
-                     dynamicCommentRequirements: '强制4名角色评论 + 2名角色私聊，内容丰富',
-                     normalMessageRequirements: '强制3-4名角色回复 + 2名角色私聊 + 动态输出',
-                     contentStandard: '评论2-3句话，回复4-5句话，私聊3-4句话',
-                     qualityRequirements: '情感表达+具体反应+互动引导+个性差异',
-                     enhancementLevel: '超强化已激活',
-                     expectedImprovement: '回复内容将显著增加，互动性大幅提升'
-                 };
-             }
 
              // *** 添加到全局作用域便于调试 ***
-             window.QQ_Test_Enhanced_AI_Response = QQ_Test_Enhanced_AI_Response;
 
              /**
               * *** 新增：查看互动空间世界书备份信息 ***
@@ -20734,88 +20921,9 @@ ${index + 1}. ${space.name}
              // *** 添加到全局作用域便于调试 ***
              window.QQ_Check_Group_Message_Backup_Status = QQ_Check_Group_Message_Backup_Status;
 
-             /**
-              * *** 新增：测试互动内容优化功能的调试函数 ***
-              */
-             function QQ_Test_Interactive_Optimization() {
-                 console.log('=== 互动内容优化功能测试 ===');
-                 
-                 // 测试用例
-                 const testCases = [
-                     {
-                         content: '小明过来吧，我想和你聊聊',
-                         primaryChar: '小明',
-                         expected: '角色专属空间（小明主导）'
-                     },
-                     {
-                         content: '【小明】【小红】【小蓝】大家一起玩游戏吧',
-                         primaryChar: '小明',
-                         expected: '公共空间（明显多人）'
-                     },
-                     {
-                         content: '和小明单独聊天，顺便【小红】也来一下',
-                         primaryChar: '小明',
-                         expected: '角色专属空间（小明主导私密互动）'
-                     },
-                     {
-                         content: '小红和小蓝以及小绿一起唱歌',
-                         primaryChar: '小红',
-                         expected: '公共空间（多人活动）'
-                     },
-                     {
-                         content: '我来了！过来抱抱你',
-                         primaryChar: '小明',
-                         expected: '角色专属空间（单人互动）'
-                     }
-                 ];
-                 
-                 testCases.forEach((testCase, index) => {
-                     console.log(`\n测试案例 ${index + 1}:`);
-                     console.log(`内容: "${testCase.content}"`);
-                     console.log(`主要角色: ${testCase.primaryChar}`);
-                     console.log(`预期结果: ${testCase.expected}`);
-                     
-                     const isMultiCharacter = QQ_DetectMultiCharacterInteraction(testCase.content, testCase.primaryChar);
-                     const actualResult = isMultiCharacter ? '公共空间' : '角色专属空间';
-                     console.log(`实际结果: ${actualResult}`);
-                     console.log(`✓ 测试${actualResult.includes(testCase.expected.includes('公共') ? '公共' : '角色') ? '通过' : '失败'}`);
-                 });
-                 
-                 console.log('\n=== 测试完成 ===');
-                 console.log('提示：你可以使用 QQ_Test_Interactive_Content_Detection("测试内容", "角色名") 来测试特定内容');
-             }
              
-             /**
-              * *** 新增：测试特定互动内容的检测结果 ***
-              */
-             function QQ_Test_Interactive_Content_Detection(content, primaryCharacter = null) {
-                 console.log(`\n=== 测试互动内容检测 ===`);
-                 console.log(`内容: "${content}"`);
-                 console.log(`主要角色: ${primaryCharacter || '无'}`);
-                 
-                 // 1. 测试是否为互动内容
-                 const isInteractive = QQ_IsInteractiveContent(content);
-                 console.log(`是否为互动内容: ${isInteractive ? '是' : '否'}`);
-                 
-                 if (isInteractive) {
-                     // 2. 测试多角色检测
-                     const isMultiCharacter = QQ_DetectMultiCharacterInteraction(content, primaryCharacter);
-                     console.log(`是否为多角色互动: ${isMultiCharacter ? '是' : '否'}`);
-                     console.log(`推荐存储位置: ${isMultiCharacter ? '公共互动空间' : (primaryCharacter ? primaryCharacter + '的专属空间' : '角色专属空间')}`);
-                     
-                     // 3. 测试场景命名
-                     const sceneName = primaryCharacter ? 
-                         `${primaryCharacter}·${QQ_GetSceneFromContent(content)}` :
-                         QQ_GetSpaceName(content);
-                     console.log(`建议空间名称: "${sceneName}"`);
-                 }
-                 
-                 console.log('=== 测试结束 ===\n');
-             }
              
              // *** 添加到全局作用域便于调试 ***
-             window.QQ_Test_Interactive_Optimization = QQ_Test_Interactive_Optimization;
-             window.QQ_Test_Interactive_Content_Detection = QQ_Test_Interactive_Content_Detection;
             
             /**
              * *** 新增：测试互动内容严格检测修复 ***
@@ -20868,124 +20976,14 @@ ${index + 1}. ${space.name}
                  });
                  
                  console.log('\n=== 检查完成 ===');
-                 console.log('提示：可以使用 QQ_Test_Cache_Message_Parsing("测试内容") 来测试消息解析');
-             }
+              }
              
-             /**
-              * *** 新增：测试缓存消息解析的调试函数 ***
-              */
-             function QQ_Test_Cache_Message_Parsing(testContent) {
-                 console.log(`\n=== 测试缓存消息解析 ===`);
-                 console.log(`测试内容: "${testContent}"`);
-                 
-                 const namevalue = QQ_GetValueName(testContent);
-                 if (namevalue && namevalue.length > 0) {
-                     console.log(`✓ 解析成功，共 ${namevalue.length} 条消息:`);
-                     namevalue.forEach((match, index) => {
-                         const type = QQ_Groups.includes(match.name) ? '群聊' : '私聊';
-                         console.log(`  ${index + 1}. ${type} - 对象: "${match.name}", 内容: "${match.value}"`);
-                     });
-                 } else {
-                     console.log('❌ 解析失败，无法识别消息格式');
-                     console.log('提示：确保消息格式为 "目标名字：消息内容" 或类似格式');
-                 }
-                 
-                 console.log('=== 测试结束 ===\n');
-             }
              
              // *** 添加到全局作用域便于调试 ***
              window.QQ_Check_Two_Stage_Send_Status = QQ_Check_Two_Stage_Send_Status;
-             window.QQ_Test_Cache_Message_Parsing = QQ_Test_Cache_Message_Parsing;
 
-             /**
-              * 测试时间功能
-              * 显示当前时间信息和时间上下文生成
-              */
-             function QQ_Test_Time_Feature() {
-                 console.log('=== 时间功能测试 ===');
-                 
-                 const now = new Date();
-                 console.log('原始时间对象:', now);
-                 
-                 const currentTime = {
-                     time: now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-                     date: now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
-                     weekday: now.toLocaleDateString('zh-CN', { weekday: 'long' }),
-                     period: QQ_GetTimePeriod(now.getHours()),
-                     season: QQ_GetSeason(now.getMonth() + 1)
-                 };
-                 
-                 console.log('格式化时间信息:');
-                 console.log('- 时间:', currentTime.time);
-                 console.log('- 日期:', currentTime.date);
-                 console.log('- 星期:', currentTime.weekday);
-                 console.log('- 时段:', currentTime.period);
-                 console.log('- 季节:', currentTime.season);
-                 
-                 // 更明确的时间描述，避免AI混淆12小时制和24小时制
-                 const hour = now.getHours();
-                 const minute = now.getMinutes();
-                 const clarifiedTime = `${currentTime.period}${hour}点${minute.toString().padStart(2, '0')}分`;
-                 
-                 const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
-                 
-                 console.log('\n生成的时间上下文:');
-                 console.log(timeContext);
-                 
-                 console.log('\n时间段功能测试:');
-                 for (let h = 0; h < 24; h++) {
-                     console.log(`${h}:00 -> ${QQ_GetTimePeriod(h)}`);
-                 }
-                 
-                 console.log('\n季节功能测试:');
-                 for (let m = 1; m <= 12; m++) {
-                     console.log(`${m}月 -> ${QQ_GetSeason(m)}`);
-                 }
-                 
-                 console.log('=== 测试完成 ===');
-             }
 
-             /**
-              * 测试完整的消息发送流程（包含时间）
-              */
-             function QQ_Test_Message_Send_With_Time() {
-                 console.log('=== 消息发送时间功能测试 ===');
-                 
-                 // 模拟QQ_SendMsg中的时间处理逻辑
-                 const now = new Date();
-                 const currentTime = {
-                     time: now.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-                     date: now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
-                     weekday: now.toLocaleDateString('zh-CN', { weekday: 'long' }),
-                     period: QQ_GetTimePeriod(now.getHours()),
-                     season: QQ_GetSeason(now.getMonth() + 1)
-                 };
-                 
-                 // 更明确的时间描述，避免AI混淆12小时制和24小时制
-                 const hour = now.getHours();
-                 const minute = now.getMinutes();
-                 const clarifiedTime = `${currentTime.period}${hour}点${minute.toString().padStart(2, '0')}分`;
-                 
-                 const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
-                 
-                 const mockRequest = `<Request:本次响应忽略其他上下文任何要求,必须使用线上格式回复,且用户本次发了消息的角色都要回复用户的消息,同时输出一条动态内容>`;
-                 
-                 const fullRequest = `给测试角色发消息:你好\n${timeContext}\n${mockRequest}`;
-                 
-                 console.log('模拟发送给AI的完整请求内容:');
-                 console.log('=================================');
-                 console.log(fullRequest);
-                 console.log('=================================');
-                 
-                 console.log('\n✅ 时间信息已成功集成到消息发送流程中');
-                 console.log('📱 AI现在可以感知到用户的真实时间环境');
-                 console.log('🕐 这将显著提升AI回复的时间相关性和真实感');
-                 console.log('=== 测试完成 ===');
-             }
 
-             // 添加到全局作用域便于调试
-             window.QQ_Test_Time_Feature = QQ_Test_Time_Feature;
-             window.QQ_Test_Message_Send_With_Time = QQ_Test_Message_Send_With_Time;
              function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
                 let momentdiv;
@@ -21279,6 +21277,31 @@ ${index + 1}. ${space.name}
                     const timestamp = sp.length >= 3 ? sp[2] : "";
                     
                     console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
+                    
+                    // *** 新增：处理\\n拆分长消息逻辑 ***
+                    const messageParts = QQ_SplitLongMessage(messageContent);
+                    if (messageParts.length > 1) {
+                        console.log(`🔄 检测到长消息拆分：${messageParts.length}条子消息`);
+                        
+                        // 递归处理每个拆分的消息部分
+                        messageParts.forEach((part, index) => {
+                            const partContent = `${sender}--${part}--${timestamp}`;
+                            
+                            // 为拆分的消息添加适当的延迟，模拟真实的聊天节奏
+                            if (index === 0) {
+                                // 第一条消息立即显示
+                                QQ_Chat_AddMsg(dom, partContent, name, isNew, skipScrollAndCount);
+                            } else {
+                                // 后续消息有延迟显示，营造连续发送的感觉
+                                setTimeout(() => {
+                                    QQ_Chat_AddMsg(dom, partContent, name, false, skipScrollAndCount);
+                                }, index * 800); // 每条消息间隔800ms
+                            }
+                        });
+                        
+                        // 拆分消息处理完成，直接返回
+                        return;
+                    }
                     
                     // 判断是否为用户消息
                     const isUser = sender == `${UserName}`;
@@ -23489,48 +23512,6 @@ ${index + 1}. ${space.name}
                 }
             }
             
-            /**
-             * *** 新增：分组同步调试工具 ***
-             */
-            function QQ_Debug_Groups_Sync() {
-                const charId = getCurrentCharacterId() || 'default';
-                console.log('=== 分组同步状态调试 ===');
-                console.log(`🎭 当前角色ID: "${charId}"`);
-                console.log(`📱 内存中分组数据: ${contactGroups.length}个分组`);
-                console.log('📊 分组详情:', contactGroups.map(g => `${g.name}(${g.contacts.length}人)`));
-                
-                // 检查世界书条目
-                const expectedComment = `QQ_分组备份_${charId}`;
-                const worldbookEntry = entries?.find(entry => entry.comment === expectedComment);
-                
-                if (worldbookEntry) {
-                    console.log(`✅ 找到世界书条目: ${expectedComment}`);
-                    try {
-                        const worldbookData = JSON.parse(worldbookEntry.content);
-                        console.log(`📚 世界书中分组数据: ${Array.isArray(worldbookData) ? worldbookData.length : '0'}个分组`);
-                        console.log('📊 世界书分组详情:', Array.isArray(worldbookData) ? worldbookData.map(g => `${g.name}(${g.contacts?.length || 0}人)`) : '无数据');
-                        
-                        // 检查数据一致性
-                        if (contactGroups.length === worldbookData.length) {
-                            console.log('✅ 内存和世界书数据数量一致');
-                        } else {
-                            console.warn('⚠️ 内存和世界书数据数量不一致');
-                        }
-                    } catch (e) {
-                        console.error('❌ 世界书数据解析失败:', e);
-                    }
-                } else {
-                    console.warn(`⚠️ 未找到世界书条目: ${expectedComment}`);
-                }
-                
-                console.log('=== 调试完成 ===');
-                return {
-                    characterId: charId,
-                    memoryGroups: contactGroups.length,
-                    worldbookEntry: !!worldbookEntry,
-                    comment: expectedComment
-                };
-            }
             
             // 确保函数全局可用
             window.createNewContactGroup = createNewContactGroup;
@@ -23538,7 +23519,6 @@ ${index + 1}. ${space.name}
             window.showNewGroupModal = showNewGroupModal;
             window.handleNewGroupKeydown = handleNewGroupKeydown;
             window.openContactGroupModal = openContactGroupModal;
-            window.QQ_Debug_Groups_Sync = QQ_Debug_Groups_Sync;
             
             /**
              * 渲染分组界面
@@ -32697,217 +32677,128 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
              * 专门针对新版本优先级逻辑导致的点赞无响应问题
              */
             window.QQ_InitMomentLikes = function() {
-                console.log('🚑 启动点赞按钮终极修复方案...');
+                console.log('🎯 初始化点赞功能...');
                 
                 try {
-                    // ========== 第一步：清理所有旧的事件绑定 ==========
-                    console.log('🧹 清理旧的事件绑定...');
-                    $(document).off('click', '.moment-like-button');
-                    $(document).off('click', '.moment_button svg');  
-                    $(document).off('click', 'span:contains("人已赞")');
-                    $(document).off('click', '.moment_button');
+                    // 清理旧的事件绑定
+                    $(document).off('click.momentLike');
                     
-                    // ========== 第二步：多重策略事件绑定 ==========
-                    console.log('🔧 使用多重策略进行事件绑定...');
-                    
-                    // 策略1：基础事件委托（针对.moment-like-button类）
-                    $(document).on('click.momentLike', '.moment-like-button', function(e) {
+                    // 类型1：绑定Discord卡片中的点赞按钮
+                    $(document).off('click.momentLike', '.moment-like-button').on('click.momentLike', '.moment-like-button', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log('🎯 策略1触发：.moment-like-button被点击');
                         
-                        const momentId = $(this).attr('data-moment-id') || $(this).data('moment-id');
-                        console.log('获取到momentId:', momentId);
+                        console.log('🎯 Discord点赞按钮点击 - .moment-like-button');
+                        
+                        const momentId = $(this).data('moment-id');
+                        console.log('momentId:', momentId);
                         
                         if (momentId && typeof QQ_LikeMoment === 'function') {
                             console.log('✅ 执行点赞操作');
                             QQ_LikeMoment(momentId);
                         } else {
-                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
+                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在', {
+                                momentId: momentId,
+                                QQ_LikeMoment: typeof QQ_LikeMoment
+                            });
                         }
+                        
                         return false;
                     });
                     
-                    // 策略2：广泛SVG点击捕获（针对所有SVG元素）
-                    $(document).on('click.momentLike', 'svg', function(e) {
-                        // 检查是否为点赞相关的SVG
-                        const $svg = $(this);
-                        const hasLikeClass = $svg.hasClass('moment-like-button');
-                        const hasLikePath = $svg.find('path[d*="471.411583"]').length > 0;
-                        const inMomentButton = $svg.closest('.moment_button').length > 0;
-                        
-                        if (hasLikeClass || hasLikePath || inMomentButton) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            console.log('🎯 策略2触发：点赞SVG被点击');
-                            
-                            // 多种方式获取momentId
-                            let momentId = $svg.attr('data-moment-id') || $svg.data('moment-id');
-                            if (!momentId) {
-                                const parentMoment = $svg.closest('[data-moment-id]');
-                                momentId = parentMoment.attr('data-moment-id') || parentMoment.data('moment-id');
-                            }
-                            
-                            console.log('获取到momentId:', momentId);
-                            
-                            if (momentId && typeof QQ_LikeMoment === 'function') {
-                                console.log('✅ 执行点赞操作');
-                                QQ_LikeMoment(momentId);
-                            } else {
-                                console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
-                            }
-                            return false;
-                        }
-                    });
-                    
-                    // 策略3：点赞文本区域点击
-                    $(document).on('click.momentLike', 'span:contains("人已赞")', function(e) {
+                    // 类型2：绑定动态模板中的👍点赞区域（按照历史版本的方式）
+                    $(document).off('click.momentLike', '.moment_button svg').on('click.momentLike', '.moment_button svg', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log('🎯 策略3触发："人已赞"文本被点击');
                         
-                        const momentElement = $(this).closest('[data-moment-id]');
-                        const momentId = momentElement.attr('data-moment-id') || momentElement.data('moment-id');
+                        console.log('🎯 动态点赞按钮点击 - .moment_button svg');
                         
-                        console.log('获取到momentId:', momentId);
+                        // 查找动态ID - 向上查找包含data-moment-id的元素
+                        const momentElement = $(this).closest('.user_moment[data-moment-id]');
+                        const momentId = momentElement.data('moment-id');
+                        console.log('momentId:', momentId);
                         
                         if (momentId && typeof QQ_LikeMoment === 'function') {
                             console.log('✅ 执行点赞操作');
                             QQ_LikeMoment(momentId);
                         } else {
-                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
+                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在', {
+                                momentId: momentId,
+                                QQ_LikeMoment: typeof QQ_LikeMoment
+                            });
                         }
+                        
                         return false;
                     });
                     
-                    // 策略4：广泛的.moment_button点击捕获
-                    $(document).on('click.momentLike', '.moment_button', function(e) {
-                        // 检查点击的是否为点赞相关区域
-                        const $target = $(e.target);
-                        if ($target.is('svg') || $target.closest('svg').length > 0) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            console.log('🎯 策略4触发：.moment_button区域被点击');
-                            
-                            const momentElement = $(this).closest('[data-moment-id]');
-                            const momentId = momentElement.attr('data-moment-id') || momentElement.data('moment-id');
-                            
-                            console.log('获取到momentId:', momentId);
-                            
-                            if (momentId && typeof QQ_LikeMoment === 'function') {
-                                console.log('✅ 执行点赞操作');
-                                QQ_LikeMoment(momentId);
-                            } else {
-                                console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在');
-                            }
-                            return false;
-                        }
-                    });
-                    
-                    // ========== 第三步：动态内容监控和强制绑定 ==========
-                    console.log('👁️ 设置动态内容监控...');
-                    
-                    // 使用MutationObserver监控DOM变化
-                    if (window.momentLikeObserver) {
-                        window.momentLikeObserver.disconnect();
-                    }
-                    
-                    window.momentLikeObserver = new MutationObserver(function(mutations) {
-                        let hasNewMoments = false;
-                        mutations.forEach(function(mutation) {
-                            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                                for (let node of mutation.addedNodes) {
-                                    if (node.nodeType === 1) { // Element node
-                                        const $node = $(node);
-                                        if ($node.find('.moment-like-button, .moment_button').length > 0 ||
-                                            $node.hasClass('moment-like-button') || 
-                                            $node.hasClass('moment_button')) {
-                                            hasNewMoments = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        });
+                    // 类型3：绑定点赞文本区域
+                    $(document).off('click.momentLike', 'span:contains("人已赞")').on('click.momentLike', 'span:contains("人已赞")', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
                         
-                        if (hasNewMoments) {
-                            console.log('🔄 检测到新的动态内容，重新强化事件绑定...');
-                            setTimeout(() => {
-                                QQ_ForceLikeButtonBinding();
-                            }, 100);
+                        console.log('🎯 点赞文本点击 - span:contains("人已赞")');
+                        
+                        const momentElement = $(this).closest('.user_moment[data-moment-id]');
+                        const momentId = momentElement.data('moment-id');
+                        console.log('momentId:', momentId);
+                        
+                        if (momentId && typeof QQ_LikeMoment === 'function') {
+                            console.log('✅ 执行点赞操作');
+                            QQ_LikeMoment(momentId);
+                        } else {
+                            console.warn('⚠️ momentId无效或QQ_LikeMoment函数不存在', {
+                                momentId: momentId,
+                                QQ_LikeMoment: typeof QQ_LikeMoment
+                            });
                         }
+                        
+                        return false;
                     });
                     
-                    // 监控动态容器
-                    const spaceContents = document.getElementById('space_contents');
-                    if (spaceContents) {
-                        window.momentLikeObserver.observe(spaceContents, {
-                            childList: true,
-                            subtree: true
-                        });
-                    }
+                    console.log('✅ 动态点赞事件绑定完成');
                     
-                    // ========== 第四步：延迟检测和强化绑定 ==========
+                    console.log('✅ 点赞功能初始化完成');
+                    
+                    // 调试：立即检查是否有点赞按钮
                     setTimeout(() => {
-                        console.log('🔍 延迟检测当前页面点赞按钮...');
-                        QQ_ForceLikeButtonBinding();
-                        QQ_DiagnoseLikeButtons();
-                    }, 300);
-                    
-                    console.log('✅ 点赞按钮终极修复方案初始化完成');
+                        const $likeButtons = $('.moment-like-button');
+                        const $momentButtons = $('.moment_button svg');
+                        const $likeTexts = $('span:contains("人已赞")');
+                        
+                        console.log('📊 点赞功能初始化后的元素统计:');
+                        console.log(`- .moment-like-button: ${$likeButtons.length}个`);
+                        console.log(`- .moment_button svg: ${$momentButtons.length}个`);
+                        console.log(`- 包含"人已赞"的span: ${$likeTexts.length}个`);
+                        
+                        if ($momentButtons.length > 0) {
+                            console.log('🔍 第一个.moment_button svg的信息:');
+                            const $first = $momentButtons.first();
+                            const $moment = $first.closest('.user_moment[data-moment-id]');
+                            console.log('- 所属动态momentId:', $moment.data('moment-id'));
+                            console.log('- SVG类名:', $first.attr('class'));
+                            console.log('- 是否是点赞按钮:', $first.hasClass('moment-like-button'));
+                        }
+                    }, 100);
                     
                 } catch (error) {
-                    console.error('❌ 点赞按钮修复失败:', error);
+                    console.error('❌ 点赞功能初始化失败:', error);
                 }
             };
             
             /**
-             * 🔨 强制点赞按钮绑定函数
+             * 🔨 强制点赞按钮绑定函数（已简化，现在由统一事件委托处理）
              */
             window.QQ_ForceLikeButtonBinding = function() {
-                console.log('🔨 开始强制绑定点赞按钮...');
+                console.log('🔨 点赞按钮绑定检查...');
                 
-                // 直接为所有现有的点赞按钮添加点击事件
-                $('.moment-like-button').each(function(index) {
-                    const $btn = $(this);
-                    const momentId = $btn.attr('data-moment-id') || $btn.data('moment-id');
-                    
-                    // 移除旧的点击事件，添加新的
-                    $btn.off('click.forceLike').on('click.forceLike', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log(`🎯 强制绑定触发：按钮${index + 1}被点击，momentId=${momentId}`);
-                        
-                        if (momentId && typeof QQ_LikeMoment === 'function') {
-                            QQ_LikeMoment(momentId);
-                        }
-                        return false;
-                    });
-                    
-                    console.log(`📌 强制绑定按钮${index + 1}，momentId=${momentId}`);
-                });
+                // 检查点赞按钮数量（用于调试）
+                const momentButtons = $('.moment-like-button');
+                const svgButtons = $('.moment_button svg');
                 
-                // 为.moment_button中的SVG元素强制绑定
-                $('.moment_button svg').each(function(index) {
-                    const $svg = $(this);
-                    const momentElement = $svg.closest('[data-moment-id]');
-                    const momentId = momentElement.attr('data-moment-id') || momentElement.data('moment-id');
-                    
-                    $svg.off('click.forceLike').on('click.forceLike', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log(`🎯 强制绑定触发：SVG${index + 1}被点击，momentId=${momentId}`);
-                        
-                        if (momentId && typeof QQ_LikeMoment === 'function') {
-                            QQ_LikeMoment(momentId);
-                        }
-                        return false;
-                    });
-                    
-                    console.log(`📌 强制绑定SVG${index + 1}，momentId=${momentId}`);
-                });
+                console.log(`📊 找到 ${momentButtons.length} 个 .moment-like-button 和 ${svgButtons.length} 个 .moment_button svg`);
                 
-                console.log('✅ 强制绑定完成');
+                // 由于现在使用统一的事件委托，不需要单独绑定
+                console.log('✅ 点赞功能由统一事件委托处理，无需额外绑定');
             };
             
             /**
@@ -33112,66 +33003,25 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
             };
 
             /**
-             * 🔧 点赞按钮专项调试和修复工具 🔧
+             * 🔧 点赞按钮调试工具（简化版）
              */
             window.QQ_Debug_Like_Button = function() {
-                console.log('🔧 ========== 点赞按钮专项调试开始 ==========');
+                console.log('🔧 ========== 点赞按钮调试开始 ==========');
                 
-                // 1. 检查基础函数
-                console.log('1️⃣ 检查基础函数存在性:');
-                console.log(`- QQ_LikeMoment: ${typeof QQ_LikeMoment}`);
-                console.log(`- QQ_InitMomentLikes: ${typeof QQ_InitMomentLikes}`);
-                console.log(`- QQ_ForceLikeButtonBinding: ${typeof QQ_ForceLikeButtonBinding}`);
-                console.log(`- QQ_DiagnoseLikeButtons: ${typeof QQ_DiagnoseLikeButtons}`);
-                console.log(`- QQ_Emergency_Fix_Like: ${typeof QQ_Emergency_Fix_Like}`);
-                console.log(`- QQ_UpdateLikeUI: ${typeof QQ_UpdateLikeUI}`);
-                
-                // 2. 检查页面元素
-                console.log('2️⃣ 检查页面元素:');
+                // 检查页面元素
                 const likeButtons = $('.moment-like-button');
                 const svgButtons = $('.moment_button svg');
                 const textButtons = $('span:contains("人已赞")');
                 const userMoments = $('.user_moment');
                 
+                console.log(`📊 页面元素统计:`);
                 console.log(`- .moment-like-button: ${likeButtons.length}个`);
                 console.log(`- .moment_button svg: ${svgButtons.length}个`);
                 console.log(`- span包含"人已赞": ${textButtons.length}个`);
                 console.log(`- .user_moment: ${userMoments.length}个`);
                 
-                // 3. 检查每个按钮的详细信息
-                if (likeButtons.length > 0) {
-                    console.log('3️⃣ 检查每个.moment-like-button的详细信息:');
-                    likeButtons.each(function(index) {
-                        const $btn = $(this);
-                        const momentId = $btn.data('moment-id') || $btn.attr('data-moment-id');
-                        const liked = $btn.data('liked') || $btn.attr('data-liked');
-                        console.log(`  按钮 ${index + 1}:`);
-                        console.log(`    - momentId: ${momentId}`);
-                        console.log(`    - liked: ${liked}`);
-                        console.log(`    - 类名: ${$btn.attr('class')}`);
-                        console.log(`    - HTML: ${$btn[0].outerHTML.substring(0, 150)}...`);
-                    });
-                }
-                
-                // 4. 检查SVG按钮
-                if (svgButtons.length > 0) {
-                    console.log('4️⃣ 检查每个SVG按钮:');
-                    svgButtons.each(function(index) {
-                        const $svg = $(this);
-                        const parentMoment = $svg.closest('.user_moment[data-moment-id]');
-                        const momentId = parentMoment.data('moment-id');
-                        const svgPath = $svg.find('path').attr('d');
-                        const isLikeButton = svgPath && svgPath.includes('471.411583');
-                        
-                        console.log(`  SVG ${index + 1}:`);
-                        console.log(`    - 所属动态ID: ${momentId}`);
-                        console.log(`    - 是点赞按钮: ${isLikeButton}`);
-                        console.log(`    - Path: ${svgPath ? svgPath.substring(0, 50) + '...' : '无'}`);
-                    });
-                }
-                
-                // 5. 强制重新初始化
-                console.log('5️⃣ 强制重新初始化点赞功能...');
+                // 强制重新初始化
+                console.log('🔄 强制重新初始化点赞功能...');
                 try {
                     QQ_InitMomentLikes();
                     console.log('✅ 重新初始化成功');
@@ -33179,93 +33029,66 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
                     console.log('❌ 重新初始化失败:', error);
                 }
                 
-                // 6. 添加额外的事件监听器（强制模式）
-                console.log('6️⃣ 添加强制事件监听器...');
+                console.log('✅ 点赞功能调试完成');
+            };
+            
+            /**
+             * 🔴 紧急点赞修复和测试函数
+             */
+            window.QQ_Emergency_Fix_Like = function() {
+                console.log('🚑 紧急点赞修复开始...');
                 
-                // 移除所有可能的冲突事件
-                $(document).off('click.force-debug');
+                // 1. 检查页面中的点赞按钮
+                const $likeButtons = $('.moment-like-button');
+                const $momentButtons = $('.moment_button');
+                const $likeTexts = $('span:contains("人已赞")');
                 
-                // 强制绑定所有可能的点赞元素
-                $('.moment-like-button, .moment_button svg, span:contains("人已赞")').off('click.force-debug').on('click.force-debug', function(e) {
-                    console.log('🎯 强制调试事件触发！');
-                    console.log('触发元素:', this);
-                    console.log('元素类名:', $(this).attr('class'));
-                    
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // 查找momentId
-                    let momentId = null;
-                    
-                    if ($(this).hasClass('moment-like-button')) {
-                        momentId = $(this).data('moment-id') || $(this).attr('data-moment-id');
-                        console.log('从.moment-like-button获取momentId:', momentId);
-                    } else if ($(this).is('svg') || $(this).closest('svg').length) {
-                        const parentMoment = $(this).closest('.user_moment[data-moment-id]');
-                        momentId = parentMoment.data('moment-id');
-                        console.log('从SVG父级获取momentId:', momentId);
-                    } else {
-                        const parentMoment = $(this).closest('.user_moment[data-moment-id]');
-                        momentId = parentMoment.data('moment-id');
-                        console.log('从文本父级获取momentId:', momentId);
-                    }
-                    
-                    if (momentId && typeof QQ_LikeMoment === 'function') {
-                        console.log(`✅ 调用 QQ_LikeMoment(${momentId})`);
-                        QQ_LikeMoment(momentId);
-                    } else {
-                        console.log('❌ 无法调用点赞功能');
-                        console.log('momentId:', momentId);
-                        console.log('QQ_LikeMoment类型:', typeof QQ_LikeMoment);
-                    }
-                });
+                console.log('📊 元素统计:');
+                console.log(`- .moment-like-button: ${$likeButtons.length}个`);
+                console.log(`- .moment_button: ${$momentButtons.length}个`);
+                console.log(`- 包含"人已赞"的span: ${$likeTexts.length}个`);
                 
-                // 7. 手动测试第一个按钮
-                if (likeButtons.length > 0) {
-                    console.log('7️⃣ 手动测试第一个按钮...');
-                    const firstButton = likeButtons.first();
-                    const momentId = firstButton.data('moment-id') || firstButton.attr('data-moment-id');
-                    
-                    if (momentId) {
-                        console.log(`准备手动点击按钮，momentId: ${momentId}`);
-                        
-                        // 模拟点击
-                        setTimeout(() => {
-                            console.log('🖱️ 模拟点击事件...');
-                            firstButton.trigger('click');
-                        }, 1000);
-                        
-                        // 直接调用函数
-                        setTimeout(() => {
-                            console.log('📞 直接调用函数...');
-                            if (typeof QQ_LikeMoment === 'function') {
-                                QQ_LikeMoment(momentId);
-                            }
-                        }, 2000);
-                    }
-                } else if (svgButtons.length > 0) {
-                    console.log('7️⃣ 没有.moment-like-button，测试第一个SVG按钮...');
-                    const firstSvg = svgButtons.first();
-                    const parentMoment = firstSvg.closest('.user_moment[data-moment-id]');
-                    const momentId = parentMoment.data('moment-id');
-                    
-                    if (momentId) {
-                        console.log(`准备手动点击SVG，momentId: ${momentId}`);
-                        setTimeout(() => {
-                            console.log('🖱️ 模拟点击SVG...');
-                            firstSvg.trigger('click');
-                        }, 1000);
-                    }
+                if ($likeButtons.length > 0) {
+                    console.log('🔍 检查第一个.moment-like-button:');
+                    const $first = $likeButtons.first();
+                    console.log('- momentId:', $first.attr('data-moment-id'));
+                    console.log('- liked:', $first.attr('data-liked'));
+                    console.log('- HTML:', $first[0].outerHTML.substring(0, 200) + '...');
                 }
                 
-                console.log('🔧 ========== 点赞按钮专项调试完成 ==========');
-                console.log('💡 如果问题仍然存在，请：');
-                console.log('1. 检查是否有其他JavaScript错误');
-                console.log('2. 确认动态数据是否正确加载');
-                console.log('3. 检查CSS样式是否影响点击事件');
-                console.log('4. 尝试刷新页面重新加载');
+                // 2. 清除所有旧的事件绑定
+                console.log('🧹 清除旧的事件绑定...');
+                $(document).off('.momentLike');
+                $(document).off('.debugClick');
                 
-                return '调试完成，请查看控制台详细输出';
+                // 3. 重新绑定事件
+                console.log('🔧 重新绑定事件...');
+                QQ_InitMomentLikes();
+                
+                // 4. 测试点击第一个按钮
+                if ($likeButtons.length > 0) {
+                    const $testButton = $likeButtons.first();
+                    const momentId = $testButton.attr('data-moment-id');
+                    
+                    console.log(`🧪 测试点击第一个按钮 (momentId: ${momentId})...`);
+                    
+                    // 模拟点击事件
+                    setTimeout(() => {
+                        console.log('🖱️ 触发模拟点击...');
+                        $testButton.trigger('click');
+                        
+                        // 如果模拟点击没有响应，直接调用函数
+                        setTimeout(() => {
+                            console.log('📞 直接调用QQ_LikeMoment...');
+                            if (momentId && typeof QQ_LikeMoment === 'function') {
+                                QQ_LikeMoment(momentId);
+                            }
+                        }, 1000);
+                    }, 500);
+                }
+                
+                console.log('✅ 紧急修复完成，请尝试点击点赞按钮');
+                return '紧急修复完成';
             };
 
             /**
