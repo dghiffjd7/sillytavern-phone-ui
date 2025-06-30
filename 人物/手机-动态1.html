@@ -7496,6 +7496,19 @@
             async function QQ_ProcessValidExtraction(result) {
                 console.log("🎯 开始智能提取有效信息");
                 
+                // 检查是否为混合格式响应（群聊+私聊+互动内容混合）
+                if (QQ_DetectMixedFormatResponse(result)) {
+                    console.log("🔄 检测到混合格式响应，启动混合格式处理器");
+                    const mixedResult = await QQ_ProcessMixedFormatResponse(result);
+                    if (mixedResult.success) {
+                        console.log("✅ 混合格式处理成功");
+                        return { success: true };
+                    } else {
+                        console.log("⚠️ 混合格式处理失败，继续常规提取流程");
+                    }
+                }
+                
+                // 常规智能提取流程
                 const extractedInfo = QQ_ExtractValidInfo(result);
                 if (extractedInfo.hasValidInfo) {
                     console.log("✅ 智能提取成功，转换为标准格式");
@@ -7582,6 +7595,12 @@
              * *** MSG标签自动补全 ***
              */
             function QQ_AutoCompleteMsgTags(content) {
+                // 如果内容包含moment_start，说明是动态内容，应该保持原格式不变
+                if (content.includes('moment_start')) {
+                    console.log("🔧 检测到moment内容，跳过msg标签自动补全");
+                    return content;
+                }
+                
                 if (content.indexOf("msg_start") < 0) {
                     let start = content.match(/<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/);
                     if (start) {
@@ -7596,10 +7615,8 @@
                     if (endMatches.length > 0) {
                         const lastEnd = endMatches[endMatches.length - 1][0];
                         content = content.replace(lastEnd, `${lastEnd}\nmsg_end`);
-                    } else if (!content.includes('moment_start')) {
-                        content = `${content}\nmsg_end`;
                     } else {
-                        content = content.replace('moment_start', 'msg_end\nmoment_start');
+                        content = `${content}\nmsg_end`;
                     }
                 }
                 
@@ -17109,6 +17126,43 @@ ${index + 1}. ${space.name}
                         }
                     }
                 }
+                
+                // 添加私聊消息（新格式：<私聊:角色名>）
+                matches = content.matchAll(
+                    /<私聊[:：](.+?)>([\s\S]+?)<\/私聊[:：](.+?)>/g,
+                );
+                if (matches) {
+                    for (const match of matches) {
+                        if (match[1] != match[3]) {
+                            console.warn("私聊标签闭合异常:", match[1], "!=", match[3]);
+                        }
+                        // 使用当前用户名构建聊天键
+                        const currentUser = QQ_GetUserName() || "用户";
+                        const key = `${currentUser}和${match[1]}的聊天`;
+                        
+                        if (!json.私聊[key]) {
+                            json.私聊[key] = [];
+                        }
+                        
+                        for (let line of match[2].split(/\r?\n/)) {
+                            line = line.trim();
+                            if (line) {
+                                let m = line.match(
+                                    /(.+?)\s*(?:--|:|：)\s*(.+)/,
+                                );
+                                if (!m) {
+                                    continue;
+                                }
+                                let message = m[2];
+                                if (message.split("--").length >= 2) {
+                                    message = message.split("--")[0];
+                                }
+                                json.私聊[key].push(`${m[1]}--${m[2]}`);
+                            }
+                        }
+                    }
+                }
+                
                 // 添加群聊消息
                 matches = content.matchAll(
                     /<群聊[:：](.+?)>([\s\S]+?)<\/群聊[:：](.+?)>/g,
@@ -17172,12 +17226,331 @@ ${index + 1}. ${space.name}
                     return "";
                 }
             }
+            /**
+             * 检测是否为混合格式响应（群聊+私聊+互动内容混合）
+             * @param {string} response - AI的完整回复内容
+             * @returns {boolean} 是否为混合格式
+             */
+            function QQ_DetectMixedFormatResponse(response) {
+                // 检测基本的MiPhone_JSON格式
+                const hasMiPhoneJSON = response.includes('MiPhone_JSON_START');
+                if (!hasMiPhoneJSON) {
+                    return false;
+                }
+                
+                // 检测是否有多个JSON块或单个JSON块与普通文本混合
+                const jsonStartCount = (response.match(/MiPhone_JSON_START/g) || []).length;
+                const jsonEndCount = (response.match(/MiPhone_JSON_END/g) || []).length;
+                
+                // 如果有多个JSON块，很可能是混合格式
+                if (jsonStartCount > 1) {
+                    console.log(`🔍 检测到${jsonStartCount}个MiPhone_JSON块，判定为混合格式`);
+                    return true;
+                }
+                
+                // 如果只有一个JSON块，检查是否与普通文本混合
+                if (jsonStartCount === 1 && jsonEndCount === 1) {
+                    const beforeJSON = response.split('MiPhone_JSON_START')[0].trim();
+                    const afterJSON = response.split('MiPhone_JSON_END')[1];
+                    
+                    // 如果JSON块前后有明显的文本内容，判定为混合格式
+                    if ((beforeJSON && beforeJSON.length > 20) || 
+                        (afterJSON && afterJSON.trim().length > 20)) {
+                        console.log('🔍 检测到JSON块与普通文本混合，判定为混合格式');
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+
+            /**
+             * *** 重新设计：混合格式响应处理器 ***
+             * 专门处理直接夹杂互动内容的群聊+私聊格式（无标记）
+             * @param {string} response - AI的完整回复内容
+             */
+            async function QQ_ProcessMixedFormatResponse(response) {
+                console.log('🔄 开始处理无标记混合格式响应...');
+                
+                try {
+                    // *** 步骤1：检测是否为混合格式 ***
+                    const hasMiPhoneJSON = response.includes('MiPhone_JSON_START');
+                    const hasMultipleJSONBlocks = (response.match(/MiPhone_JSON_START/g) || []).length > 1;
+                    
+                    if (!hasMiPhoneJSON) {
+                        return { success: false, error: '未找到MiPhone_JSON格式' };
+                    }
+                    
+                    console.log(`📊 格式检测: JSON块 ${hasMultipleJSONBlocks ? '多个' : '单个'}`);
+                    
+                    // *** 步骤2：按照JSON块分段，提取夹杂的互动内容 ***
+                    const segments = response.split(/MiPhone_JSON_START|MiPhone_JSON_END/);
+                    const jsonBlocks = [];
+                    const interactiveTexts = [];
+                    
+                    for (let i = 0; i < segments.length; i++) {
+                        const segment = segments[i].trim();
+                        if (!segment) continue;
+                        
+                        // 检查是否为JSON格式段落
+                        if (segment.includes('msg_start') && segment.includes('msg_end')) {
+                            // 提取msg_start到msg_end之间的内容
+                            const msgMatch = segment.match(/msg_start([\s\S]*?)msg_end/);
+                            if (msgMatch) {
+                                jsonBlocks.push(msgMatch[1].trim());
+                                console.log(`📦 提取JSON块 ${jsonBlocks.length}: ${msgMatch[1].substring(0, 100)}...`);
+                            }
+                        } else if (segment.length > 10) {
+                            // 可能的互动内容：不是JSON格式但有一定长度的文本
+                            const cleanText = segment.replace(/^\s*msg_start\s*|\s*msg_end\s*$/g, '').trim();
+                            if (cleanText.length > 5) {
+                                interactiveTexts.push(cleanText);
+                                console.log(`🎭 提取互动内容 ${interactiveTexts.length}: ${cleanText.substring(0, 100)}...`);
+                            }
+                        }
+                    }
+                    
+                    console.log(`📈 解析结果: JSON块 ${jsonBlocks.length}个, 互动文本 ${interactiveTexts.length}个`);
+                    
+                    // *** 步骤3：处理所有JSON块（聊天数据） ***
+                    const allChatData = { 私聊: {}, 群聊: {} };
+                    let successfulParses = 0;
+                    
+                    for (let i = 0; i < jsonBlocks.length; i++) {
+                        const blockContent = jsonBlocks[i];
+                        console.log(`处理JSON块 ${i + 1}/${jsonBlocks.length}...`);
+                        
+                        try {
+                            const parsedJson = JsonYamlParse(blockContent);
+                            if (parsedJson) {
+                                successfulParses++;
+                                
+                                // 合并群聊数据
+                                if (parsedJson.群聊) {
+                                    for (const [groupName, groupData] of Object.entries(parsedJson.群聊)) {
+                                        if (!allChatData.群聊[groupName]) {
+                                            allChatData.群聊[groupName] = { members: [], msgs: [] };
+                                        }
+                                        // 合并成员列表
+                                        if (groupData.members) {
+                                            allChatData.群聊[groupName].members = [...new Set([
+                                                ...allChatData.群聊[groupName].members,
+                                                ...groupData.members
+                                            ])];
+                                        }
+                                        // 合并消息列表
+                                        if (groupData.msgs) {
+                                            allChatData.群聊[groupName].msgs.push(...groupData.msgs);
+                                        }
+                                    }
+                                }
+                                
+                                // 合并私聊数据
+                                if (parsedJson.私聊) {
+                                    for (const [chatKey, messages] of Object.entries(parsedJson.私聊)) {
+                                        if (!allChatData.私聊[chatKey]) {
+                                            allChatData.私聊[chatKey] = [];
+                                        }
+                                        allChatData.私聊[chatKey].push(...messages);
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            console.error(`解析JSON块 ${i + 1} 失败:`, error);
+                        }
+                    }
+                    
+                    console.log(`✅ 成功解析 ${successfulParses}/${jsonBlocks.length} 个JSON块`);
+                    
+                    // *** 步骤4：处理聊天数据 ***
+                    let chatDataProcessed = false;
+                    if (Object.keys(allChatData.群聊).length > 0 || Object.keys(allChatData.私聊).length > 0) {
+                        console.log('📝 更新聊天数据...');
+                        const cleanedData = QQ_Msg_DeletOld(allChatData);
+                        await QQ_Msg_Parse(JSON.stringify(cleanedData));
+                        chatDataProcessed = true;
+                        
+                        console.log(`📊 聊天数据更新: 群聊 ${Object.keys(allChatData.群聊).length}个, 私聊 ${Object.keys(allChatData.私聊).length}个`);
+                    }
+                    
+                    // *** 步骤5：处理互动内容（创建动态） ***
+                    let interactiveContentProcessed = false;
+                    if (interactiveTexts.length > 0) {
+                        console.log('🎪 处理互动内容...');
+                        
+                        for (let i = 0; i < interactiveTexts.length; i++) {
+                            const interactiveText = interactiveTexts[i];
+                            
+                            // 处理并美化互动内容
+                            const processedContent = QQ_ProcessInteractiveMarkerContent(interactiveText);
+                            
+                            // 创建互动动态条目
+                            const interactiveMoment = {
+                                id: `mixed_interactive_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
+                                userName: charcardname || '角色',
+                                message: processedContent.summary,
+                                timestamp: new Date().toISOString(),
+                                timestampText: QQ_GetTime(),
+                                additionalInfo: processedContent.details,
+                                randomPhone: '',
+                                imgcontent: processedContent.hasImage ? processedContent.imageContent : '',
+                                likes: {
+                                    count: 0,
+                                    userLiked: false,
+                                    likedBy: [],
+                                    lastLikeTime: null
+                                },
+                                comments: [],
+                                interactiveContent: interactiveText,  // 保存原始互动内容
+                                isInteractiveContent: true,          // 标记为互动内容
+                                isMixedFormat: true                  // 标记为混合格式来源
+                            };
+                            
+                            // 添加到动态数据
+                            if (!window.QQ_MomentsData) {
+                                window.QQ_MomentsData = [];
+                            }
+                            window.QQ_MomentsData.unshift(interactiveMoment);
+                            
+                            console.log(`✅ 互动内容 ${i + 1} 已添加到动态空间: ${interactiveMoment.id}`);
+                        }
+                        
+                        interactiveContentProcessed = true;
+                        
+                        // 保存动态数据并刷新界面
+                        if (typeof QQ_SafeSaveMomentsData === 'function') {
+                            await QQ_SafeSaveMomentsData('混合格式互动内容');
+                        }
+                        
+                        // 如果当前在动态界面，刷新显示
+                        if ($('#space_contents').length > 0 && $('#space_contents').is(':visible')) {
+                            if (typeof QQ_Render_Moments === 'function') {
+                                await QQ_Render_Moments();
+                            }
+                        }
+                    }
+                    
+                    console.log('✅ 混合格式响应处理完成');
+                    
+                    return {
+                        success: true,
+                        chatDataProcessed: chatDataProcessed,
+                        interactiveContentProcessed: interactiveContentProcessed,
+                        jsonBlocksProcessed: successfulParses,
+                        interactiveTextsFound: interactiveTexts.length,
+                        groupChatsUpdated: Object.keys(allChatData.群聊).length,
+                        privateChatsUpdated: Object.keys(allChatData.私聊).length
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ 混合格式响应处理失败:', error);
+                    return {
+                        success: false,
+                        error: error.message
+                    };
+                }
+            }
+
+            /**
+             * *** 新增：处理互动内容标记 ***
+             * 将原始互动内容标记转换为适合动态显示的格式
+             * @param {string} markerContent - 原始互动标记内容
+             * @returns {object} 处理后的内容对象
+             */
+            function QQ_ProcessInteractiveMarkerContent(markerContent) {
+                const result = {
+                    summary: '发起了互动场景',
+                    details: '',
+                    hasImage: false,
+                    imageContent: ''
+                };
+                
+                try {
+                    // 清理内容，移除"互动内容"标记
+                    let cleanContent = markerContent.replace(/^\s*互动内容\s*/gm, '').trim();
+                    
+                    // 检测图片内容
+                    const imageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+                    const imageMatches = [...cleanContent.matchAll(imageRegex)];
+                    
+                    if (imageMatches.length > 0) {
+                        result.hasImage = true;
+                        result.imageContent = imageMatches[0][0]; // 取第一张图片
+                        result.summary = '分享了互动场景图片';
+                        
+                        // 移除图片标签，留下文字描述
+                        cleanContent = cleanContent.replace(imageRegex, '').trim();
+                    }
+                    
+                    // 检测特殊格式内容
+                    if (cleanContent.includes('[图片-') || cleanContent.includes('[img-')) {
+                        result.summary = '分享了互动场景图片';
+                    } else if (cleanContent.includes('*') && cleanContent.includes('*')) {
+                        result.summary = '发起了动作互动';
+                    } else if (cleanContent.includes('【') && cleanContent.includes('】')) {
+                        result.summary = '表达了情感互动';
+                    } else if (cleanContent.length > 50) {
+                        result.summary = '发起了详细互动场景';
+                    }
+                    
+                    // 处理详细内容
+                    if (cleanContent.length > 0) {
+                        // 限制详细内容长度，避免过长
+                        if (cleanContent.length > 200) {
+                            result.details = cleanContent.substring(0, 200) + '...';
+                        } else {
+                            result.details = cleanContent;
+                        }
+                        
+                        // 如果有详细内容，调整摘要
+                        if (result.details.includes('挑战') || result.details.includes('战斗')) {
+                            result.summary = '发起了挑战互动';
+                        } else if (result.details.includes('温柔') || result.details.includes('亲密')) {
+                            result.summary = '发起了温馨互动';
+                        } else if (result.details.includes('指挥官') || result.details.includes('大人')) {
+                            result.summary = '与指挥官互动';
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('处理互动标记内容失败:', error);
+                    result.summary = '发起了互动内容';
+                    result.details = '内容解析出错，请查看原始数据';
+                }
+                
+                return result;
+            }
+
             async function MiPhone_Merge() {
                 let messages = await ST.GetCurrentMessages();
                 messages = messages.replace(
                     /<(?:think|thinking)>[\s\S]+?<\/(?:think|thinking)>/gi,
                     "",
                 );
+                
+                // *** 新增：检测混合格式并优先处理 ***
+                if (messages.includes('MiPhone_JSON_START') && messages.includes('互动内容')) {
+                    console.log('🔍 检测到混合格式响应，使用增强处理器...');
+                    const result = await QQ_ProcessMixedFormatResponse(messages);
+                    
+                    if (result.success) {
+                        console.log(`✅ 混合格式处理成功: 聊天块 ${result.blocksProcessed}, 互动内容 ${result.interactiveMarkers}`);
+                        triggerSlash("/echo 混合格式响应处理完成");
+                        if (result.chatDataProcessed && result.interactiveContentProcessed) {
+                            triggerSlash("/echo 聊天内容已更新，互动内容已添加到动态空间");
+                        } else if (result.chatDataProcessed) {
+                            triggerSlash("/echo 聊天内容已更新");
+                        } else if (result.interactiveContentProcessed) {
+                            triggerSlash("/echo 互动内容已添加到动态空间");
+                        }
+                        return;
+                    } else {
+                        console.error('❌ 混合格式处理失败，回退到标准处理');
+                        triggerSlash("/echo 混合格式处理失败，使用标准处理");
+                    }
+                }
+                
+                // *** 原有的标准处理逻辑 ***
                 const matches = messages.matchAll(
                     /MiPhone_start([\s\S]+?)MiPhone_end/g,
                 );
