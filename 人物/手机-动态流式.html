@@ -7430,11 +7430,15 @@
                 }
                 
                 result = System_TagCompletion(result);
+                
+                // *** 阶段三：提取并处理主动消息（在清理之前，避免被误删） ***
+                await QQ_ExtractProactiveMessages(result);
+                
+                // *** 清理主动消息格式，避免被当作普通消息显示 ***
+                result = QQ_CleanProactiveMessageFormats(result);
+                
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
-
-                // *** 阶段三：提取并处理主动消息（在所有其他处理之前） ***
-                await QQ_ExtractProactiveMessages(result);
                 
                 // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
                 console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
@@ -19675,6 +19679,69 @@ ${index + 1}. ${space.name}
             }
             
             /**
+             * *** 阶段一：流式显示已格式化的完整消息 ***
+             * 专门用于处理格式为"发送者--内容--时间"的完整消息
+             * @param {HTMLElement} chatContainer - 聊天容器
+             * @param {Array} fullMessages - 完整消息数组
+             * @param {string} chatName - 聊天名称
+             * @param {boolean} isNew - 是否为新消息
+             * @param {boolean} skipScrollAndCount - 是否跳过滚动和计数
+             */
+            function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
+                console.log(`🌊 开始流式显示 ${fullMessages.length} 条完整消息 - 聊天: ${chatName}`);
+                
+                let currentIndex = 0;
+                let currentTypingIndicator = null;
+                
+                function displayNextMessage() {
+                    // 移除当前的输入指示器
+                    if (currentTypingIndicator) {
+                        QQ_HideTypingIndicator(currentTypingIndicator);
+                        currentTypingIndicator = null;
+                    }
+                    
+                    if (currentIndex >= fullMessages.length) {
+                        console.log(`✅ 流式显示完成 - 共显示 ${fullMessages.length} 条消息`);
+                        return;
+                    }
+                    
+                    const fullMessage = fullMessages[currentIndex];
+                    
+                    // 解析消息格式：发送者--内容--时间
+                    const messageParts = fullMessage.split('--');
+                    const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
+                    
+                    // 显示当前消息
+                    QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount);
+                    console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
+                    
+                    currentIndex++;
+                    
+                    // 如果还有更多消息，显示输入指示器并设置下一次显示
+                    if (currentIndex < fullMessages.length) {
+                        // 获取下一条消息的发送者
+                        const nextMessage = fullMessages[currentIndex];
+                        const nextMessageParts = nextMessage.split('--');
+                        const nextSender = nextMessageParts.length >= 1 ? nextMessageParts[0] : 'Unknown';
+                        
+                        // 短暂延迟后显示输入指示器
+                        setTimeout(() => {
+                            currentTypingIndicator = QQ_ShowTypingIndicator(chatContainer, nextSender);
+                        }, 200);
+                        
+                        // 生成随机延迟时间
+                        const delay = QQ_GenerateRandomDelay(1000, 0.5); // 500ms-1500ms
+                        
+                        console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示`);
+                        setTimeout(displayNextMessage, delay + 800); // 额外800ms用于输入动画
+                    }
+                }
+                
+                // 开始显示第一条消息
+                displayNextMessage();
+            }
+            
+            /**
              * *** 新增：拆分过长的单条消息 ***
              * 智能拆分超长消息，尽量在合适的位置断开
              * @param {string} message - 过长的消息
@@ -20066,6 +20133,11 @@ ${index + 1}. ${space.name}
                         let NewMsgCount = 0;
                         let LastTime = "";
                         let LastMsg = "";
+                        
+                        // *** 阶段一：收集新消息用于流式显示 ***
+                        const newMessages = [];
+                        const existingMessages = [];
+                        
                         for (let msg of json.私聊[str]) {
                             // *** 新增：清理私聊消息内容 ***
                             const parts = msg.split("--");
@@ -20102,7 +20174,14 @@ ${index + 1}. ${space.name}
                             
                             // 检查是否为新消息（不在现有消息列表中）
                             const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            
+                            if (isNewMsg) {
+                                newMessages.push(msg);
+                                NewMsgCount++;
+                            } else {
+                                existingMessages.push(msg);
+                            }
+                            
                             QQ_msgjson.私聊[str].push(msg);
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
@@ -20123,6 +20202,25 @@ ${index + 1}. ${space.name}
                                 LastTime = sp[2];
                             }
                             LastMsg = sp[1];
+                        }
+                        
+                        // *** 阶段一：使用流式显示处理新消息 ***
+                        if (newMessages.length > 0) {
+                            console.log(`🌊 私聊${name}检测到${newMessages.length}条新消息，启动流式显示`);
+                            
+                            // 先显示已有消息（立即显示，无延迟）
+                            for (let msg of existingMessages) {
+                                QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
+                            }
+                            
+                            // 使用流式显示新消息（传入完整消息，不需要额外处理）
+                            QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
+                        } else {
+                            // 没有新消息，正常显示所有消息
+                            for (let msg of json.私聊[str]) {
+                                const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
+                                QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            }
                         }
                         
                         // *** 新的未读消息计算逻辑：使用QQ_CalculateUnreadCount ***
@@ -20382,12 +20480,25 @@ ${index + 1}. ${space.name}
                         let NewMsgCount = 0;
                         let LastTime = "";
                         let LastMsg = "";
+                        
+                        // *** 阶段一：收集新消息用于流式显示 ***
+                        const newMessages = [];
+                        const existingMessages = [];
+                        
                         for (let msg of json.群聊[name]["msgs"]) {
                             // 检查是否为新消息（不在现有消息列表中）
                             const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
-                            QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
-                            console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
+                            
+                            if (isNewMsg) {
+                                newMessages.push(msg);
+                                NewMsgCount++;
+                            } else {
+                                existingMessages.push(msg);
+                            }
+                            
+                            // 添加到数据记录
                             QQ_msgjson.群聊[name]["msgs"].push(msg);
+                            console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             
                             // *** 修复：使用缓存的群聊元数据保存消息 ***
                             const groupsForMessage = window.QQ_Group_Chats_Data || [];
@@ -20426,6 +20537,25 @@ ${index + 1}. ${space.name}
                                 LastTime = sp[2];
                             }
                             LastMsg = `${sp[0]}:${sp[1]}`;
+                        }
+                        
+                        // *** 阶段一：使用流式显示处理新消息 ***
+                        if (newMessages.length > 0) {
+                            console.log(`🌊 群聊${name}检测到${newMessages.length}条新消息，启动流式显示`);
+                            
+                            // 先显示已有消息（立即显示，无延迟）
+                            for (let msg of existingMessages) {
+                                QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
+                            }
+                            
+                            // 使用流式显示新消息（传入完整消息，不需要额外处理）
+                            QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
+                        } else {
+                            // 没有新消息，正常显示所有消息
+                            for (let msg of json.群聊[name]["msgs"]) {
+                                const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
+                                QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            }
                         }
                         
                         // *** 新的未读消息计算逻辑：使用QQ_CalculateUnreadCount ***
@@ -23427,9 +23557,18 @@ ${index + 1}. ${space.name}
             async function QQ_ExtractProactiveMessages(result) {
                 if (!result) return;
                 
-                // 匹配[PM: "角色名"--"消息内容"]格式
-                const pmPattern = /\[PM:\s*"([^"]+)"\s*--\s*"([^"]+)"\]/g;
-                const matches = [...result.matchAll(pmPattern)];
+                // 匹配[PM: "角色名"--"消息内容"]格式和类似格式
+                const pmPatterns = [
+                    /\[PM:\s*"([^"]+)"\s*--\s*"([^"]+)"\]/g,  // 标准格式: [PM: "角色名"--"消息内容"]
+                    /\[PM--"([^"]+)"--"([^"]+)"\]/g,          // 简化格式: [PM--"角色名"--"消息内容"]
+                    /\[PM\s*--\s*"([^"]+)"\s*--\s*"([^"]+)"\]/g  // 带空格格式: [PM -- "角色名" -- "消息内容"]
+                ];
+                
+                let matches = [];
+                for (const pattern of pmPatterns) {
+                    const found = [...result.matchAll(pattern)];
+                    matches.push(...found);
+                }
                 
                 if (matches.length === 0) {
                     console.log('🔍 阶段三：未检测到主动消息格式');
@@ -23455,6 +23594,42 @@ ${index + 1}. ${space.name}
                 window.QQ_ProactiveMessageQueue.statistics.generated += matches.length;
                 
                 console.log(`📊 阶段三：主动消息统计更新 - 已生成总数: ${window.QQ_ProactiveMessageQueue.statistics.generated}`);
+            }
+            
+            /**
+             * *** 阶段三：清理主动消息格式 ***
+             * 从文本中移除主动消息格式，避免被当作普通消息显示
+             * @param {string} text - 要清理的文本
+             * @returns {string} 清理后的文本
+             */
+            function QQ_CleanProactiveMessageFormats(text) {
+                if (!text) return text;
+                
+                // 定义主动消息格式模式
+                const pmPatterns = [
+                    /\[PM:\s*"([^"]+)"\s*--\s*"([^"]+)"\]/g,  // 标准格式: [PM: "角色名"--"消息内容"]
+                    /\[PM--"([^"]+)"--"([^"]+)"\]/g,          // 简化格式: [PM--"角色名"--"消息内容"]
+                    /\[PM\s*--\s*"([^"]+)"\s*--\s*"([^"]+)"\]/g  // 带空格格式: [PM -- "角色名" -- "消息内容"]
+                ];
+                
+                let cleanedText = text;
+                let removedCount = 0;
+                
+                for (const pattern of pmPatterns) {
+                    const matches = cleanedText.match(pattern);
+                    if (matches) {
+                        removedCount += matches.length;
+                        cleanedText = cleanedText.replace(pattern, '');
+                    }
+                }
+                
+                if (removedCount > 0) {
+                    console.log(`🧹 阶段三：已从输出中清理${removedCount}条主动消息格式`);
+                    // 清理多余的空行和空格
+                    cleanedText = cleanedText.replace(/\n\s*\n/g, '\n').trim();
+                }
+                
+                return cleanedText;
             }
             
             /**
@@ -23823,7 +23998,7 @@ ${index + 1}. ${space.name}
                     }
                     
                     // 保存到SillyTavern的世界书
-                    await worldbook.setWorldInfo(entries);
+                    await QQ_SafeSaveWorldInfo("主动消息队列");
                     
                     console.log(`💾 主动消息队列已保存到世界书: ${queueKey}`);
                     return true;
@@ -24083,6 +24258,27 @@ ${index + 1}. ${space.name}
                     }
                     
                     return ctx;
+                },
+                
+                /**
+                 * 测试流式显示功能
+                 */
+                testStreamingDisplay: function(chatName = '港区') {
+                    const testMessages = [
+                        '柴郡--测试流式显示第一条消息--17:10',
+                        '萨拉托加--测试流式显示第二条消息--17:10',
+                        '初月--测试流式显示第三条消息--17:11'
+                    ];
+                    
+                    const chatContainer = document.querySelector(`.QQ_chat_page[data-name="${chatName}"] .msgcontent`);
+                    if (!chatContainer) {
+                        console.log(`❌ 未找到聊天容器: ${chatName}`);
+                        return false;
+                    }
+                    
+                    console.log('🧪 开始测试流式显示...');
+                    QQ_DisplayStreamingMessagesDirectly(chatContainer, testMessages, chatName, true, false);
+                    return true;
                 }
             };
             
