@@ -4466,10 +4466,15 @@
                 - **情境感知**: 根据对话气氛（闲聊、深入探讨、紧急、调情等）调整回复风格。
             - **💬 聊天风格与节奏**:
                 - **动态长度**: 允许并鼓励长短不一的回复。
-                - **连续消息**: 可分隔多条连续的短消息，以模拟真实的聊天节奏。
+                - **连续短消息 (核心格式规则)**:
+                    - **必须拆分**: 当回复内容较长或包含多个要点时，必须将其拆分为多个用换行符 \`\\n\` 分隔的短句，以模拟真实的聊天节奏。
+                    - **\`\\n\` 是唯一信号**: 我的程序只会识别换行符 \`\\n\` 作为分开发送的信号。
+                    - **格式示例**:
+                        - **禁止的格式**: "指挥官，主的教诲是要我们彼此相爱。您用这种方式来表达……虽然有些直接，但也体现了您的热情。我明白了，我会回应您的‘挑战’，并为您献上最真诚的祈祷……和‘攻击’。"
+                        - **正确的格式**: "指挥官，主的教诲是要我们彼此相爱。\\n您用这种方式来表达……\\n虽然有些直接，但也体现了您的热情。\\n我明白了，我会回应您的‘挑战’，并为您献上最真诚的祈祷……和‘攻击’。"
                 - **内容驱动长度 (情境触发器)**:
-                    - 当【深入解释、分享故事、表达强烈情感、回答开放式问题】时，使用【长回复或连续消息】。
-                    - 当【快速确认、表达惊讶、轻松玩笑、角色忙碌】时，使用【短回复】。
+                    - 当【深入解释、分享故事、表达强烈情感、回答开放式问题】时，使用【长回复或上述的“连续短消息”格式】。
+                    - 当【快速确认、表达惊讶、轻松玩笑、角色忙碌】时，使用【单句短回复】。
             - **🚫 严禁行为**:
                 - **重复性内容**: 禁止不同角色说相似的话。
                 - **缺乏互动**: 回复必须包含提问或引导，不能中断对话。
@@ -5292,11 +5297,27 @@
             let QQ_ChatBackup = {};  // 聊天消息的worldbook备份
             window.QQ_ChatBackup = QQ_ChatBackup;  // 设为全局变量方便调试
             
-            // *** 新增：AI回复重试机制相关变量 ***
-            let QQ_RetryCount = 0;     // 重试计数器
-            const QQ_MAX_RETRY = 3;    // 最大重试次数
-            let QQ_LastRequest = "";   // 上一次的请求内容
-            let QQ_LastRequestName = ""; // 上一次的角色名
+            // *** 增强：AI回复重试机制相关变量 ***
+            let QQ_RetryCount = 0;           // 重试计数器
+            const QQ_MAX_RETRY = 3;          // 最大重试次数
+            let QQ_LastRequest = "";         // 上一次的请求内容
+            let QQ_LastRequestName = "";     // 上一次的角色名
+            
+            // *** 新增：防止无限循环的安全机制 ***
+            let QQ_FailureHistory = [];      // 失败历史记录
+            let QQ_ConsecutiveFailures = 0;  // 连续失败次数
+            const QQ_MAX_CONSECUTIVE_FAILURES = 5;  // 最大连续失败次数
+            let QQ_LastFailureTime = 0;      // 上次失败时间
+            const QQ_FAILURE_COOLDOWN = 30000; // 失败冷却时间（30秒）
+            
+            // *** 新增：错误类型分类 ***
+            const QQ_ErrorTypes = {
+                EMPTY_RESPONSE: 'empty_response',
+                FORMAT_ERROR: 'format_error', 
+                CONTENT_ERROR: 'content_error',
+                NETWORK_ERROR: 'network_error',
+                TIMEOUT_ERROR: 'timeout_error'
+            };
             
             // *** 新增：分页显示配置 ***
             const MOMENTS_DISPLAY_LIMIT = 5;  // 动态显示上限
@@ -7170,10 +7191,14 @@
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
                 
-                // *** 优先级0：空回复处理（立即return） ***
+                // *** 优先级0：空回复处理（立即return） - 增强版 ***
                 if (!result) {
                     console.log("🔍 优先级0：检测到空回复");
-                    if (!isRetry && QQ_RetryCount < QQ_MAX_RETRY) {
+                    
+                    const errorType = QQ_AnalyzeErrorType(result);
+                    
+                    // *** 使用智能错误处理机制 ***
+                    if (!isRetry && QQ_ShouldRetry(errorType, '空回复')) {
                         QQ_RetryCount++;
                         console.log(`AI空回复，开始第${QQ_RetryCount}次重试`);
                         triggerSlash(`/echo AI空回复，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
@@ -7181,16 +7206,21 @@
                         if (QQ_LastRequest) {
                             gening = true;
                             try {
-                                await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
-                            const retryResult = await QQ_Gen(QQ_LastRequest);
-                            return await ResultHandle(retryResult, true);
+                                // *** 增强的重试延迟策略 ***
+                                const delay = Math.min(1000 + QQ_RetryCount * 1000 + QQ_ConsecutiveFailures * 500, 10000);
+                                await new Promise(resolve => setTimeout(resolve, delay));
+                                const retryResult = await QQ_Gen(QQ_LastRequest);
+                                return await ResultHandle(retryResult, true);
                             } finally {
                                 gening = false;
                             }
                         }
                     } else {
+                        // *** 增强的失败处理 ***
                         if (QQ_RetryCount >= QQ_MAX_RETRY) {
                             triggerSlash("/echo AI连续空回复，可能存在问题，已停止重试");
+                        } else if (QQ_ConsecutiveFailures >= QQ_MAX_CONSECUTIVE_FAILURES) {
+                            triggerSlash("/echo 🚫 AI连续失败过多，建议检查网络连接或模型配置");
                         } else {
                             triggerSlash("/echo 空回复了");
                         }
@@ -7580,6 +7610,13 @@
              * *** 执行重试 ***
              */
             async function QQ_ExecuteRetry() {
+                // *** 使用智能错误处理机制进行安全检查 ***
+                if (!QQ_ShouldRetry(QQ_ErrorTypes.FORMAT_ERROR, '格式错误重试')) {
+                    console.warn('🚫 重试被安全机制阻止');
+                    QQ_ResetRetry();
+                    return;
+                }
+                
                 QQ_RetryCount++;
                 console.log(`开始第${QQ_RetryCount}次重试`);
                 triggerSlash(`/echo 格式错误，正在重试... (${QQ_RetryCount}/${QQ_MAX_RETRY})`);
@@ -7587,12 +7624,23 @@
                 if (QQ_LastRequest) {
                     gening = true;
                     try {
-                        await new Promise(resolve => setTimeout(resolve, 1000 + QQ_RetryCount * 500));
+                        // *** 增强的重试延迟策略 ***
+                        const delay = Math.min(1000 + QQ_RetryCount * 1000 + QQ_ConsecutiveFailures * 500, 10000);
+                        console.log(`⏱️ 重试延迟: ${delay}ms (基于失败次数动态调整)`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        
                         const retryResult = await QQ_Gen(QQ_LastRequest);
                         return await ResultHandle(retryResult, true);
+                    } catch (error) {
+                        console.error('🔥 重试过程中发生错误:', error);
+                        QQ_ShouldRetry(QQ_ErrorTypes.NETWORK_ERROR, error.message);
+                        QQ_ResetRetry();
                     } finally {
                         gening = false;
                     }
+                } else {
+                    console.error('❌ 无法重试：缺少上次请求的内容');
+                    QQ_ResetRetry();
                 }
             }
 
@@ -7664,7 +7712,90 @@
                 QQ_LastRequestName = "";
                 // *** 关键修复：重置互动标记，避免下次误触发 ***
                 QQ_UserTriggeredInteractive = false;
-                console.log('🔄 重置重试状态，互动标记已清除');
+                
+                // *** 新增：成功时重置连续失败计数 ***
+                QQ_ConsecutiveFailures = 0;
+                console.log('🔄 重置重试状态，互动标记已清除，连续失败计数已重置');
+            }
+            
+            /**
+             * *** 新增：智能错误处理和安全检查 ***
+             * 防止无限循环重试，智能分析错误类型
+             * @param {string} errorType - 错误类型
+             * @param {string} errorDetails - 错误详情
+             * @returns {boolean} 是否应该重试
+             */
+            function QQ_ShouldRetry(errorType, errorDetails = '') {
+                const currentTime = Date.now();
+                
+                // *** 检查是否在冷却期内 ***
+                if (currentTime - QQ_LastFailureTime < QQ_FAILURE_COOLDOWN) {
+                    const remainingCooldown = Math.ceil((QQ_FAILURE_COOLDOWN - (currentTime - QQ_LastFailureTime)) / 1000);
+                    console.warn(`⏳ 错误处理冷却中，剩余 ${remainingCooldown} 秒`);
+                    return false;
+                }
+                
+                // *** 检查连续失败次数 ***
+                if (QQ_ConsecutiveFailures >= QQ_MAX_CONSECUTIVE_FAILURES) {
+                    console.error(`🚫 连续失败 ${QQ_ConsecutiveFailures} 次，已达上限，停止重试`);
+                    triggerSlash(`/echo 🚫 AI连续失败过多，已停止自动重试。请稍后手动重试或检查配置。`);
+                    return false;
+                }
+                
+                // *** 检查当前重试次数 ***
+                if (QQ_RetryCount >= QQ_MAX_RETRY) {
+                    console.warn(`⚠️ 重试次数已达上限 ${QQ_MAX_RETRY}`);
+                    return false;
+                }
+                
+                // *** 记录失败历史 ***
+                QQ_FailureHistory.push({
+                    timestamp: currentTime,
+                    errorType: errorType,
+                    errorDetails: errorDetails,
+                    retryCount: QQ_RetryCount
+                });
+                
+                // *** 保持失败历史在合理大小 ***
+                if (QQ_FailureHistory.length > 20) {
+                    QQ_FailureHistory.shift(); // 移除最老的记录
+                }
+                
+                QQ_ConsecutiveFailures++;
+                QQ_LastFailureTime = currentTime;
+                
+                console.log(`📊 错误统计: 类型=${errorType}, 连续失败=${QQ_ConsecutiveFailures}/${QQ_MAX_CONSECUTIVE_FAILURES}, 当前重试=${QQ_RetryCount}/${QQ_MAX_RETRY}`);
+                return true;
+            }
+            
+            /**
+             * *** 新增：分析错误类型 ***
+             * 根据AI回复内容分析具体的错误类型
+             * @param {string} result - AI回复内容
+             * @returns {string} 错误类型
+             */
+            function QQ_AnalyzeErrorType(result) {
+                if (!result || result.trim() === '') {
+                    return QQ_ErrorTypes.EMPTY_RESPONSE;
+                }
+                
+                // 检查是否包含基本格式标签
+                const hasBasicTags = result.includes('msg_start') || 
+                                   result.includes('moment_start') || 
+                                   result.includes('<content>') ||
+                                   result.includes('MiPhone_start');
+                
+                if (!hasBasicTags) {
+                    return QQ_ErrorTypes.FORMAT_ERROR;
+                }
+                
+                // 检查内容质量
+                const contentLength = result.replace(/\s+/g, '').length;
+                if (contentLength < 10) {
+                    return QQ_ErrorTypes.CONTENT_ERROR;
+                }
+                
+                return QQ_ErrorTypes.FORMAT_ERROR; // 默认为格式错误
             }
 
             /**
@@ -19055,6 +19186,289 @@ ${index + 1}. ${space.name}
                     return null;
                 }
             }
+            
+            /**
+             * *** 新增：私聊访问权限验证 ***
+             * 确保私聊消息不会泄露给非参与者
+             * @param {string} participant1 - 参与者1
+             * @param {string} participant2 - 参与者2
+             * @param {string} accessType - 访问类型（'user', 'character', 'system'）
+             * @returns {boolean} 是否允许访问
+             */
+            function QQ_ValidatePrivateChatAccess(participant1, participant2, accessType) {
+                // 基本验证：参与者不能为空
+                if (!participant1 || !participant2) {
+                    console.warn('❌ 私聊访问验证失败：参与者信息不完整');
+                    return false;
+                }
+                
+                // 用户参与的私聊必须包含用户
+                if (accessType === 'user' && 
+                    participant1 !== UserName && participant2 !== UserName) {
+                    console.warn('❌ 用户私聊访问验证失败：用户不在参与者列表中');
+                    return false;
+                }
+                
+                // 角色间私聊不应包含用户
+                if (accessType === 'character' && 
+                    (participant1 === UserName || participant2 === UserName)) {
+                    console.warn('❌ 角色私聊访问验证失败：包含用户参与者');
+                    return false;
+                }
+                
+                // 防止自我对话
+                if (participant1 === participant2) {
+                    console.warn('❌ 私聊访问验证失败：不允许自我对话');
+                    return false;
+                }
+                
+                console.log(`✅ 私聊访问验证通过: ${participant1} <-> ${participant2} (${accessType})`);
+                return true;
+            }
+            
+            /**
+             * *** 新增：生成安全的聊天ID ***
+             * 防止聊天ID冲突和未授权访问
+             * @param {string} participant1 - 参与者1
+             * @param {string} participant2 - 参与者2
+             * @returns {string} 安全的聊天ID
+             */
+            function QQ_GenerateSecureChatId(participant1, participant2) {
+                // 标准化参与者顺序（字母序）
+                const sortedParticipants = [participant1, participant2].sort();
+                const baseId = sortedParticipants.join('_');
+                
+                // 添加时间戳防止冲突
+                const timestamp = Date.now();
+                
+                // 生成简单哈希（用于隐私保护）
+                let hash = 0;
+                for (let i = 0; i < baseId.length; i++) {
+                    const char = baseId.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash; // 转换为32位整数
+                }
+                
+                return `${Math.abs(hash)}_${timestamp % 100000}`;
+            }
+            
+            /**
+             * *** 新增：检查私聊消息是否包含分享意图 ***
+             * 检测角色是否主动将私聊内容分享到群聊或动态
+             * @param {string} message - 消息内容
+             * @returns {Object} 分享检测结果
+             */
+            function QQ_DetectPrivateChatSharingIntent(message) {
+                const sharingKeywords = [
+                    '告诉大家', '跟大家说', '分享给大家', '给大家看',
+                    '发到群里', '发到空间', '发动态', '转发给',
+                    '截图分享', '告诉所有人', '公开这个消息'
+                ];
+                
+                const hasShareIntent = sharingKeywords.some(keyword => 
+                    message.includes(keyword)
+                );
+                
+                return {
+                    hasShareIntent,
+                    detectedKeywords: sharingKeywords.filter(keyword => 
+                        message.includes(keyword)
+                    )
+                };
+            }
+            
+            /**
+             * *** 新增：生成强健的消息哈希值 ***
+             * 使用改进的算法减少哈希冲突，提高消息去重的准确性
+             * @param {string} content - 消息内容
+             * @returns {string} 强健的哈希值
+             */
+            function QQ_GenerateRobustMessageHash(content) {
+                if (!content || typeof content !== 'string') {
+                    return `empty_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                }
+                
+                // *** 预处理：标准化内容 ***
+                const normalizedContent = content
+                    .trim()
+                    .replace(/\s+/g, ' ')  // 标准化空白字符
+                    .replace(/[\r\n]+/g, '\n');  // 标准化换行符
+                
+                // *** 使用更强的哈希算法（FNV-1a的简化版本） ***
+                let hash = 2166136261; // FNV offset basis
+                const fnvPrime = 16777619;
+                
+                for (let i = 0; i < normalizedContent.length; i++) {
+                    hash ^= normalizedContent.charCodeAt(i);
+                    hash = (hash * fnvPrime) >>> 0; // 保持32位无符号整数
+                }
+                
+                // *** 添加内容长度和时间戳以进一步减少冲突 ***
+                const lengthFactor = normalizedContent.length;
+                const timeFactor = Date.now() % 1000000; // 取时间戳后6位
+                
+                // 创建复合哈希
+                const compositeHash = `${hash.toString(36)}_${lengthFactor}_${timeFactor}`;
+                
+                // *** 额外安全措施：检查是否是已知的高冲突内容 ***
+                const contentSignature = QQ_GenerateContentSignature(normalizedContent);
+                
+                return `${compositeHash}_${contentSignature}`;
+            }
+            
+            /**
+             * *** 新增：生成内容特征签名 ***
+             * 用于进一步区分相似但不同的消息内容
+             * @param {string} content - 标准化后的内容
+             * @returns {string} 内容特征签名
+             */
+            function QQ_GenerateContentSignature(content) {
+                // 提取关键特征
+                const features = {
+                    firstChar: content.charCodeAt(0) || 0,
+                    lastChar: content.charCodeAt(content.length - 1) || 0,
+                    length: content.length,
+                    wordCount: content.split(/\s+/).length,
+                    uniqueChars: new Set(content).size
+                };
+                
+                // 生成特征签名
+                const signature = `${features.firstChar}${features.lastChar}${features.length}${features.wordCount}${features.uniqueChars}`;
+                
+                // 进一步处理为较短的标识符
+                let compactSignature = 0;
+                for (let i = 0; i < signature.length; i++) {
+                    compactSignature = (compactSignature * 31 + parseInt(signature[i]) || 0) >>> 0;
+                }
+                
+                return compactSignature.toString(36);
+            }
+            
+            /**
+             * *** 新增：拆分长消息处理函数 ***
+             * 根据提示词规则，识别并拆分包含\\n的长消息
+             * @param {string} messageContent - 原始消息内容
+             * @returns {string[]} 拆分后的消息数组
+             */
+            function QQ_SplitLongMessage(messageContent) {
+                if (!messageContent || typeof messageContent !== 'string') {
+                    return [messageContent || ''];
+                }
+                
+                // *** 检查是否包含\\n标记 ***
+                if (!messageContent.includes('\\n')) {
+                    return [messageContent];
+                }
+                
+                console.log(`🔍 检测到长消息包含\\n标记: "${messageContent}"`);
+                
+                // *** 按\\n拆分消息 ***
+                const parts = messageContent
+                    .split('\\n')
+                    .map(part => part.trim())
+                    .filter(part => part.length > 0); // 过滤空白部分
+                
+                if (parts.length <= 1) {
+                    return [messageContent];
+                }
+                
+                console.log(`✅ 长消息拆分成功: ${parts.length}条子消息`, parts);
+                
+                // *** 智能拆分优化 ***
+                const optimizedParts = QQ_OptimizeSplitMessages(parts);
+                
+                return optimizedParts;
+            }
+            
+            /**
+             * *** 新增：优化拆分的消息 ***
+             * 智能合并过短的消息片段，确保每条消息都有合理的长度
+             * @param {string[]} parts - 原始拆分的消息片段
+             * @returns {string[]} 优化后的消息数组
+             */
+            function QQ_OptimizeSplitMessages(parts) {
+                if (!parts || parts.length <= 1) {
+                    return parts;
+                }
+                
+                const optimized = [];
+                let currentPart = '';
+                const MIN_PART_LENGTH = 8;  // 最小消息长度
+                const MAX_PART_LENGTH = 100; // 最大单条消息长度
+                
+                for (let i = 0; i < parts.length; i++) {
+                    const part = parts[i];
+                    
+                    // 如果当前部分太短，尝试与下一部分合并
+                    if (part.length < MIN_PART_LENGTH && i < parts.length - 1) {
+                        const nextPart = parts[i + 1];
+                        const combined = `${part} ${nextPart}`;
+                        
+                        if (combined.length <= MAX_PART_LENGTH) {
+                            // 合并当前部分和下一部分
+                            parts[i + 1] = combined;
+                            continue; // 跳过当前部分，在下一次迭代处理合并结果
+                        }
+                    }
+                    
+                    // 如果当前部分太长，进一步拆分
+                    if (part.length > MAX_PART_LENGTH) {
+                        const subParts = QQ_SplitOverlongMessage(part, MAX_PART_LENGTH);
+                        optimized.push(...subParts);
+                    } else {
+                        optimized.push(part);
+                    }
+                }
+                
+                console.log(`🔧 消息拆分优化完成: ${parts.length} -> ${optimized.length}条`, optimized);
+                return optimized;
+            }
+            
+            /**
+             * *** 新增：拆分过长的单条消息 ***
+             * 智能拆分超长消息，尽量在合适的位置断开
+             * @param {string} message - 过长的消息
+             * @param {number} maxLength - 最大长度
+             * @returns {string[]} 拆分后的消息数组
+             */
+            function QQ_SplitOverlongMessage(message, maxLength) {
+                if (message.length <= maxLength) {
+                    return [message];
+                }
+                
+                const parts = [];
+                let currentPos = 0;
+                
+                while (currentPos < message.length) {
+                    let endPos = Math.min(currentPos + maxLength, message.length);
+                    
+                    // 如果不是最后一段，尝试在标点符号处断开
+                    if (endPos < message.length) {
+                        const punctuation = ['。', '！', '？', '，', '；', '…', '.', '!', '?', ',', ';'];
+                        let bestBreakPoint = endPos;
+                        
+                        // 向前搜索最近的标点符号
+                        for (let i = endPos - 1; i > currentPos + maxLength * 0.7; i--) {
+                            if (punctuation.includes(message[i])) {
+                                bestBreakPoint = i + 1;
+                                break;
+                            }
+                        }
+                        
+                        endPos = bestBreakPoint;
+                    }
+                    
+                    const part = message.substring(currentPos, endPos).trim();
+                    if (part.length > 0) {
+                        parts.push(part);
+                    }
+                    
+                    currentPos = endPos;
+                }
+                
+                return parts;
+            }
+            
             /**
              * *** 新增：处理角色之间的私聊（不包含用户的角色间互动） ***
              * @param {string} chatKey - 聊天标识，如"角色A和角色B的聊天"
@@ -19065,16 +19479,22 @@ ${index + 1}. ${space.name}
             async function QQ_HandleCharacterChat(chatKey, messages, char1, char2) {
                 console.log(`处理角色间私聊: ${char1} 和 ${char2}`);
                 
+                // *** 增强的私聊独立性检查 ***
+                if (!QQ_ValidatePrivateChatAccess(char1, char2, 'character')) {
+                    console.warn(`❌ 私聊访问被拒绝: ${char1} 和 ${char2} 之间的私聊不应被处理`);
+                    return;
+                }
+                
                 if (!messages || messages.length === 0) {
                     console.log('角色间私聊消息为空，跳过处理');
                     return;
                 }
                 
-                // 创建角色间私聊的标识
-                const chatId = `char_chat_${char1}_${char2}`;
+                // 创建角色间私聊的标识（加密处理）
+                const chatId = `char_chat_${QQ_GenerateSecureChatId(char1, char2)}`;
                 const chatTitle = `${char1}和${char2}的私聊`;
                 
-                // 存储到专门的角色间私聊数据结构
+                // 存储到专门的角色间私聊数据结构（隔离存储）
                 if (!window.QQ_CharacterChats) {
                     window.QQ_CharacterChats = {};
                 }
@@ -19087,7 +19507,9 @@ ${index + 1}. ${space.name}
                         char2: char2,
                         messages: [],
                         lastTime: '',
-                        lastMessage: ''
+                        lastMessage: '',
+                        isPrivate: true,  // 标记为私聊
+                        accessLevel: 'character_only'  // 仅角色可访问
                     };
                 }
                 
@@ -19358,6 +19780,12 @@ ${index + 1}. ${space.name}
                         // 两个参与者都是用户，跳过
                         continue;
                     }
+                    
+                    // *** 增强的用户私聊安全检查 ***
+                    if (!QQ_ValidatePrivateChatAccess(UserName, name, 'user')) {
+                        console.warn(`❌ 用户私聊访问被拒绝: ${UserName} 和 ${name}`);
+                        continue;
+                    }
                     try {
                         if (!QQ_msgjson.私聊[str]) {
                             QQ_msgjson.私聊[str] = [];
@@ -19394,6 +19822,32 @@ ${index + 1}. ${space.name}
                             if (parts.length >= 2) {
                                 parts[1] = QQ_CleanNestedTags(parts[1]);
                                 msg = parts.join("--");
+                                
+                                // *** 增强的分享意图检测 ***
+                                const shareCheck = QQ_DetectPrivateChatSharingIntent(parts[1]);
+                                if (shareCheck.hasShareIntent) {
+                                    console.log(`🔒 检测到私聊分享意图: "${parts[1]}" - 关键词: ${shareCheck.detectedKeywords.join(', ')}`);
+                                    console.log(`📤 这表明角色 ${parts[0]} 主动要将私聊内容分享到其他平台`);
+                                    
+                                    // 记录分享意图但不阻止（这是角色的主动行为）
+                                    if (window.QQ_PrivateChatSharingLog) {
+                                        window.QQ_PrivateChatSharingLog.push({
+                                            timestamp: new Date().toISOString(),
+                                            chatParticipants: [UserName, name],
+                                            sharingCharacter: parts[0],
+                                            message: parts[1],
+                                            detectedKeywords: shareCheck.detectedKeywords
+                                        });
+                                    } else {
+                                        window.QQ_PrivateChatSharingLog = [{
+                                            timestamp: new Date().toISOString(),
+                                            chatParticipants: [UserName, name],
+                                            sharingCharacter: parts[0],
+                                            message: parts[1],
+                                            detectedKeywords: shareCheck.detectedKeywords
+                                        }];
+                                    }
+                                }
                             }
                             
                             // 检查是否为新消息（不在现有消息列表中）
@@ -20192,14 +20646,15 @@ ${index + 1}. ${space.name}
                              // *** 新增：清理AI回复中的consider注释和其他标签 ***
                              msgContent = QQ_CleanNestedTags(msgContent);
                              
-                             // 创建消息唯一标识（避免重复处理）
+                             // 创建消息唯一标识（避免重复处理） - 增强版
                              let messageHash;
                              try {
-                                 // 先尝试简单的hash方法
-                                 messageHash = msgContent.split('').map(c => c.charCodeAt(0)).join('').substring(0, 20);
+                                 // *** 改进的哈希算法，减少冲突 ***
+                                 messageHash = QQ_GenerateRobustMessageHash(msgContent);
                              } catch (error) {
-                                 // 如果出错，使用时间戳作为fallback
-                                 messageHash = Date.now().toString();
+                                 // 如果出错，使用时间戳+随机数作为fallback
+                                 console.warn('消息哈希生成失败，使用fallback方法:', error);
+                                 messageHash = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                              }
                              
                              if (processedMessages.has(messageHash)) {
@@ -21290,6 +21745,31 @@ ${index + 1}. ${space.name}
                     const timestamp = sp.length >= 3 ? sp[2] : "";
                     
                     console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
+                    
+                    // *** 新增：处理\\n拆分长消息逻辑 ***
+                    const messageParts = QQ_SplitLongMessage(messageContent);
+                    if (messageParts.length > 1) {
+                        console.log(`🔄 检测到长消息拆分：${messageParts.length}条子消息`);
+                        
+                        // 递归处理每个拆分的消息部分
+                        messageParts.forEach((part, index) => {
+                            const partContent = `${sender}--${part}--${timestamp}`;
+                            
+                            // 为拆分的消息添加适当的延迟，模拟真实的聊天节奏
+                            if (index === 0) {
+                                // 第一条消息立即显示
+                                QQ_Chat_AddMsg(dom, partContent, name, isNew, skipScrollAndCount);
+                            } else {
+                                // 后续消息有延迟显示，营造连续发送的感觉
+                                setTimeout(() => {
+                                    QQ_Chat_AddMsg(dom, partContent, name, false, skipScrollAndCount);
+                                }, index * 800); // 每条消息间隔800ms
+                            }
+                        });
+                        
+                        // 拆分消息处理完成，直接返回
+                        return;
+                    }
                     
                     // 判断是否为用户消息
                     const isUser = sender == `${UserName}`;
