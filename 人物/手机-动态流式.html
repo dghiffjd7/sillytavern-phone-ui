@@ -7327,8 +7327,11 @@
                 const systemContext = QQ_GenerateSystemContext();
                 console.log(`🔍 阶段二系统上下文:\n${systemContext}`);
                 
-                // 8. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 系统上下文 + 动态指令)
-                const finalPayload = `${value}\n\n${timeContext}\n\n${systemContext}${finalPrompt}`;
+                // 8. 阶段三：注入主动消息生成指令
+                const proactivePrompt = QQ_GenerateProactiveMessagePrompt();
+                
+                // 9. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 系统上下文 + 主动消息指令 + 动态指令)
+                const finalPayload = `${value}\n\n${timeContext}\n\n${systemContext}${proactivePrompt}${finalPrompt}`;
 
                 // 8. 发送请求给AI (保留原有逻辑)
                 console.log(`发送给AI的最终Payload:\n${finalPayload}`);
@@ -7430,6 +7433,8 @@
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
 
+                // *** 阶段三：提取并处理主动消息（在所有其他处理之前） ***
+                await QQ_ExtractProactiveMessages(result);
                 
                 // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
                 console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
@@ -23281,11 +23286,46 @@ ${index + 1}. ${space.name}
             }
             
             /**
-             * 上线后的处理逻辑（为阶段三主动消息做准备）
+             * *** 阶段三核心：主动消息队列系统 ***
+             * 让AI能够"在后台思考"并"主动发起对话"的革命性功能
              */
-            function QQ_ProcessOnlineActions() {
-                console.log('🔄 处理用户上线后的逻辑...');
-                // 这里将在阶段三实现主动消息队列的触发
+            
+            // 全局主动消息队列管理
+            window.QQ_ProactiveMessageQueue = {
+                queue: new Map(),           // 角色 -> 主动消息数组
+                scheduledTasks: new Map(),  // 定时任务管理
+                config: {
+                    maxMessagesPerCharacter: 5,
+                    messageDeliveryDelay: { min: 5000, max: 60000 }, // 5秒-1分钟
+                    queueProcessInterval: 30000, // 30秒检查一次队列
+                    enableAutoProcess: true
+                },
+                statistics: {
+                    generated: 0,
+                    delivered: 0,
+                    failed: 0
+                }
+            };
+            
+            /**
+             * 上线后的处理逻辑（阶段三：触发主动消息处理）
+             */
+            async function QQ_ProcessOnlineActions() {
+                console.log('🔄 用户上线，开始处理主动消息队列...');
+                
+                // 首先尝试从世界书加载队列数据
+                await QQ_LoadProactiveMessageQueue();
+                
+                // 清理过期消息
+                QQ_CleanupProactiveMessageQueue();
+                
+                // 延迟处理，让用户有时间适应界面
+                setTimeout(() => {
+                    QQ_ProcessProactiveMessageQueue();
+                }, 2000);
+                
+                // 启动定期检查
+                QQ_StartProactiveMessageScheduler();
             }
             
             /**
@@ -23310,6 +23350,741 @@ ${index + 1}. ${space.name}
                 
                 console.log('✅ 在线状态检测系统已初始化');
             }
+            
+            /**
+             * *** 阶段三：主动消息生成Prompt系统 ***
+             */
+            
+            /**
+             * 生成主动消息生成指令，注入到AI的Prompt中
+             * @returns {string} 主动消息生成指令
+             */
+            function QQ_GenerateProactiveMessagePrompt() {
+                // 检查是否需要生成主动消息
+                if (!QQ_ShouldGenerateProactiveMessages()) {
+                    return '';
+                }
+                
+                const prompt = `
+[Proactive Message Generation - 主动消息生成]
+
+除了回复当前对话，请你根据角色性格和最近的互动，思考一下"在没有对话时，你可能会主动想对{{user}}说些什么？"
+
+生成0到2条你可能在未来某个时刻（如下次用户上线时、空闲时）主动发送的消息。
+
+请严格使用以下格式，每条消息独立一行：
+[PM: "角色名"--"消息内容"]
+
+例如:
+[PM: "安克雷奇"--"指挥官，在忙吗？我发现了一个很有趣的东西想跟你分享！"]
+[PM: "柴郡"--"呜...肚子饿了...{{user}}什么时候回来带我去吃好吃的..."]
+
+如果当前没有主动想说的话，则不要生成任何[PM: ...]格式的内容。
+
+`;
+                
+                console.log('🎯 阶段三：已注入主动消息生成指令');
+                return prompt;
+            }
+            
+            /**
+             * 判断是否应该生成主动消息
+             * @returns {boolean} 是否应该生成
+             */
+            function QQ_ShouldGenerateProactiveMessages() {
+                const config = window.QQ_ProactiveMessageQueue.config;
+                if (!config.enableAutoProcess) {
+                    return false;
+                }
+                
+                // 检查队列是否已满
+                const queueSize = window.QQ_ProactiveMessageQueue.queue.size;
+                const totalMessages = Array.from(window.QQ_ProactiveMessageQueue.queue.values())
+                    .reduce((total, messages) => total + messages.length, 0);
+                
+                if (totalMessages >= config.maxMessagesPerCharacter * 3) {
+                    console.log('🔄 主动消息队列已满，跳过生成');
+                    return false;
+                }
+                
+                // 根据时间间隔判断（避免过于频繁生成）
+                const lastGeneration = localStorage.getItem('QQ_LastProactiveGeneration');
+                if (lastGeneration) {
+                    const timeSinceLastGeneration = Date.now() - parseInt(lastGeneration);
+                    if (timeSinceLastGeneration < 300000) { // 5分钟内不重复生成
+                        return false;
+                    }
+                }
+                
+                return true;
+            }
+            
+            /**
+             * *** 阶段三：提取主动消息 ***
+             * 从AI回复中提取[PM: "角色名"--"消息内容"]格式的主动消息
+             * @param {string} result - AI回复内容
+             */
+            async function QQ_ExtractProactiveMessages(result) {
+                if (!result) return;
+                
+                // 匹配[PM: "角色名"--"消息内容"]格式
+                const pmPattern = /\[PM:\s*"([^"]+)"\s*--\s*"([^"]+)"\]/g;
+                const matches = [...result.matchAll(pmPattern)];
+                
+                if (matches.length === 0) {
+                    console.log('🔍 阶段三：未检测到主动消息格式');
+                    return;
+                }
+                
+                console.log(`🎯 阶段三：检测到${matches.length}条主动消息`);
+                
+                for (const match of matches) {
+                    const characterName = match[1].trim();
+                    const messageContent = match[2].trim();
+                    
+                    if (characterName && messageContent) {
+                        console.log(`📥 阶段三：添加主动消息 - ${characterName}: ${messageContent}`);
+                        QQ_AddProactiveMessage(characterName, messageContent);
+                    }
+                }
+                
+                // 更新生成时间戳
+                localStorage.setItem('QQ_LastProactiveGeneration', Date.now().toString());
+                
+                // 更新统计
+                window.QQ_ProactiveMessageQueue.statistics.generated += matches.length;
+                
+                console.log(`📊 阶段三：主动消息统计更新 - 已生成总数: ${window.QQ_ProactiveMessageQueue.statistics.generated}`);
+            }
+            
+            /**
+             * *** 阶段三：添加主动消息到队列 ***
+             * @param {string} characterName - 角色名
+             * @param {string} messageContent - 消息内容
+             */
+            function QQ_AddProactiveMessage(characterName, messageContent) {
+                const queue = window.QQ_ProactiveMessageQueue.queue;
+                const config = window.QQ_ProactiveMessageQueue.config;
+                
+                if (!queue.has(characterName)) {
+                    queue.set(characterName, []);
+                }
+                
+                const characterMessages = queue.get(characterName);
+                
+                // 检查是否超过单个角色的消息限制
+                if (characterMessages.length >= config.maxMessagesPerCharacter) {
+                    console.log(`⚠️ 角色${characterName}的主动消息队列已满，移除最旧的消息`);
+                    characterMessages.shift(); // 移除最旧的消息
+                }
+                
+                // 添加新消息
+                const messageData = {
+                    id: `pm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    content: messageContent,
+                    timestamp: Date.now(),
+                    status: 'pending', // pending, scheduled, delivered, failed
+                    deliveryDelay: QQ_GenerateRandomDelay(
+                        config.messageDeliveryDelay.min,
+                        config.messageDeliveryDelay.max - config.messageDeliveryDelay.min
+                    )
+                };
+                
+                characterMessages.push(messageData);
+                console.log(`✅ 已添加主动消息到队列: ${characterName} - ${messageContent}`);
+                
+                // 异步保存到世界书（不等待完成以免影响性能）
+                setTimeout(() => {
+                    QQ_SaveProactiveMessageQueue().catch(error => {
+                        console.error('保存主动消息队列失败:', error);
+                    });
+                }, 100);
+            }
+            
+            /**
+             * *** 阶段三：处理主动消息队列 ***
+             * 当用户上线时触发，发送排队的主动消息
+             */
+            async function QQ_ProcessProactiveMessageQueue() {
+                const queue = window.QQ_ProactiveMessageQueue.queue;
+                const config = window.QQ_ProactiveMessageQueue.config;
+                
+                if (queue.size === 0) {
+                    console.log('📭 主动消息队列为空');
+                    return;
+                }
+                
+                console.log(`🚀 开始处理主动消息队列，共${queue.size}个角色有待发送消息`);
+                
+                for (const [characterName, messages] of queue.entries()) {
+                    const pendingMessages = messages.filter(msg => msg.status === 'pending');
+                    
+                    if (pendingMessages.length === 0) {
+                        console.log(`⏭️ 角色${characterName}没有待发送的消息`);
+                        continue;
+                    }
+                    
+                    console.log(`📨 角色${characterName}有${pendingMessages.length}条待发送消息`);
+                    
+                    for (const message of pendingMessages) {
+                        // 标记为已调度
+                        message.status = 'scheduled';
+                        
+                        // 计划发送消息
+                        setTimeout(async () => {
+                            await QQ_DeliverProactiveMessage(characterName, message);
+                        }, message.deliveryDelay);
+                        
+                        console.log(`⏰ 已调度消息发送: ${characterName} - ${message.deliveryDelay}ms后发送`);
+                    }
+                }
+            }
+            
+            /**
+             * *** 阶段三：发送主动消息 ***
+             * @param {string} characterName - 角色名
+             * @param {Object} messageData - 消息数据
+             */
+            async function QQ_DeliverProactiveMessage(characterName, messageData) {
+                try {
+                    console.log(`📤 开始发送主动消息: ${characterName} - ${messageData.content}`);
+                    
+                    // 检查用户是否仍在线
+                    const ctx = window.QQ_SystemContext;
+                    if (!ctx.userOnlineStatus) {
+                        console.log('⏸️ 用户已下线，延迟发送主动消息');
+                        messageData.status = 'pending';
+                        return;
+                    }
+                    
+                    // 生成消息时间戳
+                    const timestamp = QQ_GetTime();
+                    
+                    // 构建私聊消息格式
+                    const messageText = `${characterName}--${messageData.content}--${timestamp}`;
+                    const chatKey = `${QQ_GetUserName()}和${characterName}的聊天`;
+                    
+                    // 添加到消息记录
+                    if (!QQ_msgjson.私聊[chatKey]) {
+                        QQ_msgjson.私聊[chatKey] = [];
+                    }
+                    QQ_msgjson.私聊[chatKey].push(messageText);
+                    
+                    // 如果当前正在查看该角色的聊天，立即显示消息
+                    const currentChatPage = document.querySelector('.QQ_chat_page:visible');
+                    if (currentChatPage && currentChatPage.dataset.name === characterName) {
+                        // 创建消息HTML
+                        const messageHtml = QQ_CreateChatMessage(characterName, messageData.content, timestamp, false);
+                        const msgContent = currentChatPage.querySelector('.msgcontent');
+                        msgContent.insertAdjacentHTML('beforeend', messageHtml);
+                        msgContent.scrollTop = msgContent.scrollHeight;
+                        
+                        // 播放通知声音（如果有）
+                        QQ_PlayNotificationSound();
+                    }
+                    
+                    // 更新联系人列表的红点提示
+                    QQ_UpdateContactNotification(characterName, true);
+                    
+                    // 保存消息到世界书
+                    await QQ_Save_Msg();
+                    
+                    // 标记为已发送
+                    messageData.status = 'delivered';
+                    messageData.deliveredAt = Date.now();
+                    
+                    // 更新统计
+                    window.QQ_ProactiveMessageQueue.statistics.delivered++;
+                    
+                    console.log(`✅ 主动消息发送成功: ${characterName} - ${messageData.content}`);
+                    
+                    // 显示系统通知
+                    QQ_ShowProactiveMessageNotification(characterName, messageData.content);
+                    
+                    // 保存队列状态到世界书
+                    await QQ_SaveProactiveMessageQueue();
+                    
+                } catch (error) {
+                    console.error('❌ 主动消息发送失败:', error);
+                    messageData.status = 'failed';
+                    messageData.errorMessage = error.message;
+                    
+                    // 更新统计
+                    window.QQ_ProactiveMessageQueue.statistics.failed++;
+                    
+                    // 保存失败状态到世界书
+                    await QQ_SaveProactiveMessageQueue();
+                }
+            }
+            
+            /**
+             * *** 阶段三：启动主动消息调度器 ***
+             * 定期检查和处理主动消息队列
+             */
+            function QQ_StartProactiveMessageScheduler() {
+                const config = window.QQ_ProactiveMessageQueue.config;
+                
+                if (!config.enableAutoProcess) {
+                    console.log('🔇 主动消息自动处理已禁用');
+                    return;
+                }
+                
+                // 清除现有调度器（如果有）
+                if (window.QQ_ProactiveMessageQueue.scheduler) {
+                    clearInterval(window.QQ_ProactiveMessageQueue.scheduler);
+                }
+                
+                // 启动新的调度器
+                window.QQ_ProactiveMessageQueue.scheduler = setInterval(() => {
+                    console.log('🔄 定期检查主动消息队列...');
+                    QQ_ProcessProactiveMessageQueue();
+                }, config.queueProcessInterval);
+                
+                console.log(`⏰ 主动消息调度器已启动，每${config.queueProcessInterval}ms检查一次`);
+            }
+            
+            /**
+             * *** 阶段三：显示主动消息通知 ***
+             * @param {string} characterName - 角色名
+             * @param {string} content - 消息内容
+             */
+            function QQ_ShowProactiveMessageNotification(characterName, content) {
+                // 创建通知HTML
+                const notificationHtml = `
+                    <div class="proactive-message-notification" style="
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        padding: 12px 16px;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        z-index: 1000;
+                        max-width: 300px;
+                        font-size: 14px;
+                        animation: slideInRight 0.3s ease-out;
+                    ">
+                        <div style="font-weight: 600; margin-bottom: 4px;">
+                            💬 ${characterName} 主动联系你
+                        </div>
+                        <div style="opacity: 0.9; line-height: 1.4;">
+                            ${content.length > 60 ? content.substring(0, 60) + '...' : content}
+                        </div>
+                    </div>
+                    
+                    <style>
+                        @keyframes slideInRight {
+                            from {
+                                transform: translateX(100%);
+                                opacity: 0;
+                            }
+                            to {
+                                transform: translateX(0);
+                                opacity: 1;
+                            }
+                        }
+                    </style>
+                `;
+                
+                // 添加到页面
+                $('body').append(notificationHtml);
+                
+                // 3秒后自动消失
+                setTimeout(() => {
+                    $('.proactive-message-notification').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                }, 3000);
+            }
+            
+            /**
+             * *** 阶段三：更新联系人通知 ***
+             * @param {string} characterName - 角色名
+             * @param {boolean} hasNewMessage - 是否有新消息
+             */
+            function QQ_UpdateContactNotification(characterName, hasNewMessage) {
+                // 查找联系人列表中的对应项
+                const contactItems = document.querySelectorAll('.contact-item');
+                for (const item of contactItems) {
+                    const nameElement = item.querySelector('.contact-name');
+                    if (nameElement && nameElement.textContent.trim() === characterName) {
+                        let redDot = item.querySelector('.red-dot');
+                        
+                        if (hasNewMessage) {
+                            // 添加红点提示
+                            if (!redDot) {
+                                redDot = document.createElement('div');
+                                redDot.className = 'red-dot';
+                                redDot.style.cssText = `
+                                    position: absolute;
+                                    top: 5px;
+                                    right: 5px;
+                                    width: 12px;
+                                    height: 12px;
+                                    background: #ff4757;
+                                    border-radius: 50%;
+                                    border: 2px solid white;
+                                `;
+                                item.style.position = 'relative';
+                                item.appendChild(redDot);
+                            }
+                        } else {
+                            // 移除红点提示
+                            if (redDot) {
+                                redDot.remove();
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            /**
+             * *** 阶段三：播放通知声音 ***
+             */
+            function QQ_PlayNotificationSound() {
+                // 简单的音频通知（可以根据需要扩展）
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.value = 800;
+                    oscillator.type = 'sine';
+                    
+                    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+                    
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.3);
+                } catch (error) {
+                    console.log('通知声音播放失败:', error);
+                }
+            }
+            
+            /**
+             * *** 阶段三：保存主动消息队列到世界书 ***
+             */
+            async function QQ_SaveProactiveMessageQueue() {
+                if (!worldbook || !entries) {
+                    console.log('🔇 世界书未初始化，无法保存主动消息队列');
+                    return false;
+                }
+                
+                try {
+                    const charId = getCurrentCharacterId();
+                    const queueKey = `QQ_主动消息队列_${charId}`;
+                    
+                    // 将Map转换为可序列化的对象
+                    const queueData = {
+                        version: '1.0',
+                        timestamp: Date.now(),
+                        characterId: charId,
+                        queue: Object.fromEntries(window.QQ_ProactiveMessageQueue.queue),
+                        statistics: window.QQ_ProactiveMessageQueue.statistics,
+                        config: window.QQ_ProactiveMessageQueue.config
+                    };
+                    
+                    // 查找现有条目
+                    let queueEntry = entries.find(entry => 
+                        entry.keys.includes(queueKey)
+                    );
+                    
+                    if (queueEntry) {
+                        // 更新现有条目
+                        queueEntry.content = JSON.stringify(queueData);
+                    } else {
+                        // 创建新条目
+                        queueEntry = {
+                            uid: Date.now(),
+                            keys: [queueKey],
+                            keysecondary: [],
+                            comment: `角色${charId}的主动消息队列数据`,
+                            content: JSON.stringify(queueData),
+                            constant: false,
+                            selective: true,
+                            vectorized: false,
+                            selectiveLogic: 0,
+                            addMemo: true,
+                            order: entries.length,
+                            disable: false,
+                            excludeRecursion: false,
+                            preventRecursion: false,
+                            delayUntilRecursion: false,
+                            displayIndex: entries.length + 1,
+                            probability: 100,
+                            useProbability: true
+                        };
+                        entries.push(queueEntry);
+                    }
+                    
+                    // 保存到SillyTavern的世界书
+                    await worldbook.setWorldInfo(entries);
+                    
+                    console.log(`💾 主动消息队列已保存到世界书: ${queueKey}`);
+                    return true;
+                    
+                } catch (error) {
+                    console.error('❌ 保存主动消息队列失败:', error);
+                    return false;
+                }
+            }
+            
+            /**
+             * *** 阶段三：从世界书加载主动消息队列 ***
+             */
+            async function QQ_LoadProactiveMessageQueue() {
+                if (!worldbook || !entries) {
+                    console.log('🔇 世界书未初始化，无法加载主动消息队列');
+                    return false;
+                }
+                
+                try {
+                    const charId = getCurrentCharacterId();
+                    const queueKey = `QQ_主动消息队列_${charId}`;
+                    
+                    // 查找队列数据条目
+                    const queueEntry = entries.find(entry => 
+                        entry.keys.includes(queueKey)
+                    );
+                    
+                    if (!queueEntry || !queueEntry.content) {
+                        console.log(`📭 角色${charId}没有保存的主动消息队列数据`);
+                        return false;
+                    }
+                    
+                    const queueData = JSON.parse(queueEntry.content);
+                    
+                    // 恢复队列数据
+                    window.QQ_ProactiveMessageQueue.queue = new Map(Object.entries(queueData.queue || {}));
+                    
+                    // 恢复统计数据
+                    if (queueData.statistics) {
+                        Object.assign(window.QQ_ProactiveMessageQueue.statistics, queueData.statistics);
+                    }
+                    
+                    // 恢复配置（保持当前配置为主，只恢复部分设置）
+                    if (queueData.config) {
+                        window.QQ_ProactiveMessageQueue.config.maxMessagesPerCharacter = 
+                            queueData.config.maxMessagesPerCharacter || window.QQ_ProactiveMessageQueue.config.maxMessagesPerCharacter;
+                    }
+                    
+                    console.log(`📥 已从世界书加载主动消息队列: ${queueKey}`);
+                    console.log(`📊 队列统计: 已生成${queueData.statistics?.generated || 0}条, 已发送${queueData.statistics?.delivered || 0}条`);
+                    
+                    return true;
+                    
+                } catch (error) {
+                    console.error('❌ 加载主动消息队列失败:', error);
+                    return false;
+                }
+            }
+            
+            /**
+             * *** 阶段三：清理过期主动消息 ***
+             * 清理超过一定时间的已发送消息，避免队列无限增长
+             */
+            function QQ_CleanupProactiveMessageQueue() {
+                const queue = window.QQ_ProactiveMessageQueue.queue;
+                const maxAge = 7 * 24 * 60 * 60 * 1000; // 7天
+                const cutoffTime = Date.now() - maxAge;
+                
+                let cleanedCount = 0;
+                
+                for (const [characterName, messages] of queue.entries()) {
+                    const originalLength = messages.length;
+                    
+                    // 保留未发送的消息和7天内发送的消息
+                    const filteredMessages = messages.filter(msg => 
+                        msg.status !== 'delivered' || 
+                        (msg.deliveredAt && msg.deliveredAt > cutoffTime)
+                    );
+                    
+                    if (filteredMessages.length < originalLength) {
+                        queue.set(characterName, filteredMessages);
+                        cleanedCount += originalLength - filteredMessages.length;
+                        
+                        // 如果角色没有剩余消息，移除该角色
+                        if (filteredMessages.length === 0) {
+                            queue.delete(characterName);
+                        }
+                    }
+                }
+                
+                if (cleanedCount > 0) {
+                    console.log(`🧹 已清理${cleanedCount}条过期主动消息`);
+                }
+                
+                return cleanedCount;
+            }
+            
+            /**
+             * *** 阶段三：调试和管理工具 ***
+             * 便于开发者和用户监控和管理主动消息系统
+             */
+            
+            // 暴露调试函数到全局窗口对象
+            window.QQ_Stage3_Debug = {
+                /**
+                 * 查看主动消息队列状态
+                 */
+                showQueueStatus: function() {
+                    const queue = window.QQ_ProactiveMessageQueue.queue;
+                    const stats = window.QQ_ProactiveMessageQueue.statistics;
+                    const config = window.QQ_ProactiveMessageQueue.config;
+                    
+                    console.log('🎯 === 主动消息队列状态 ===');
+                    console.log(`📊 统计信息:`);
+                    console.log(`  - 已生成: ${stats.generated}条`);
+                    console.log(`  - 已发送: ${stats.delivered}条`);
+                    console.log(`  - 发送失败: ${stats.failed}条`);
+                    console.log(`  - 成功率: ${stats.generated > 0 ? ((stats.delivered / stats.generated) * 100).toFixed(1) : 0}%`);
+                    
+                    console.log(`⚙️ 配置信息:`);
+                    console.log(`  - 每角色最大消息数: ${config.maxMessagesPerCharacter}`);
+                    console.log(`  - 发送延迟范围: ${config.messageDeliveryDelay.min}-${config.messageDeliveryDelay.max}ms`);
+                    console.log(`  - 队列检查间隔: ${config.queueProcessInterval}ms`);
+                    console.log(`  - 自动处理: ${config.enableAutoProcess ? '启用' : '禁用'}`);
+                    
+                    console.log(`📨 队列内容:`);
+                    if (queue.size === 0) {
+                        console.log('  队列为空');
+                    } else {
+                        for (const [characterName, messages] of queue.entries()) {
+                            console.log(`  ${characterName}: ${messages.length}条消息`);
+                            messages.forEach((msg, index) => {
+                                const statusIcon = msg.status === 'pending' ? '⏳' : 
+                                                 msg.status === 'scheduled' ? '⏰' : 
+                                                 msg.status === 'delivered' ? '✅' : '❌';
+                                console.log(`    ${index + 1}. ${statusIcon} ${msg.content.substring(0, 50)}...`);
+                            });
+                        }
+                    }
+                    
+                    return { queue: Object.fromEntries(queue), stats, config };
+                },
+                
+                /**
+                 * 手动添加测试消息
+                 */
+                addTestMessage: function(characterName, content) {
+                    if (!characterName || !content) {
+                        console.error('❌ 请提供角色名和消息内容');
+                        return false;
+                    }
+                    
+                    QQ_AddProactiveMessage(characterName, content);
+                    console.log(`✅ 已添加测试消息: ${characterName} -> ${content}`);
+                    return true;
+                },
+                
+                /**
+                 * 手动触发队列处理
+                 */
+                processQueue: function() {
+                    console.log('🚀 手动触发队列处理...');
+                    QQ_ProcessProactiveMessageQueue();
+                },
+                
+                /**
+                 * 清空指定角色的队列
+                 */
+                clearCharacterQueue: function(characterName) {
+                    const queue = window.QQ_ProactiveMessageQueue.queue;
+                    if (queue.has(characterName)) {
+                        queue.delete(characterName);
+                        console.log(`🧹 已清空角色${characterName}的消息队列`);
+                        return true;
+                    } else {
+                        console.log(`❌ 角色${characterName}没有消息队列`);
+                        return false;
+                    }
+                },
+                
+                /**
+                 * 清空所有队列
+                 */
+                clearAllQueues: function() {
+                    window.QQ_ProactiveMessageQueue.queue.clear();
+                    console.log('🧹 已清空所有主动消息队列');
+                    return true;
+                },
+                
+                /**
+                 * 重置统计数据
+                 */
+                resetStatistics: function() {
+                    const stats = window.QQ_ProactiveMessageQueue.statistics;
+                    stats.generated = 0;
+                    stats.delivered = 0;
+                    stats.failed = 0;
+                    console.log('📊 已重置统计数据');
+                    return true;
+                },
+                
+                /**
+                 * 手动保存到世界书
+                 */
+                saveToWorldbook: async function() {
+                    console.log('💾 手动保存到世界书...');
+                    const success = await QQ_SaveProactiveMessageQueue();
+                    if (success) {
+                        console.log('✅ 保存成功');
+                    } else {
+                        console.log('❌ 保存失败');
+                    }
+                    return success;
+                },
+                
+                /**
+                 * 手动从世界书加载
+                 */
+                loadFromWorldbook: async function() {
+                    console.log('📥 手动从世界书加载...');
+                    const success = await QQ_LoadProactiveMessageQueue();
+                    if (success) {
+                        console.log('✅ 加载成功');
+                    } else {
+                        console.log('❌ 加载失败或无数据');
+                    }
+                    return success;
+                },
+                
+                /**
+                 * 测试主动消息通知
+                 */
+                testNotification: function(characterName = '测试角色', content = '这是一条测试主动消息通知') {
+                    QQ_ShowProactiveMessageNotification(characterName, content);
+                    console.log('🔔 已显示测试通知');
+                },
+                
+                /**
+                 * 查看系统上下文状态
+                 */
+                showSystemContext: function() {
+                    const ctx = window.QQ_SystemContext;
+                    console.log('🔍 === 系统上下文状态 ===');
+                    console.log(`在线状态: ${ctx.userOnlineStatus ? '🟢 在线' : '🔴 离线'}`);
+                    console.log(`最后上线时间: ${ctx.lastOnlineTime || '未知'}`);
+                    console.log(`当前聊天: ${ctx.currentChatName || '无'}`);
+                    console.log(`聊天类型: ${ctx.currentChatType || '无'}`);
+                    console.log(`未读消息数: ${ctx.unreadMessages.size}`);
+                    console.log(`系统事件数: ${ctx.systemEvents.length}`);
+                    
+                    if (ctx.systemEvents.length > 0) {
+                        console.log('最近事件:');
+                        ctx.systemEvents.slice(-5).forEach((event, index) => {
+                            console.log(`  ${index + 1}. ${event.type} - ${event.data.timestamp}`);
+                        });
+                    }
+                    
+                    return ctx;
+                }
+            };
             
             // 注意：addGroupToContactList和addGroupToMessageList函数已删除
             // 现在统一使用AddNewGroup函数，它会自动处理联系人列表和消息列表的同步
