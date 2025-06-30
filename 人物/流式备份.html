@@ -7391,6 +7391,15 @@
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
                 
+                // *** 新增：异常格式预检测 ***
+                if (result && result.length > 0) {
+                    const formatAnalysis = QQ_DebugUnusualFormat(result, false);
+                    if (formatAnalysis.hasIssues) {
+                        console.log("⚠️ 检测到异常格式，启用增强解析模式");
+                        console.log(`🔍 发现问题: ${formatAnalysis.issues.join(', ')}`);
+                    }
+                }
+                
                 // *** 优先级0：空回复处理（立即return） - 增强版 ***
                 if (!result) {
                     console.log("🔍 优先级0：检测到空回复");
@@ -7534,17 +7543,31 @@
                 ];
                 
                 let matches = [];
+                let matchedContent = null;
+                
                 for (const pattern of strictFormatPatterns) {
                     const found = [...result.matchAll(pattern)];
                     if (found.length > 0) {
                         matches = found;
                         console.log(`✅ 严格格式匹配成功: ${pattern.source.substring(0, 50)}...`);
-                        break;
+                        
+                        // *** 新增：对匹配到的内容进行异常格式清理 ***
+                        let rawContent = found[0][1];
+                        matchedContent = QQ_CleanUnusualFormatting(rawContent);
+                        
+                        if (matchedContent && matchedContent.trim().length > 0) {
+                            console.log(`🧹 严格格式内容清理完成，原长度: ${rawContent.length}, 新长度: ${matchedContent.length}`);
+                            break;
+                        } else {
+                            console.log("⚠️ 清理后内容为空，尝试下一个模式");
+                            matches = [];
+                            continue;
+                        }
                     }
                 }
                 
-                if (matches.length === 0) {
-                    console.log("❌ 严格格式检查失败：未找到任何完整格式");
+                if (matches.length === 0 || !matchedContent) {
+                    console.log("❌ 严格格式检查失败：未找到任何完整格式或清理后内容为空");
                     return { success: false, shouldRetry: false };
                 }
                 
@@ -7555,14 +7578,13 @@
                 }
                 
                 // 成功找到单一严格格式，立即处理
-                console.log("✅ 找到单一严格格式，开始处理");
-                const content = matches[0][1];
+                console.log("✅ 找到单一严格格式，开始处理清理后的内容");
                 
-                // 处理消息内容
-                await QQ_ProcessMsgContent(content);
+                // 处理消息内容（使用清理后的内容）
+                await QQ_ProcessMsgContent(matchedContent);
                 
                 // 处理动态内容
-                const momentMatches = content.matchAll(/moment_start([\s\S]+?)moment_end/g);
+                const momentMatches = matchedContent.matchAll(/moment_start([\s\S]+?)moment_end/g);
                 if (momentMatches) {
                     for (const moment of momentMatches) {
                         const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
@@ -7572,6 +7594,269 @@
                 
                 return { success: true };
             }
+            
+            /**
+             * *** 新增：增强的MiPhone内容提取器，处理异常格式 ***
+             * 专门处理包含异常字符（如反引号、换行等）的AI响应
+             */
+            function QQ_ExtractMiPhoneContentRobust(input) {
+                console.log("🔍 开始鲁棒性MiPhone内容提取");
+                
+                try {
+                    // 第一步：标准提取，支持各种格式变体
+                    const patterns = [
+                        /MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/gi,
+                        /MiPhone_JSON_start([\s\S]*?)MiPhone_JSON_end/gi,
+                        /MiPhone_start([\s\S]*?)MiPhone_end/gi,
+                        /MiPhone_Start([\s\S]*?)MiPhone_End/gi,
+                        /MiPhone_START([\s\S]*?)MiPhone_END/gi,
+                    ];
+                    
+                    for (const pattern of patterns) {
+                        const matches = [...input.matchAll(pattern)];
+                        if (matches.length > 0) {
+                            let content = matches[0][1];
+                            
+                            // 第二步：清理异常格式
+                            content = QQ_CleanUnusualFormatting(content);
+                            
+                            if (content && content.trim().length > 0) {
+                                console.log(`✅ 鲁棒性提取成功，内容长度: ${content.length}`);
+                                return { success: true, content: content };
+                            }
+                        }
+                    }
+                    
+                    // 第三步：处理不完整标签的情况
+                    const incompletePatterns = [
+                        /MiPhone_JSON_START([\s\S]*?)$/gi,
+                        /MiPhone_start([\s\S]*?)$/gi,
+                        /MiPhone_Start([\s\S]*?)$/gi,
+                        /MiPhone_START([\s\S]*?)$/gi,
+                    ];
+                    
+                    for (const pattern of incompletePatterns) {
+                        const matches = [...input.matchAll(pattern)];
+                        if (matches.length > 0) {
+                            let content = matches[0][1];
+                            
+                            // 清理异常格式
+                            content = QQ_CleanUnusualFormatting(content);
+                            
+                            if (content && content.trim().length > 10) {
+                                console.log(`🔧 不完整标签鲁棒性提取成功，内容长度: ${content.length}`);
+                                return { success: true, content: content };
+                            }
+                        }
+                    }
+                    
+                    console.log("❌ 鲁棒性提取失败：未找到有效的MiPhone内容");
+                    return { success: false };
+                    
+                } catch (error) {
+                    console.error("❌ 鲁棒性提取异常:", error);
+                    return { success: false, error: error.message };
+                }
+            }
+            
+            /**
+             * *** 新增：清理异常格式的辅助函数 ***
+             * 处理反引号、多余的换行、异常字符等
+             */
+            function QQ_CleanUnusualFormatting(content) {
+                if (!content || typeof content !== 'string') {
+                    return content;
+                }
+                
+                try {
+                    // 清理开头和结尾的异常字符
+                    let cleaned = content.trim();
+                    
+                    // 移除开头的反引号和代码块标记
+                    cleaned = cleaned.replace(/^```[a-z]*\s*/gi, '');
+                    cleaned = cleaned.replace(/```\s*$/gi, '');
+                    
+                    // 移除开头和结尾的多个反引号
+                    cleaned = cleaned.replace(/^`+\s*/g, '');
+                    cleaned = cleaned.replace(/\s*`+$/g, '');
+                    
+                    // 规范化换行符
+                    cleaned = cleaned.replace(/\r\n/g, '\n');
+                    cleaned = cleaned.replace(/\r/g, '\n');
+                    
+                    // 移除开头的多余空行
+                    cleaned = cleaned.replace(/^\n+/, '');
+                    
+                    // 移除结尾的多余空行
+                    cleaned = cleaned.replace(/\n+$/, '');
+                    
+                    // 处理夹杂在内容中的异常字符序列
+                    // 保留聊天格式的基本结构，只清理明显的异常字符
+                    cleaned = cleaned.replace(/```json\s*/gi, '');
+                    cleaned = cleaned.replace(/```yaml\s*/gi, '');
+                    cleaned = cleaned.replace(/```\s*/gi, '');
+                    
+                    // 移除多余的转义字符
+                    cleaned = cleaned.replace(/\\n/g, '\n');
+                    cleaned = cleaned.replace(/\\r/g, '');
+                    cleaned = cleaned.replace(/\\t/g, '\t');
+                    
+                    // 检查清理后的内容是否有效
+                    if (cleaned.length < 5) {
+                        console.log("⚠️ 清理后内容过短，可能过度清理");
+                        return content.trim(); // 返回原始内容的trim版本
+                    }
+                    
+                    console.log(`🧹 格式清理完成，原长度: ${content.length}, 新长度: ${cleaned.length}`);
+                    return cleaned;
+                    
+                } catch (error) {
+                    console.error("❌ 格式清理异常:", error);
+                    return content; // 发生错误时返回原内容
+                }
+            }
+            
+            /**
+             * *** 新增：调试函数 - 分析异常格式AI响应 ***
+             * 用于调试和分析包含异常格式的AI响应
+             */
+            function QQ_DebugUnusualFormat(response, showDetails = true) {
+                console.log("🔍 ===== 异常格式调试分析 =====");
+                
+                if (!response || typeof response !== 'string') {
+                    console.log("❌ 无效的响应内容");
+                    return { hasIssues: false, analysis: "无效输入" };
+                }
+                
+                const analysis = {
+                    hasIssues: false,
+                    issues: [],
+                    originalLength: response.length,
+                    patterns: {
+                        miPhoneStart: (response.match(/MiPhone_[A-Z_]*START/gi) || []).length,
+                        miPhoneEnd: (response.match(/MiPhone_[A-Z_]*END/gi) || []).length,
+                        codeBlocks: (response.match(/```/g) || []).length,
+                        backticks: (response.match(/`/g) || []).length,
+                        unusualNewlines: (response.match(/\r|\\\w/g) || []).length
+                    },
+                    segments: []
+                };
+                
+                // 检测异常字符
+                if (analysis.patterns.codeBlocks > 0) {
+                    analysis.hasIssues = true;
+                    analysis.issues.push(`检测到 ${analysis.patterns.codeBlocks} 个代码块标记`);
+                }
+                
+                // 修复：更准确的反引号检测逻辑
+                const expectedBackticks = analysis.patterns.codeBlocks * 3; // 每个代码块标记算作3个反引号
+                const extraBackticks = analysis.patterns.backticks - expectedBackticks;
+                
+                if (extraBackticks > 0) {
+                    analysis.hasIssues = true;
+                    analysis.issues.push(`检测到额外的反引号: ${extraBackticks} 个`);
+                } else if (analysis.patterns.backticks > 0 && analysis.patterns.codeBlocks === 0) {
+                    // 有反引号但没有完整的代码块
+                    analysis.hasIssues = true;
+                    analysis.issues.push(`检测到孤立的反引号: ${analysis.patterns.backticks} 个（未形成完整代码块）`);
+                }
+                
+                if (analysis.patterns.unusualNewlines > 0) {
+                    analysis.hasIssues = true;
+                    analysis.issues.push(`检测到异常换行符: ${analysis.patterns.unusualNewlines} 个`);
+                }
+                
+                // 标签不匹配检测
+                if (analysis.patterns.miPhoneStart !== analysis.patterns.miPhoneEnd) {
+                    analysis.hasIssues = true;
+                    analysis.issues.push(`MiPhone标签不匹配: START(${analysis.patterns.miPhoneStart}) vs END(${analysis.patterns.miPhoneEnd})`);
+                }
+                
+                // 尝试鲁棒性提取
+                const robustResult = QQ_ExtractMiPhoneContentRobust(response);
+                analysis.robustExtraction = robustResult;
+                
+                if (showDetails) {
+                    console.log(`📊 响应长度: ${analysis.originalLength} 字符`);
+                    console.log(`🏷️ 标签统计: START=${analysis.patterns.miPhoneStart}, END=${analysis.patterns.miPhoneEnd}`);
+                    console.log(`🔤 异常字符: 代码块=${analysis.patterns.codeBlocks}, 反引号=${analysis.patterns.backticks}, 异常换行=${analysis.patterns.unusualNewlines}`);
+                    
+                    if (analysis.hasIssues) {
+                        console.log("⚠️ 发现的问题:");
+                        analysis.issues.forEach((issue, i) => console.log(`   ${i + 1}. ${issue}`));
+                    } else {
+                        console.log("✅ 未发现明显的格式问题");
+                    }
+                    
+                    if (robustResult.success) {
+                        console.log(`✅ 鲁棒性提取成功，提取内容长度: ${robustResult.content.length}`);
+                        console.log(`📝 提取内容预览: ${robustResult.content.substring(0, 200)}...`);
+                    } else {
+                        console.log("❌ 鲁棒性提取失败");
+                    }
+                }
+                
+                console.log("🔍 ===== 调试分析完成 =====");
+                return analysis;
+            }
+            
+            /**
+             * *** 新增：用户可调用的格式修复工具 ***
+             */
+            window.QQ_FixUnusualFormat = function(response) {
+                console.log("🛠️ 手动格式修复工具启动");
+                
+                if (!response) {
+                    console.log("请提供要修复的AI响应内容");
+                    return null;
+                }
+                
+                // 调试分析
+                const analysis = QQ_DebugUnusualFormat(response, true);
+                
+                // 尝试修复
+                const robustResult = QQ_ExtractMiPhoneContentRobust(response);
+                if (robustResult.success) {
+                    const cleaned = QQ_CleanUnusualFormatting(robustResult.content);
+                    console.log("✅ 修复完成！");
+                    console.log("修复后内容:", cleaned);
+                    return {
+                        success: true,
+                        original: response,
+                        fixed: cleaned,
+                        analysis: analysis
+                    };
+                } else {
+                    console.log("❌ 无法修复此格式");
+                    return {
+                        success: false,
+                        original: response,
+                        analysis: analysis
+                    };
+                }
+            };
+            
+            /**
+             * *** 新增：用户可调用的直接标签提取工具 ***
+             */
+            window.QQ_ExtractTagsDirectly = function(response) {
+                console.log("🎯 手动直接标签提取工具启动");
+                
+                if (!response) {
+                    console.log("请提供要提取的AI响应内容");
+                    return null;
+                }
+                
+                const result = QQ_ExtractValidTagsDirectly(response);
+                if (result.success) {
+                    console.log("✅ 直接提取成功！");
+                    console.log("提取结果:", result.data);
+                    return result;
+                } else {
+                    console.log("❌ 直接提取失败");
+                    return result;
+                }
+            };
             
             /**
              * *** 优先级2（B步骤）：模糊/修复匹配 ***
@@ -7590,40 +7875,47 @@
                 
                 let repairedContent = null;
                 
-                // 尝试不完整格式匹配和自动修复
-                for (const pattern of fuzzyFormatPatterns) {
-                    const found = [...result.matchAll(pattern)];
-                    if (found.length > 0) {
-                        console.log(`🔧 检测到不完整格式，尝试修复: ${pattern.source.substring(0, 50)}...`);
-                        
-                        // *** 修复：使用完整匹配内容而不是分组[1] ***
-                        let content = found[0][0];  // 使用完整匹配内容[0]而不是分组[1]
-                        
-                        // 自动补全结束标签
-                        if (pattern.source.includes('MiPhone_JSON_START')) {
-                            content += '\nMiPhone_JSON_END';
-                            console.log("🔧 自动补全MiPhone_JSON_END标签");
-                        } else if (pattern.source.includes('MiPhone_start')) {
-                            content += '\nMiPhone_end';
-                            console.log("🔧 自动补全MiPhone_end标签");
-                        } else if (pattern.source.includes('MiPhone_Start')) {
-                            content += '\nMiPhone_End';
-                            console.log("🔧 自动补全MiPhone_End标签");
-                        } else if (pattern.source.includes('MiPhone_START')) {
-                            content += '\nMiPhone_END';
-                            console.log("🔧 自动补全MiPhone_END标签");
+                // *** 新增：增强的MiPhone标签提取，处理异常格式 ***
+                const enhancedMatch = QQ_ExtractMiPhoneContentRobust(result);
+                if (enhancedMatch.success) {
+                    console.log("🔧 增强提取成功，使用鲁棒性解析结果");
+                    repairedContent = enhancedMatch.content;
+                } else {
+                    // 尝试不完整格式匹配和自动修复
+                    for (const pattern of fuzzyFormatPatterns) {
+                        const found = [...result.matchAll(pattern)];
+                        if (found.length > 0) {
+                            console.log(`🔧 检测到不完整格式，尝试修复: ${pattern.source.substring(0, 50)}...`);
+                            
+                            // *** 修复：使用完整匹配内容而不是分组[1] ***
+                            let content = found[0][0];  // 使用完整匹配内容[0]而不是分组[1]
+                            
+                            // 自动补全结束标签
+                            if (pattern.source.includes('MiPhone_JSON_START')) {
+                                content += '\nMiPhone_JSON_END';
+                                console.log("🔧 自动补全MiPhone_JSON_END标签");
+                            } else if (pattern.source.includes('MiPhone_start')) {
+                                content += '\nMiPhone_end';
+                                console.log("🔧 自动补全MiPhone_end标签");
+                            } else if (pattern.source.includes('MiPhone_Start')) {
+                                content += '\nMiPhone_End';
+                                console.log("🔧 自动补全MiPhone_End标签");
+                            } else if (pattern.source.includes('MiPhone_START')) {
+                                content += '\nMiPhone_END';
+                                console.log("🔧 自动补全MiPhone_END标签");
+                            }
+                            
+                            // *** 修复：现在需要重新提取内容部分 ***
+                            const repairMatch = content.match(/MiPhone_(?:JSON_)?(?:START|start|Start)([\s\S]+?)MiPhone_(?:JSON_)?(?:END|end|End)/);
+                            if (repairMatch) {
+                                repairedContent = repairMatch[1];  // 提取标签之间的内容
+                                console.log("🔧 修复完成，提取到内容:", repairedContent.substring(0, 100) + "...");
+                            } else {
+                                console.error("❌ 修复后无法提取内容");
+                                continue;
+                            }
+                            break;
                         }
-                        
-                        // *** 修复：现在需要重新提取内容部分 ***
-                        const repairMatch = content.match(/MiPhone_(?:JSON_)?(?:START|start|Start)([\s\S]+?)MiPhone_(?:JSON_)?(?:END|end|End)/);
-                        if (repairMatch) {
-                            repairedContent = repairMatch[1];  // 提取标签之间的内容
-                            console.log("🔧 修复完成，提取到内容:", repairedContent.substring(0, 100) + "...");
-                        } else {
-                            console.error("❌ 修复后无法提取内容");
-                            continue;
-                        }
-                        break;
                     }
                 }
                 
@@ -7697,10 +7989,233 @@
             }
             
             /**
+             * *** 新增：直接有效标签提取器（忽略所有格式要求） ***
+             * 在所有模糊匹配失败后，直接从混乱格式中提取任何有效的标签内容
+             */
+            function QQ_ExtractValidTagsDirectly(input) {
+                console.log("🎯 开始直接有效标签提取（忽略格式）");
+                
+                try {
+                    let hasValidContent = false;
+                    const results = {
+                        群聊: {},
+                        私聊: {}
+                    };
+                    
+                    // *** 1. 直接提取群聊标签（各种可能的格式） ***
+                    const groupTagPatterns = [
+                        // 标准群聊格式
+                        /<群聊[:：]([^>]+)>([\s\S]*?)<\/群聊[:：][^>]*>/gi,
+                        // 不完整的群聊标签
+                        /<群聊[:：]([^>]+)>([\s\S]*?)(?=<[^>]*>|$)/gi,
+                        // 简化的群聊标签
+                        /<群聊([^>]*)>([\s\S]*?)<\/群聊[^>]*>/gi,
+                        /<群聊([^>]*)>([\s\S]*?)(?=<[^>]*>|$)/gi
+                    ];
+                    
+                    for (const pattern of groupTagPatterns) {
+                        const matches = [...input.matchAll(pattern)];
+                        for (const match of matches) {
+                            let groupName = (match[1] || '').replace(/[:：]/g, '').trim();
+                            let content = (match[2] || '').trim();
+                            
+                            if (!groupName && content) {
+                                groupName = '未知群聊';
+                            }
+                            
+                            if (content && content.length > 5) {
+                                console.log(`🎯 找到群聊标签: ${groupName}, 内容长度: ${content.length}`);
+                                
+                                // 解析群聊内容
+                                const messages = QQ_ParseMessagesFromRawContent(content);
+                                if (messages.length > 0) {
+                                    if (!results.群聊[groupName]) {
+                                        results.群聊[groupName] = {
+                                            members: [],
+                                            msgs: []
+                                        };
+                                    }
+                                    results.群聊[groupName].msgs.push(...messages);
+                                    
+                                    // 提取成员列表
+                                    const members = [...new Set(messages.map(msg => msg.split('--')[0]).filter(name => name && name.trim()))];
+                                    results.群聊[groupName].members = [...new Set([...results.群聊[groupName].members, ...members])];
+                                    
+                                    hasValidContent = true;
+                                    console.log(`✅ 群聊 ${groupName} 提取到 ${messages.length} 条消息，${members.length} 个成员`);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // *** 2. 直接提取私聊标签（各种可能的格式） ***
+                    const privateChatPatterns = [
+                        // 标准私聊格式
+                        /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)<\/[^>]*和[^>]*的(?:私聊|聊天)>/gi,
+                        // 不完整的私聊标签
+                        /<([^>]*和[^>]*的(?:私聊|聊天))>([\s\S]*?)(?=<[^>]*>|$)/gi,
+                        // 简化的私聊标签
+                        /<([^>]*(?:私聊|聊天)[^>]*)>([\s\S]*?)<\/[^>]*(?:私聊|聊天)[^>]*>/gi,
+                        /<([^>]*(?:私聊|聊天)[^>]*)>([\s\S]*?)(?=<[^>]*>|$)/gi
+                    ];
+                    
+                    for (const pattern of privateChatPatterns) {
+                        const matches = [...input.matchAll(pattern)];
+                        for (const match of matches) {
+                            let chatName = (match[1] || '').trim();
+                            let content = (match[2] || '').trim();
+                            
+                            if (!chatName && content) {
+                                chatName = '未知私聊';
+                            }
+                            
+                            if (content && content.length > 5) {
+                                console.log(`🎯 找到私聊标签: ${chatName}, 内容长度: ${content.length}`);
+                                
+                                // 解析私聊内容
+                                const messages = QQ_ParseMessagesFromRawContent(content);
+                                if (messages.length > 0) {
+                                    if (!results.私聊[chatName]) {
+                                        results.私聊[chatName] = [];
+                                    }
+                                    results.私聊[chatName].push(...messages);
+                                    
+                                    hasValidContent = true;
+                                    console.log(`✅ 私聊 ${chatName} 提取到 ${messages.length} 条消息`);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // *** 3. 直接处理提取到的内容 ***
+                    if (hasValidContent) {
+                        console.log("🎯 直接标签提取成功，开始处理内容");
+                        console.log(`📊 提取统计: 群聊 ${Object.keys(results.群聊).length} 个，私聊 ${Object.keys(results.私聊).length} 个`);
+                        
+                        // 直接调用消息解析处理
+                        QQ_Msg_Parse(JSON.stringify(results));
+                        
+                        return { success: true, data: results };
+                    } else {
+                        console.log("❌ 直接标签提取失败：未找到有效的标签内容");
+                        return { success: false };
+                    }
+                    
+                } catch (error) {
+                    console.error("❌ 直接标签提取异常:", error);
+                    return { success: false, error: error.message };
+                }
+            }
+            
+            /**
+             * *** 新增：从原始内容中解析消息的辅助函数 ***
+             * 用于处理直接提取的标签内容
+             */
+            function QQ_ParseMessagesFromRawContent(content) {
+                if (!content || typeof content !== 'string') {
+                    return [];
+                }
+                
+                try {
+                    const messages = [];
+                    
+                    // 清理内容
+                    let cleaned = content.trim();
+                    
+                    // 移除可能的异常字符
+                    cleaned = cleaned.replace(/```[a-z]*\s*/gi, '');
+                    cleaned = cleaned.replace(/```\s*/gi, '');
+                    cleaned = cleaned.replace(/`+/g, '');
+                    
+                    // 尝试多种消息格式匹配
+                    const messagePatterns = [
+                        // 标准格式：用户名--消息内容--时间
+                        /([^-\n]+?)--([^-\n]+?)--([^\n]+)/g,
+                        // 简化格式：用户名--消息内容
+                        /([^-\n]+?)--([^\n]+)/g,
+                        // 冒号格式：用户名: 消息内容
+                        /([^:\n]+?):\s*([^\n]+)/g,
+                        // 说话格式：用户名说：消息内容
+                        /([^：:\n]+?)(?:说|讲)[:：]\s*([^\n]+)/g,
+                        // 换行分隔格式
+                        /^([^\n]+)$/gm
+                    ];
+                    
+                    for (const pattern of messagePatterns) {
+                        const matches = [...cleaned.matchAll(pattern)];
+                        if (matches.length > 0) {
+                            console.log(`🔍 使用模式匹配到 ${matches.length} 条消息`);
+                            
+                            for (const match of matches) {
+                                let messageText = '';
+                                
+                                if (match.length >= 3) {
+                                    // 带时间的格式
+                                    const name = match[1].trim();
+                                    const content = match[2].trim();
+                                    const time = match[3].trim();
+                                    
+                                    if (name && content) {
+                                        messageText = `${name}--${content}--${time}`;
+                                    }
+                                } else if (match.length >= 2) {
+                                    // 不带时间的格式
+                                    const name = match[1].trim();
+                                    const content = match[2].trim();
+                                    
+                                    if (name && content) {
+                                        const currentTime = new Date().toLocaleTimeString('zh-CN', {
+                                            hour12: false,
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        });
+                                        messageText = `${name}--${content}--${currentTime}`;
+                                    }
+                                } else {
+                                    // 纯文本格式
+                                    const text = match[1].trim();
+                                    if (text && text.length > 3) {
+                                        const currentTime = new Date().toLocaleTimeString('zh-CN', {
+                                            hour12: false,
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        });
+                                        messageText = `系统--${text}--${currentTime}`;
+                                    }
+                                }
+                                
+                                if (messageText && !messages.includes(messageText)) {
+                                    messages.push(messageText);
+                                }
+                            }
+                            
+                            if (messages.length > 0) {
+                                break; // 找到有效消息就停止尝试其他模式
+                            }
+                        }
+                    }
+                    
+                    console.log(`🎯 从原始内容解析出 ${messages.length} 条消息`);
+                    return messages;
+                    
+                } catch (error) {
+                    console.error("❌ 原始内容消息解析异常:", error);
+                    return [];
+                }
+            }
+            
+            /**
              * *** 优先级4：智能提取有效信息 ***
              */
             async function QQ_ProcessValidExtraction(result) {
                 console.log("🎯 开始智能提取有效信息");
+                
+                // *** 新增：首先尝试直接的有效标签提取（最高优先级） ***
+                const directTagResult = QQ_ExtractValidTagsDirectly(result);
+                if (directTagResult.success) {
+                    console.log("✅ 直接标签提取成功，跳过其他提取方式");
+                    return { success: true };
+                }
                 
                 // 检查是否为混合格式响应（群聊+私聊+互动内容混合）
                 if (QQ_DetectMixedFormatResponse(result)) {
@@ -10062,12 +10577,36 @@
             }
             
             /**
+             * *** 新增：检查元素是否可见 ***
+             * @param {Element} element - 要检查的元素
+             * @returns {boolean} 是否可见
+             */
+            function QQ_IsElementVisible(element) {
+                if (!element) return false;
+                
+                // 检查display样式
+                const style = window.getComputedStyle(element);
+                if (style.display === 'none' || style.visibility === 'hidden') {
+                    return false;
+                }
+                
+                // 检查opacity
+                if (parseFloat(style.opacity) === 0) {
+                    return false;
+                }
+                
+                // 检查元素尺寸
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            }
+            
+            /**
              * *** 新增：检查是否在私聊模式 ***
              * @returns {boolean} 是否在私聊
              */
             function QQ_IsInPrivateChat() {
-                const chatPage = document.querySelector('.QQ_chat_page:visible');
-                if (!chatPage) return false;
+                const chatPage = document.querySelector('.QQ_chat_page');
+                if (!QQ_IsElementVisible(chatPage)) return false;
                 
                 const chatTitle = document.getElementById('QQ_chat_username');
                 return chatTitle && !chatTitle.textContent.includes('群聊');
@@ -10078,8 +10617,8 @@
              * @returns {boolean} 是否在群聊
              */
             function QQ_IsInGroupChat() {
-                const chatPage = document.querySelector('.QQ_chat_page:visible');
-                if (!chatPage) return false;
+                const chatPage = document.querySelector('.QQ_chat_page');
+                if (!QQ_IsElementVisible(chatPage)) return false;
                 
                 const chatTitle = document.getElementById('QQ_chat_username');
                 return chatTitle && chatTitle.textContent.includes('群聊');
@@ -10101,7 +10640,7 @@
                 const chatContent = `<${QQ_GetUserName()}和${characterName}的私聊>\n${characterName}--${content}--${messageData.time}\n</${QQ_GetUserName()}和${characterName}的私聊>`;
                 
                 // 直接更新到当前聊天界面（如果是对应的私聊）
-                const currentChat = document.querySelector('.QQ_chat_page:visible');
+                const currentChat = document.querySelector('.QQ_chat_page');
                 if (currentChat && QQ_IsTargetChat(characterName)) {
                     QQ_AddMessageToCurrentChat(characterName, content, messageData.time);
                 }
@@ -16947,7 +17486,19 @@ ${index + 1}. ${space.name}
                     
                     console.log(`📊 格式检测: JSON块 ${hasMultipleJSONBlocks ? '多个' : '单个'}`);
                     
-                    // *** 步骤2：按照JSON块分段，提取夹杂的互动内容 ***
+                    // *** 步骤2：使用增强提取器处理异常格式 ***
+                    const robustResult = QQ_ExtractMiPhoneContentRobust(response);
+                    if (robustResult.success) {
+                        console.log("🔧 混合格式中使用鲁棒性提取成功");
+                        try {
+                            await QQ_ProcessMsgContent(robustResult.content);
+                            return { success: true };
+                        } catch (error) {
+                            console.error("❌ 鲁棒性提取内容处理失败:", error);
+                        }
+                    }
+                    
+                    // *** 步骤3：按照JSON块分段，提取夹杂的互动内容（备用方案） ***
                     const segments = response.split(/MiPhone_JSON_START|MiPhone_JSON_END/);
                     const jsonBlocks = [];
                     const interactiveTexts = [];
@@ -23746,7 +24297,7 @@ ${index + 1}. ${space.name}
                     QQ_msgjson.私聊[chatKey].push(messageText);
                     
                     // 如果当前正在查看该角色的聊天，立即显示消息
-                    const currentChatPage = document.querySelector('.QQ_chat_page:visible');
+                    const currentChatPage = document.querySelector('.QQ_chat_page');
                     if (currentChatPage && currentChatPage.dataset.name === characterName) {
                         // 创建消息HTML
                         const messageHtml = QQ_CreateChatMessage(characterName, messageData.content, timestamp, false);
