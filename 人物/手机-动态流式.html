@@ -5049,7 +5049,7 @@
             }
 
             /**
-             * 标记聊天为已读
+             * 标记聊天为已读 - 增强版本，支持Stage 2上下文感知系统
              */
             function QQ_MarkAsRead(chatName, chatType = 'auto') {
                 try {
@@ -5057,9 +5057,24 @@
                         QQ_ReadStatus[chatName] = {};
                     }
                     
-                    QQ_ReadStatus[chatName].lastReadTime = Date.now();
+                    const currentTime = Date.now();
+                    const readTimestamp = new Date().toISOString();
                     
-                    // *** 修复：根据聊天类型设置已读索引 ***
+                    // 记录基础已读状态
+                    QQ_ReadStatus[chatName].lastReadTime = currentTime;
+                    
+                    // *** Stage 2增强：收集读取事件的详细上下文信息 ***
+                    let readEventData = {
+                        chatName: chatName,
+                        chatType: chatType,
+                        readTime: readTimestamp,
+                        userName: UserName || '用户',
+                        unreadCount: 0,
+                        lastMessages: [],
+                        readContext: {}
+                    };
+                    
+                    // *** 修复：根据聊天类型设置已读索引并收集消息上下文 ***
                     if (chatType === 'auto') {
                         // 先查找私聊
                         const privateChatKey = Object.keys(QQ_msgjson.私聊).find(key => 
@@ -5067,10 +5082,62 @@
                         );
                         
                         if (privateChatKey && QQ_msgjson.私聊[privateChatKey]) {
-                            QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.私聊[privateChatKey].length;
+                            const messages = QQ_msgjson.私聊[privateChatKey];
+                            const previousReadIndex = QQ_ReadStatus[chatName].lastReadIndex || 0;
+                            
+                            QQ_ReadStatus[chatName].lastReadIndex = messages.length;
+                            readEventData.chatType = 'private';
+                            readEventData.unreadCount = Math.max(0, messages.length - previousReadIndex);
+                            
+                            // *** Stage 2增强：收集最近的未读消息上下文 ***
+                            if (readEventData.unreadCount > 0) {
+                                const unreadMessages = messages.slice(previousReadIndex).slice(-3); // 最后3条未读消息
+                                readEventData.lastMessages = unreadMessages.map(msg => ({
+                                    sender: msg.name || '未知',
+                                    content: (msg.mes || '').substring(0, 50) + (msg.mes && msg.mes.length > 50 ? '...' : ''),
+                                    timestamp: msg.send_date || readTimestamp,
+                                    isUser: msg.is_user || false
+                                }));
+                            }
+                            
+                            readEventData.readContext = {
+                                totalMessages: messages.length,
+                                previousReadIndex: previousReadIndex,
+                                newReadIndex: messages.length,
+                                readDuration: QQ_ReadStatus[chatName].lastReadTime ? 
+                                    currentTime - QQ_ReadStatus[chatName].lastReadTime : 0
+                            };
+                            
                             console.log(`私聊 ${chatName} 已读索引设置为: ${QQ_ReadStatus[chatName].lastReadIndex}`);
+                            
                         } else if (QQ_msgjson.群聊[chatName] && QQ_msgjson.群聊[chatName].msgs) {
-                            QQ_ReadStatus[chatName].lastReadIndex = QQ_msgjson.群聊[chatName].msgs.length;
+                            const messages = QQ_msgjson.群聊[chatName].msgs;
+                            const previousReadIndex = QQ_ReadStatus[chatName].lastReadIndex || 0;
+                            
+                            QQ_ReadStatus[chatName].lastReadIndex = messages.length;
+                            readEventData.chatType = 'group';
+                            readEventData.unreadCount = Math.max(0, messages.length - previousReadIndex);
+                            
+                            // *** Stage 2增强：收集群聊未读消息上下文 ***
+                            if (readEventData.unreadCount > 0) {
+                                const unreadMessages = messages.slice(previousReadIndex).slice(-5); // 群聊取最后5条未读消息
+                                readEventData.lastMessages = unreadMessages.map(msg => ({
+                                    sender: msg.name || '未知',
+                                    content: (msg.mes || '').substring(0, 50) + (msg.mes && msg.mes.length > 50 ? '...' : ''),
+                                    timestamp: msg.send_date || readTimestamp,
+                                    isUser: msg.is_user || false
+                                }));
+                            }
+                            
+                            readEventData.readContext = {
+                                totalMessages: messages.length,
+                                previousReadIndex: previousReadIndex,
+                                newReadIndex: messages.length,
+                                groupMembers: QQ_msgjson.群聊[chatName].members || [],
+                                readDuration: QQ_ReadStatus[chatName].lastReadTime ? 
+                                    currentTime - QQ_ReadStatus[chatName].lastReadTime : 0
+                            };
+                            
                             console.log(`群聊 ${chatName} 已读索引设置为: ${QQ_ReadStatus[chatName].lastReadIndex}`);
                         }
                     }
@@ -5079,13 +5146,139 @@
                     QQ_NewMsg[chatName] = 0;
                     QQ_SetHomeTips(chatName, 0);
                     
+                    // *** Stage 2增强：记录读取事件到系统事件队列 ***
+                    if (readEventData.unreadCount > 0) {
+                        // 只有当确实有未读消息被标记为已读时才记录事件
+                        QQ_AddSystemEvent(QQ_SystemEventTypes.MESSAGE_READ, {
+                            ...readEventData,
+                            eventId: `read_${chatName}_${currentTime}`,
+                            stage2Context: {
+                                readReceiptGenerated: true,
+                                contextAware: true,
+                                detailedReadInfo: true
+                            }
+                        });
+                        
+                        console.log(`📖 Stage 2读取事件已记录: ${chatName}, 未读消息数: ${readEventData.unreadCount}`);
+                    }
+                    
                     console.log(`${chatName} 已标记为已读，已读状态:`, QQ_ReadStatus[chatName]);
                     
-                    // 异步保存到世界书
-                    setTimeout(() => QQ_SaveReadStatus(), 1000);
+                    // *** Stage 2增强：异步保存读取事件到世界书用于长期上下文记忆 ***
+                    setTimeout(() => {
+                        QQ_SaveReadStatus();
+                        
+                        // 保存详细的读取事件记录
+                        if (readEventData.unreadCount > 0) {
+                            QQ_SafeSaveToWorldBook('读取事件记录', {
+                                ...readEventData,
+                                stage2Enhanced: true,
+                                savedAt: new Date().toISOString()
+                            }, 'QQ_读取事件记录');
+                        }
+                    }, 1000);
                     
                 } catch (error) {
                     console.error('标记已读状态失败:', error);
+                }
+            }
+
+            /**
+             * *** Stage 2增强：读取事件分析和调试工具 ***
+             * 用于分析和监控读取事件的详细信息
+             */
+            function QQ_AnalyzeReadEvents(chatName = null, limit = 10) {
+                try {
+                    const allEvents = window.QQ_SystemContext?.systemEvents || [];
+                    let readEvents = allEvents.filter(event => 
+                        event.type === QQ_SystemEventTypes.MESSAGE_READ &&
+                        (!chatName || event.data.chatName === chatName)
+                    );
+                    
+                    // 按时间排序，最新的在前
+                    readEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    
+                    // 限制返回数量
+                    if (limit > 0) {
+                        readEvents = readEvents.slice(0, limit);
+                    }
+                    
+                    const analysis = {
+                        totalReadEvents: readEvents.length,
+                        chatFilter: chatName,
+                        stage2Enhanced: readEvents.filter(e => e.data.stage2Context?.detailedReadInfo).length,
+                        traditionalEvents: readEvents.filter(e => !e.data.stage2Context?.detailedReadInfo).length,
+                        recentEvents: readEvents.map(event => ({
+                            timestamp: event.timestamp,
+                            chatName: event.data.chatName,
+                            chatType: event.data.chatType,
+                            unreadCount: event.data.unreadCount || 0,
+                            isStage2Enhanced: Boolean(event.data.stage2Context?.detailedReadInfo),
+                            lastMessageSender: event.data.lastMessages?.[event.data.lastMessages.length - 1]?.sender
+                        }))
+                    };
+                    
+                    console.log('📊 读取事件分析结果:', analysis);
+                    return analysis;
+                    
+                } catch (error) {
+                    console.error('分析读取事件失败:', error);
+                    return null;
+                }
+            }
+
+            /**
+             * *** Stage 2增强：读取事件统计工具 ***
+             * 提供读取行为的统计信息
+             */
+            function QQ_GetReadStatistics(timeRange = 24) { // 默认24小时内
+                try {
+                    const cutoffTime = Date.now() - (timeRange * 60 * 60 * 1000);
+                    const allEvents = window.QQ_SystemContext?.systemEvents || [];
+                    
+                    const recentReadEvents = allEvents.filter(event => 
+                        event.type === QQ_SystemEventTypes.MESSAGE_READ &&
+                        new Date(event.timestamp).getTime() > cutoffTime
+                    );
+                    
+                    const stats = {
+                        timeRangeHours: timeRange,
+                        totalReadEvents: recentReadEvents.length,
+                        privateChats: {},
+                        groupChats: {},
+                        totalUnreadProcessed: 0,
+                        stage2EnhancedEvents: 0
+                    };
+                    
+                    recentReadEvents.forEach(event => {
+                        const data = event.data;
+                        stats.totalUnreadProcessed += data.unreadCount || 0;
+                        
+                        if (data.stage2Context?.detailedReadInfo) {
+                            stats.stage2EnhancedEvents++;
+                        }
+                        
+                        if (data.chatType === 'private') {
+                            if (!stats.privateChats[data.chatName]) {
+                                stats.privateChats[data.chatName] = { readEvents: 0, unreadProcessed: 0 };
+                            }
+                            stats.privateChats[data.chatName].readEvents++;
+                            stats.privateChats[data.chatName].unreadProcessed += data.unreadCount || 0;
+                        } else if (data.chatType === 'group') {
+                            if (!stats.groupChats[data.chatName]) {
+                                stats.groupChats[data.chatName] = { readEvents: 0, unreadProcessed: 0 };
+                            }
+                            stats.groupChats[data.chatName].readEvents++;
+                            stats.groupChats[data.chatName].unreadProcessed += data.unreadCount || 0;
+                        }
+                    });
+                    
+                    console.log(`📈 最近${timeRange}小时读取统计:`, stats);
+                    return stats;
+                    
+                } catch (error) {
+                    console.error('获取读取统计失败:', error);
+                    return null;
                 }
             }
 
@@ -7130,8 +7323,12 @@
                 // 6. 【全新核心逻辑】调用动态指令生成器，创建量身定制的Prompt
                 const finalPrompt = buildDynamicPrompt(tasks);
                 
-                // 7. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 动态指令)
-                const finalPayload = `${value}\n\n${timeContext}\n\n${finalPrompt}`;
+                // 7. 注入阶段二系统上下文 (让AI能够"看到"环境变化)
+                const systemContext = QQ_GenerateSystemContext();
+                console.log(`🔍 阶段二系统上下文:\n${systemContext}`);
+                
+                // 8. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 系统上下文 + 动态指令)
+                const finalPayload = `${value}\n\n${timeContext}\n\n${systemContext}${finalPrompt}`;
 
                 // 8. 发送请求给AI (保留原有逻辑)
                 console.log(`发送给AI的最终Payload:\n${finalPayload}`);
@@ -18656,6 +18853,25 @@ ${index + 1}. ${space.name}
                 const isGroup = QQ_Groups.includes(name);
                 console.log(`切换到聊天页: ${name}, 是否为群聊: ${isGroup}`);
                 
+                // *** 阶段二：聊天切换上下文记录 ***
+                const previousChatName = window.QQ_SystemContext.currentChatName;
+                const previousChatType = window.QQ_SystemContext.currentChatType;
+                
+                // 更新当前聊天上下文
+                window.QQ_SystemContext.currentChatName = name;
+                window.QQ_SystemContext.currentChatType = isGroup ? 'group' : 'private';
+                
+                // 记录聊天切换事件
+                if (previousChatName !== name || previousChatType !== window.QQ_SystemContext.currentChatType) {
+                    QQ_AddSystemEvent(QQ_SystemEventTypes.CHAT_SWITCH, {
+                        fromChat: previousChatName,
+                        fromType: previousChatType,
+                        toChat: name,
+                        chatType: window.QQ_SystemContext.currentChatType,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                
                 let $page = $(`.QQ_chat_page[data-name='${name}']`);
                 if ($page.length === 0) {
                     console.log(`${name}的聊天页不存在,开始创建`);
@@ -22865,6 +23081,236 @@ ${index + 1}. ${space.name}
                 });
             }
             
+            /**
+             * *** 阶段二核心：上下文感知系统 ***
+             * 让AI能够"看到"环境变化，为主动行为打下基础
+             */
+            
+            // 全局上下文状态管理
+            window.QQ_SystemContext = {
+                userOnlineStatus: false,
+                lastOnlineTime: null,
+                currentChatName: null,
+                currentChatType: null, // 'private', 'group', 'moment'
+                unreadMessages: new Map(), // 聊天窗口 -> 未读消息数组
+                readReceipts: new Map(),   // 消息ID -> 已读状态
+                systemEvents: []           // 系统事件队列
+            };
+            
+            /**
+             * 系统事件类型定义
+             */
+            const QQ_SystemEventTypes = {
+                USER_ONLINE: 'user_online',
+                USER_OFFLINE: 'user_offline', 
+                CHAT_SWITCH: 'chat_switch',
+                MESSAGE_READ: 'message_read',
+                GROUP_MEMBER_JOIN: 'group_member_join',
+                GROUP_MEMBER_LEAVE: 'group_member_leave',
+                GROUP_NAME_CHANGE: 'group_name_change'
+            };
+            
+            /**
+             * 添加系统事件到队列
+             * @param {string} eventType - 事件类型
+             * @param {Object} eventData - 事件数据
+             */
+            function QQ_AddSystemEvent(eventType, eventData) {
+                const event = {
+                    type: eventType,
+                    data: eventData,
+                    timestamp: new Date().toISOString(),
+                    processed: false
+                };
+                
+                window.QQ_SystemContext.systemEvents.push(event);
+                console.log(`📝 系统事件记录: ${eventType}`, eventData);
+                
+                // 保持事件队列大小在合理范围内
+                if (window.QQ_SystemContext.systemEvents.length > 50) {
+                    window.QQ_SystemContext.systemEvents = window.QQ_SystemContext.systemEvents.slice(-30);
+                }
+            }
+            
+            /**
+             * 生成系统上下文字符串，注入到AI的Prompt中
+             * @returns {string} 格式化的系统上下文
+             */
+            function QQ_GenerateSystemContext() {
+                const context = [];
+                const ctx = window.QQ_SystemContext;
+                
+                // 用户在线状态
+                if (ctx.userOnlineStatus) {
+                    context.push(`[System Context: {{user}}当前在线]`);
+                } else {
+                    context.push(`[System Context: {{user}}当前离线]`);
+                }
+                
+                // 当前聊天环境
+                if (ctx.currentChatName && ctx.currentChatType) {
+                    if (ctx.currentChatType === 'group') {
+                        context.push(`[System Context: 你现在在群聊"${ctx.currentChatName}"中]`);
+                    } else if (ctx.currentChatType === 'private') {
+                        context.push(`[System Context: 你现在在与{{user}}的私聊中]`);
+                    }
+                }
+                
+                // 处理未处理的系统事件
+                const unprocessedEvents = ctx.systemEvents.filter(e => !e.processed);
+                for (const event of unprocessedEvents.slice(-3)) { // 只处理最近3个事件
+                    const eventText = QQ_TranslateSystemEvent(event);
+                    if (eventText) {
+                        context.push(eventText);
+                        event.processed = true;
+                    }
+                }
+                
+                return context.length > 0 ? context.join('\n') + '\n' : '';
+            }
+            
+            /**
+             * 翻译系统事件为AI可理解的上下文
+             * @param {Object} event - 系统事件对象
+             * @returns {string} 翻译后的上下文文本
+             */
+            function QQ_TranslateSystemEvent(event) {
+                switch (event.type) {
+                    case QQ_SystemEventTypes.USER_ONLINE:
+                        return `[System Context: {{user}}刚刚上线了]`;
+                        
+                    case QQ_SystemEventTypes.CHAT_SWITCH:
+                        if (event.data.chatType === 'group') {
+                            return `[System Context: {{user}}切换到了群聊"${event.data.chatName}"]`;
+                        } else if (event.data.chatType === 'private') {
+                            return `[System Context: {{user}}打开了与你的私聊窗口]`;
+                        }
+                        break;
+                        
+                    case QQ_SystemEventTypes.MESSAGE_READ:
+                        if (event.data.stage2Context && event.data.stage2Context.detailedReadInfo) {
+                            // Stage 2增强版本 - 提供详细的读取上下文
+                            let contextText = `[System Context: {{user}}刚刚已读了`;
+                            
+                            if (event.data.chatType === 'private') {
+                                contextText += `与你的私聊消息`;
+                            } else if (event.data.chatType === 'group') {
+                                contextText += `群聊"${event.data.chatName}"中的消息`;
+                            } else {
+                                contextText += `聊天"${event.data.chatName}"中的消息`;
+                            }
+                            
+                            if (event.data.unreadCount > 0) {
+                                contextText += `，共${event.data.unreadCount}条未读消息`;
+                            }
+                            
+                            // 添加最近消息的预览信息
+                            if (event.data.lastMessages && event.data.lastMessages.length > 0) {
+                                const latestMsg = event.data.lastMessages[event.data.lastMessages.length - 1];
+                                if (!latestMsg.isUser) { // 如果最新消息不是用户发送的
+                                    contextText += `，最新消息来自"${latestMsg.sender}"`;
+                                }
+                            }
+                            
+                            contextText += `]`;
+                            return contextText;
+                        } else {
+                            // 传统版本
+                            return `[System Context: {{user}}刚刚已读了你发送的消息]`;
+                        }
+                        
+                    case QQ_SystemEventTypes.GROUP_MEMBER_JOIN:
+                        return `[System Context: 系统提示"${event.data.memberName}"加入了群聊"${event.data.groupName}"]`;
+                        
+                    case QQ_SystemEventTypes.GROUP_MEMBER_LEAVE:
+                        return `[System Context: 系统提示"${event.data.memberName}"离开了群聊"${event.data.groupName}"]`;
+                        
+                    case QQ_SystemEventTypes.GROUP_NAME_CHANGE:
+                        return `[System Context: {{user}}将群聊名称从"${event.data.oldName}"修改为"${event.data.newName}"]`;
+                        
+                    default:
+                        return null;
+                }
+            }
+            
+            /**
+             * *** 阶段二：上线/下线状态管理 ***
+             */
+            
+            /**
+             * 用户上线处理
+             */
+            function QQ_HandleUserOnline() {
+                const ctx = window.QQ_SystemContext;
+                
+                if (!ctx.userOnlineStatus) {
+                    ctx.userOnlineStatus = true;
+                    ctx.lastOnlineTime = new Date().toISOString();
+                    
+                    // 记录上线事件
+                    QQ_AddSystemEvent(QQ_SystemEventTypes.USER_ONLINE, {
+                        timestamp: ctx.lastOnlineTime
+                    });
+                    
+                    console.log('🟢 用户上线状态已更新');
+                    
+                    // 触发上线后的处理逻辑（为阶段三做准备）
+                    setTimeout(() => {
+                        QQ_ProcessOnlineActions();
+                    }, 1000);
+                }
+            }
+            
+            /**
+             * 用户下线处理
+             */
+            function QQ_HandleUserOffline() {
+                const ctx = window.QQ_SystemContext;
+                
+                if (ctx.userOnlineStatus) {
+                    ctx.userOnlineStatus = false;
+                    
+                    // 记录下线事件
+                    QQ_AddSystemEvent(QQ_SystemEventTypes.USER_OFFLINE, {
+                        timestamp: new Date().toISOString(),
+                        duration: ctx.lastOnlineTime ? Date.now() - new Date(ctx.lastOnlineTime).getTime() : 0
+                    });
+                    
+                    console.log('🔴 用户下线状态已更新');
+                }
+            }
+            
+            /**
+             * 上线后的处理逻辑（为阶段三主动消息做准备）
+             */
+            function QQ_ProcessOnlineActions() {
+                console.log('🔄 处理用户上线后的逻辑...');
+                // 这里将在阶段三实现主动消息队列的触发
+            }
+            
+            /**
+             * 监听页面可见性变化来检测上线/下线
+             */
+            function QQ_InitializeOnlineStatusDetection() {
+                // 页面可见性变化监听
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        QQ_HandleUserOffline();
+                    } else {
+                        QQ_HandleUserOnline();
+                    }
+                });
+                
+                // 窗口焦点变化监听
+                window.addEventListener('focus', QQ_HandleUserOnline);
+                window.addEventListener('blur', QQ_HandleUserOffline);
+                
+                // 页面加载时设置为上线状态
+                QQ_HandleUserOnline();
+                
+                console.log('✅ 在线状态检测系统已初始化');
+            }
+            
             // 注意：addGroupToContactList和addGroupToMessageList函数已删除
             // 现在统一使用AddNewGroup函数，它会自动处理联系人列表和消息列表的同步
             
@@ -26741,9 +27187,13 @@ ${index + 1}. ${space.name}
             // 在页面加载完成后初始化增强功能
             if (document.readyState === 'complete' || document.readyState === 'interactive') {
                 setTimeout(initializeEnhancedFeatures, 1000);
+                // *** 阶段二：初始化上下文感知系统 ***
+                QQ_InitializeOnlineStatusDetection();
             } else {
                 document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(initializeEnhancedFeatures, 1000);
+                    // *** 阶段二：初始化上下文感知系统 ***
+                    QQ_InitializeOnlineStatusDetection();
                 });
             }
             
