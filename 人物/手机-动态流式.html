@@ -1190,27 +1190,42 @@
                 transform-origin: center bottom;
             }
 
-            /* 长按菜单样式 */
+            /* 长按菜单样式 - 小巧美观版 */
             .long-press-menu {
                 position: fixed;
-                background: white;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 12px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.3);
                 z-index: 10000;
-                min-width: 120px;
-                font-size: 14px;
-                border: 1px solid #e0e0e0;
+                min-width: 90px;
+                font-size: 13px;
+                backdrop-filter: blur(20px);
                 overflow: hidden;
+                transform: scale(0.8);
+                opacity: 0;
+                animation: menuFadeIn 0.25s ease-out forwards;
+            }
+
+            @keyframes menuFadeIn {
+                0% {
+                    opacity: 0;
+                    transform: scale(0.8) translateY(10px);
+                }
+                100% {
+                    opacity: 1;
+                    transform: scale(1) translateY(0);
+                }
             }
 
             .long-press-menu-item {
-                padding: 12px 16px;
+                padding: 8px 12px;
                 cursor: pointer;
-                transition: background-color 0.2s ease;
-                border-bottom: 1px solid #f0f0f0;
+                transition: all 0.2s ease;
+                border-bottom: 1px solid rgba(240,240,240,0.6);
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 6px;
+                font-weight: 500;
             }
 
             .long-press-menu-item:last-child {
@@ -1218,7 +1233,13 @@
             }
 
             .long-press-menu-item:hover {
-                background-color: #f5f5f5;
+                background-color: rgba(0,0,0,0.08);
+                transform: scale(1.02);
+            }
+
+            .long-press-menu-item:active {
+                transform: scale(0.98);
+                background-color: rgba(0,0,0,0.12);
             }
 
             .long-press-menu-item.edit {
@@ -1227,6 +1248,11 @@
 
             .long-press-menu-item.delete {
                 color: #d32f2f;
+            }
+
+            .long-press-menu-item svg {
+                width: 14px;
+                height: 14px;
             }
 
             /* 批量删除模式样式 */
@@ -7641,6 +7667,27 @@
                         const html = _.template(chat_user_message)({ content: SpecialHtml });
                         $container.find(".msgcontent").append(html).scrollTop($container.find(".msgcontent")[0].scrollHeight);
                         input.val("");
+                        
+                        // *** 修复：立即将用户消息记录到数据结构中，避免重复显示 ***
+                        const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                        const userMessage = `${UserName}--${content}--${currentTime}`;
+                        
+                        if (QQ_Groups.includes(name)) {
+                            // 群聊消息
+                            if (!QQ_msgjson.群聊[name]) {
+                                QQ_msgjson.群聊[name] = { msgs: [] };
+                            }
+                            if (!QQ_msgjson.群聊[name].msgs.includes(userMessage)) {
+                                QQ_msgjson.群聊[name].msgs.push(userMessage);
+                            }
+                        } else {
+                            // *** 修复：使用更稳定的私聊消息存储机制 ***
+                            QQ_SaveUserMessageToPrivateChat(name, userMessage);
+                        }
+                        
+                        // *** 新增：立即保存数据到世界书，确保持久化 ***
+                        await QQ_Save_Chat_Backup();
+                        console.log(`✅ 用户消息已记录并保存: ${userMessage}`);
                     }
                     // 整合缓存消息
                     value = QQ_CacheSendMsg;
@@ -8664,7 +8711,7 @@
                     console.log("✅ Moment内容QQ_Msg_Parse调用完成");
                     
                     // *** 在moment内容处理完成后添加系统时间消息 ***
-                    QQ_AddTimeSystemMessageAfterProcessing();
+                    //QQ_AddTimeSystemMessageAfterProcessing();
                     return;
                 }
                 
@@ -8699,9 +8746,6 @@
                     
                     await QQ_Msg_Parse(JSON.stringify(json));
                     console.log("✅ QQ_Msg_Parse调用完成");
-                    
-                    // *** 在消息处理完成后添加系统时间消息 ***
-                    QQ_AddTimeSystemMessageAfterProcessing();
                 } else {
                     console.error("❌ 未找到msg_start...msg_end标签包裹的内容");
                     console.error("❌ 当前content内容:", content);
@@ -20015,8 +20059,9 @@ ${index + 1}. ${space.name}
                 
                 if (isGroup && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs) {
                     allMessages = QQ_msgjson.群聊[name].msgs;
-                } else if (!isGroup && QQ_msgjson.私聊[`${UserName}和${name}的聊天`]) {
-                    allMessages = QQ_msgjson.私聊[`${UserName}和${name}的聊天`];
+                } else if (!isGroup) {
+                    // *** 修复：使用更稳定的私聊消息加载机制 ***
+                    allMessages = QQ_LoadPrivateChatMessages(name);
                 }
                 
                 if (allMessages.length > 0) {
@@ -20636,12 +20681,13 @@ ${index + 1}. ${space.name}
                     display: flex;
                     align-items: center;
                     padding: 4px 8px;
-                    background: rgba(255, 255, 255, 0.9);
-                    border-radius: 15px;
+                    background: transparent;
+                    border-radius: 0;
                     animation: fadeIn 0.3s ease-out;
                     z-index: 10;
                     pointer-events: none;
-                    max-width: calc(100% - 80px);
+                    min-width: 120px;
+                    max-width: calc(100% - 40px);
                     font-size: 12px;
                 `;
                 
@@ -23513,6 +23559,76 @@ ${index + 1}. ${space.name}
              * @param {string} messageContent - 消息内容
              * @param {string} chatName - 聊天名称
              */
+            /**
+             * *** 新增：稳定的私聊消息存储机制 ***
+             * 处理私聊消息存储，支持多种键格式兼容
+             * @param {string} characterName - 角色名称
+             * @param {string} userMessage - 用户消息
+             */
+            function QQ_SaveUserMessageToPrivateChat(characterName, userMessage) {
+                // 支持的私聊键格式
+                const chatKey1 = `${UserName}和${characterName}的聊天`;
+                const chatKey2 = `${characterName}和${UserName}的聊天`;
+                
+                // 确保私聊数据结构存在
+                if (!QQ_msgjson.私聊) {
+                    QQ_msgjson.私聊 = {};
+                }
+                
+                // 查找现有的聊天记录
+                let existingChatKey = null;
+                let existingMessages = null;
+                
+                if (QQ_msgjson.私聊[chatKey1]) {
+                    existingChatKey = chatKey1;
+                    existingMessages = QQ_msgjson.私聊[chatKey1];
+                } else if (QQ_msgjson.私聊[chatKey2]) {
+                    existingChatKey = chatKey2;
+                    existingMessages = QQ_msgjson.私聊[chatKey2];
+                }
+                
+                // 如果找到现有聊天，使用现有的键
+                if (existingChatKey && existingMessages) {
+                    if (!existingMessages.includes(userMessage)) {
+                        existingMessages.push(userMessage);
+                        console.log(`✅ 消息已添加到现有聊天: ${existingChatKey}`);
+                    }
+                } else {
+                    // 如果没有现有聊天，创建新的（使用第一种格式）
+                    QQ_msgjson.私聊[chatKey1] = [userMessage];
+                    console.log(`✅ 创建新的私聊聊天: ${chatKey1}`);
+                }
+            }
+            
+            /**
+             * *** 新增：稳定的私聊消息加载机制 ***
+             * 从数据结构中加载私聊消息，支持多种键格式兼容
+             * @param {string} characterName - 角色名称
+             * @returns {Array} 私聊消息数组
+             */
+            function QQ_LoadPrivateChatMessages(characterName) {
+                if (!QQ_msgjson.私聊) {
+                    return [];
+                }
+                
+                // 支持的私聊键格式
+                const chatKey1 = `${UserName}和${characterName}的聊天`;
+                const chatKey2 = `${characterName}和${UserName}的聊天`;
+                
+                // 查找现有的聊天记录
+                if (QQ_msgjson.私聊[chatKey1]) {
+                    console.log(`✅ 从格式1加载私聊消息: ${chatKey1}`);
+                    return QQ_msgjson.私聊[chatKey1] || [];
+                } else if (QQ_msgjson.私聊[chatKey2]) {
+                    console.log(`✅ 从格式2加载私聊消息: ${chatKey2}`);
+                    return QQ_msgjson.私聊[chatKey2] || [];
+                } else {
+                    console.log(`⚠️ 未找到私聊消息: ${characterName}`);
+                    console.log(`现有私聊键:`, Object.keys(QQ_msgjson.私聊));
+                    return [];
+                }
+            }
+            
             function QQ_AddLongPressHandler(messageElement, messageContent, chatName) {
                 if (!messageElement) return;
                 
@@ -23554,11 +23670,12 @@ ${index + 1}. ${space.name}
                         longPressTimer = null;
                     }
                     
-                    // 如果是长按，阻止默认的点击事件
+                    // 如果是长按，阻止默认的点击事件，但不重置isLongPress
+                    // 让菜单保持显示状态
                     if (isLongPress) {
                         e.preventDefault();
                         e.stopPropagation();
-                        isLongPress = false;
+                        // 注意：不在这里重置 isLongPress，让菜单保持显示
                     }
                 }
                 
@@ -23637,29 +23754,71 @@ ${index + 1}. ${space.name}
                 menu.style.left = Math.min(x, maxX) + 'px';
                 menu.style.top = Math.min(y, maxY) + 'px';
                 
-                // 添加事件监听器
-                editItem.addEventListener('click', () => {
-                    menu.remove();
-                    QQ_EditUserMessage(messageElement, messageContent, chatName);
+                // 添加事件监听器 - 带动画的菜单关闭
+                editItem.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    menu.style.animation = 'menuFadeOut 0.2s ease-in forwards';
+                    setTimeout(() => {
+                        if (menu.parentNode) {
+                            menu.remove();
+                        }
+                        QQ_EditUserMessage(messageElement, messageContent, chatName);
+                    }, 200);
                 });
                 
-                deleteItem.addEventListener('click', () => {
-                    menu.remove();
-                    QQ_DeleteUserMessage(messageElement, messageContent, chatName);
+                deleteItem.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    menu.style.animation = 'menuFadeOut 0.2s ease-in forwards';
+                    setTimeout(() => {
+                        if (menu.parentNode) {
+                            menu.remove();
+                        }
+                        QQ_DeleteUserMessage(messageElement, messageContent, chatName);
+                    }, 200);
                 });
                 
-                // 点击其他地方关闭菜单
+                // 阻止菜单本身的点击事件冒泡
+                menu.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+                
+                // 点击其他地方关闭菜单 - 延迟更长时间确保菜单不会立即消失
                 setTimeout(() => {
                     const closeMenu = (e) => {
-                        if (!menu.contains(e.target)) {
-                            menu.remove();
+                        // 检查点击的目标是否在菜单内或是菜单本身
+                        if (!menu.contains(e.target) && e.target !== menu) {
+                            menu.style.animation = 'menuFadeOut 0.2s ease-in forwards';
+                            setTimeout(() => {
+                                if (menu.parentNode) {
+                                    menu.remove();
+                                }
+                            }, 200);
                             document.removeEventListener('click', closeMenu);
                             document.removeEventListener('touchstart', closeMenu);
                         }
                     };
                     document.addEventListener('click', closeMenu);
                     document.addEventListener('touchstart', closeMenu);
-                }, 100);
+                }, 300); // 增加延迟到300ms
+                
+                // 添加菜单淡出动画
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes menuFadeOut {
+                        0% {
+                            opacity: 1;
+                            transform: scale(1) translateY(0);
+                        }
+                        100% {
+                            opacity: 0;
+                            transform: scale(0.9) translateY(-5px);
+                        }
+                    }
+                `;
+                if (!document.querySelector('style[data-menu-animations]')) {
+                    style.setAttribute('data-menu-animations', 'true');
+                    document.head.appendChild(style);
+                }
             }
             
             /**
@@ -26216,20 +26375,13 @@ ${index + 1}. ${space.name}
                     });
                 }
                 
-                const timeDividerHtml = `
-                    <div class="system-message time-divider" data-timestamp="${Date.now()}">
-                        <span style="
-                            background: rgba(255,255,255,0.9);
-                            padding: 4px 12px;
-                            border-radius: 12px;
-                            border: 1px solid #e0e0e0;
-                            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                            font-weight: 500;
-                        ">📅 ${timeText}</span>
-                    </div>
-                `;
+                // *** 使用标准系统消息格式 ***
+                const systemMessageContent = `系统消息--${timeText}--📅 ${timeText}`;
                 
-                $(chatContainer).append(timeDividerHtml);
+                // 使用标准的系统消息处理函数
+                const msgDiv = $("<div>", { class: "system-message" }).text(`📅 ${timeText}`);
+                $(chatContainer).append(msgDiv);
+                
                 console.log(`⏰ 为 ${chatName} 添加时间分隔消息: ${timeText}`);
                 
                 // 滚动到底部
