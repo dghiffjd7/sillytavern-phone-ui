@@ -5968,7 +5968,7 @@
                     // 第三层: 查找通用的启发式摘要格式
                     if (!cleanSummaryText) cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
                     // 第四层: 前端生成机械式总结
-                    if (!cleanSummaryText) cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
+                    //if (!cleanSummaryText) cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
                     
                     if (!cleanSummaryText || cleanSummaryText.trim() === "") {
                         cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
@@ -25193,8 +25193,8 @@ ${index + 1}. ${space.name}
             }
             
             /**
-             * *** 新增：提取并处理tableEdit标签 ***
-             * 提取AI回复中的tableEdit标签内容，通过SillyTavern后端进行正常处理
+             * *** 新增：处理tableEdit标签 ***
+             * 确保tableEdit标签保留在AI回复中，供SillyTavern后端处理
              * @param {string} result - AI回复内容
              */
             async function QQ_ExtractAndProcessTableEdit(result) {
@@ -25204,7 +25204,7 @@ ${index + 1}. ${space.name}
                 
                 console.log('🗂️ 开始检查tableEdit标签...');
                 
-                // 提取tableEdit标签内容
+                // 检查是否存在tableEdit标签
                 const tableEditMatches = [...result.matchAll(/<tableEdit>([\s\S]*?)<\/tableEdit>/gi)];
                 
                 if (tableEditMatches.length === 0) {
@@ -25212,88 +25212,23 @@ ${index + 1}. ${space.name}
                     return;
                 }
                 
-                console.log(`🎯 发现${tableEditMatches.length}个tableEdit标签，开始处理`);
+                console.log(`🎯 发现${tableEditMatches.length}个tableEdit标签`);
                 
-                // *** 收集所有tableEdit内容，一次性处理以避免重复操作 ***
-                let allTableEditContent = '';
-                
+                // *** 简化策略：让tableEdit标签保留在原始回复中 ***
+                // SillyTavern的后端会自动处理这些标签，我们不需要手动干预
                 for (let i = 0; i < tableEditMatches.length; i++) {
                     const match = tableEditMatches[i];
                     const tableContent = match[1].trim();
                     
-                    if (!tableContent) {
-                        console.log(`⚠️ tableEdit标签${i + 1}内容为空，跳过`);
-                        continue;
-                    }
-                    
-                    console.log(`📦 收集tableEdit内容${i + 1}:`, tableContent.substring(0, 100) + '...');
-                    allTableEditContent += `<tableEdit>${tableContent}</tableEdit>\n`;
-                }
-                
-                // 如果有收集到tableEdit内容，一次性添加到当前楼层
-                if (allTableEditContent.trim()) {
-                    try {
-                        console.log(`📤 使用setChatMessage将所有tableEdit内容添加到当前楼层`);
-                        
-                        // 获取当前消息和turnId
-                        if (typeof chat !== 'undefined' && chat && chat.length > 0) {
-                            const currentTurnId = chat.length - 1; // 当前楼层的索引
-                            const currentMessage = chat[currentTurnId];
-                            
-                            if (currentMessage && !currentMessage.is_user) {
-                                // 获取当前消息内容
-                                let currentContent = currentMessage.mes || '';
-                                
-                                // *** 关键：处理手机JSON结构和表格数据替换 ***
-                                const phoneJsonPattern = /(MiPhone_JSON_START[\s\S]*?MiPhone_JSON_END)/;
-                                const phoneJsonMatch = currentContent.match(phoneJsonPattern);
-                                
-                                if (phoneJsonMatch) {
-                                    // 移除当前消息中所有旧的tableEdit内容（避免重复累积）
-                                    let cleanedContent = currentContent.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/g, '').trim();
-                                    
-                                    // 确保手机JSON结构存在，然后在其后添加新的表格内容
-                                    if (cleanedContent.includes('MiPhone_JSON_END')) {
-                                        // 在MiPhone_JSON_END后添加表格内容
-                                        const updatedContent = cleanedContent.replace(
-                                            'MiPhone_JSON_END', 
-                                            `MiPhone_JSON_END\n\n${allTableEditContent.trim()}`
-                                        );
-                                        
-                                        // 创建更新后的消息对象
-                                        const updatedMessage = {
-                                            ...currentMessage,
-                                            mes: updatedContent
-                                        };
-                                        
-                                        // 使用setChatMessage API更新当前楼层
-                                        if (typeof setChatMessage !== 'undefined') {
-                                            setChatMessage(updatedMessage, currentTurnId);
-                                            console.log(`✅ 所有tableEdit内容已通过setChatMessage添加到楼层${currentTurnId}`);
-                                        } else {
-                                            // 备用方法：直接修改chat数组
-                                            chat[currentTurnId] = updatedMessage;
-                                            console.log(`✅ 所有tableEdit内容已直接添加到chat数组楼层${currentTurnId}`);
-                                        }
-                                    } else {
-                                        console.warn(`⚠️ 未找到MiPhone_JSON_END标记，无法添加tableEdit内容`);
-                                    }
-                                } else {
-                                    console.warn(`⚠️ 未找到手机JSON结构，无法添加tableEdit内容`);
-                                }
-                            } else {
-                                console.warn(`⚠️ 当前消息不是AI消息，无法添加tableEdit内容`);
-                            }
-                        } else {
-                            console.warn(`⚠️ 聊天历史不可用，无法添加tableEdit内容`);
-                        }
-                        
-                    } catch (error) {
-                        console.error(`❌ 使用setChatMessage处理tableEdit内容时出错:`, error);
+                    if (tableContent) {
+                        console.log(`📋 tableEdit标签${i + 1}内容:`, tableContent.substring(0, 100) + '...');
+                    } else {
+                        console.log(`⚠️ tableEdit标签${i + 1}内容为空`);
                     }
                 }
                 
-                console.log(`🎉 tableEdit处理完成，共处理${tableEditMatches.length}个标签`);
+                console.log(`✅ tableEdit标签已确认存在，将由SillyTavern后端自动处理`);
+                console.log(`🎉 tableEdit检查完成，共发现${tableEditMatches.length}个标签`);
             }
             
             /**
