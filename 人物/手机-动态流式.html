@@ -25214,6 +25214,9 @@ ${index + 1}. ${space.name}
                 
                 console.log(`🎯 发现${tableEditMatches.length}个tableEdit标签，开始处理`);
                 
+                // *** 收集所有tableEdit内容，一次性处理以避免重复操作 ***
+                let allTableEditContent = '';
+                
                 for (let i = 0; i < tableEditMatches.length; i++) {
                     const match = tableEditMatches[i];
                     const tableContent = match[1].trim();
@@ -25223,105 +25226,70 @@ ${index + 1}. ${space.name}
                         continue;
                     }
                     
+                    console.log(`📦 收集tableEdit内容${i + 1}:`, tableContent.substring(0, 100) + '...');
+                    allTableEditContent += `<tableEdit>${tableContent}</tableEdit>\n`;
+                }
+                
+                // 如果有收集到tableEdit内容，一次性添加到当前楼层
+                if (allTableEditContent.trim()) {
                     try {
-                        console.log(`📤 发送tableEdit内容${i + 1}到SillyTavern后端:`, tableContent.substring(0, 100) + '...');
+                        console.log(`📤 使用setChatMessage将所有tableEdit内容添加到当前楼层`);
                         
-                        // 获取当前角色名，用于/sendas指令
-                        // 尝试从多个可能的全局变量获取角色名
-                        let currentCharacter = 'Assistant';
-                        
-                        try {
-                            // 方法1: 从name2变量获取（SillyTavern常用）
-                            if (typeof name2 !== 'undefined' && name2) {
-                                currentCharacter = name2;
-                            }
-                            // 方法2: 从全局characters数组获取
-                            else if (typeof characters !== 'undefined' && typeof this_chid !== 'undefined' && characters[this_chid]) {
-                                currentCharacter = characters[this_chid].name;
-                            }
-                            // 方法3: 从可能存在的其他全局变量获取
-                            else if (typeof window.name2 !== 'undefined' && window.name2) {
-                                currentCharacter = window.name2;
-                            }
-                            // 方法4: 从当前聊天上下文获取
-                            else if (window.QQ_SystemContext && window.QQ_SystemContext.currentChatName) {
-                                // 如果是私聊，提取角色名
-                                const chatName = window.QQ_SystemContext.currentChatName;
-                                if (chatName.includes('和') && chatName.includes('的聊天')) {
-                                    const parts = chatName.replace('的聊天', '').split('和');
-                                    currentCharacter = parts.find(part => part !== QQ_GetUserName()) || 'Assistant';
-                                } else {
-                                    currentCharacter = chatName;
-                                }
-                            }
+                        // 获取当前消息和turnId
+                        if (typeof chat !== 'undefined' && chat && chat.length > 0) {
+                            const currentTurnId = chat.length - 1; // 当前楼层的索引
+                            const currentMessage = chat[currentTurnId];
                             
-                            console.log(`🎭 检测到角色名: ${currentCharacter}`);
-                        } catch (error) {
-                            console.warn('⚠️ 获取角色名时出错，使用默认名称:', error);
-                            currentCharacter = 'Assistant';
+                            if (currentMessage && !currentMessage.is_user) {
+                                // 获取当前消息内容
+                                let currentContent = currentMessage.mes || '';
+                                
+                                // *** 关键：处理手机JSON结构和表格数据替换 ***
+                                const phoneJsonPattern = /(MiPhone_JSON_START[\s\S]*?MiPhone_JSON_END)/;
+                                const phoneJsonMatch = currentContent.match(phoneJsonPattern);
+                                
+                                if (phoneJsonMatch) {
+                                    // 移除当前消息中所有旧的tableEdit内容（避免重复累积）
+                                    let cleanedContent = currentContent.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/g, '').trim();
+                                    
+                                    // 确保手机JSON结构存在，然后在其后添加新的表格内容
+                                    if (cleanedContent.includes('MiPhone_JSON_END')) {
+                                        // 在MiPhone_JSON_END后添加表格内容
+                                        const updatedContent = cleanedContent.replace(
+                                            'MiPhone_JSON_END', 
+                                            `MiPhone_JSON_END\n\n${allTableEditContent.trim()}`
+                                        );
+                                        
+                                        // 创建更新后的消息对象
+                                        const updatedMessage = {
+                                            ...currentMessage,
+                                            mes: updatedContent
+                                        };
+                                        
+                                        // 使用setChatMessage API更新当前楼层
+                                        if (typeof setChatMessage !== 'undefined') {
+                                            setChatMessage(updatedMessage, currentTurnId);
+                                            console.log(`✅ 所有tableEdit内容已通过setChatMessage添加到楼层${currentTurnId}`);
+                                        } else {
+                                            // 备用方法：直接修改chat数组
+                                            chat[currentTurnId] = updatedMessage;
+                                            console.log(`✅ 所有tableEdit内容已直接添加到chat数组楼层${currentTurnId}`);
+                                        }
+                                    } else {
+                                        console.warn(`⚠️ 未找到MiPhone_JSON_END标记，无法添加tableEdit内容`);
+                                    }
+                                } else {
+                                    console.warn(`⚠️ 未找到手机JSON结构，无法添加tableEdit内容`);
+                                }
+                            } else {
+                                console.warn(`⚠️ 当前消息不是AI消息，无法添加tableEdit内容`);
+                            }
+                        } else {
+                            console.warn(`⚠️ 聊天历史不可用，无法添加tableEdit内容`);
                         }
                         
-                        // *** 修复：包含tableEdit标签一起发送，不创建新楼层 ***
-                        const fullTableEditContent = `<tableEdit>${tableContent}</tableEdit>`;
-                        
-                        // 不使用/sendas创建新楼层，而是直接将内容发送到当前楼层让后端处理
-                        // 方法：模拟在当前消息中注入tableEdit内容
-                        await new Promise((resolve) => {
-                            setTimeout(() => {
-                                try {
-                                    // 方法1：尝试通过消息事件系统发送
-                                    if (typeof eventSource !== 'undefined' && eventSource) {
-                                        console.log(`📤 通过事件系统发送tableEdit内容${i + 1}`);
-                                        // 创建一个模拟的消息事件
-                                        const customEvent = new CustomEvent('message_received', {
-                                            detail: {
-                                                message: {
-                                                    mes: fullTableEditContent,
-                                                    name: currentCharacter,
-                                                    is_user: false
-                                                }
-                                            }
-                                        });
-                                        document.dispatchEvent(customEvent);
-                                    }
-                                    // 方法2：尝试直接调用SillyTavern的消息处理函数
-                                    else if (typeof addOneMessage !== 'undefined') {
-                                        console.log(`📤 通过addOneMessage发送tableEdit内容${i + 1}`);
-                                        addOneMessage({
-                                            mes: fullTableEditContent,
-                                            name: currentCharacter,
-                                            is_user: false
-                                        });
-                                    }
-                                    // 方法3：直接添加到聊天历史并触发处理
-                                    else {
-                                        console.log(`📤 通过聊天历史注入tableEdit内容${i + 1}`);
-                                        // 将tableEdit内容添加到当前聊天的最后一条消息中
-                                        if (typeof chat !== 'undefined' && chat && chat.length > 0) {
-                                            const lastMessage = chat[chat.length - 1];
-                                            if (lastMessage && !lastMessage.is_user) {
-                                                // 在最后一条AI消息中注入tableEdit内容
-                                                if (!lastMessage.mes.includes('<tableEdit>')) {
-                                                    lastMessage.mes += '\n' + fullTableEditContent;
-                                                    console.log(`✅ tableEdit内容${i + 1}已注入到当前消息`);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    
-                                } catch (error) {
-                                    console.warn(`⚠️ 常规方法失败，尝试备用方法:`, error);
-                                    // 备用方法：使用triggerSlash但不创建新消息
-                                    triggerSlash(`/echo tableEdit: ${tableContent}`);
-                                }
-                                
-                                console.log(`✅ tableEdit内容${i + 1}处理完成`);
-                                resolve();
-                            }, i * 100); // 每个tableEdit间隔100ms
-                        });
-                        
                     } catch (error) {
-                        console.error(`❌ 发送tableEdit内容${i + 1}时出错:`, error);
+                        console.error(`❌ 使用setChatMessage处理tableEdit内容时出错:`, error);
                     }
                 }
                 
