@@ -20592,11 +20592,41 @@ ${index + 1}. ${space.name}
                 const typingIndicator = document.createElement('div');
                 typingIndicator.className = 'typing-indicator';
                 
-                // 获取输入框位置信息
-                const inputContainer = currentChatPage.querySelector('.input-container');
-                const inputRect = inputContainer ? inputContainer.getBoundingClientRect() : null;
-                const userInput = inputContainer ? inputContainer.querySelector('.userInput') : null;
-                const userInputRect = userInput ? userInput.getBoundingClientRect() : null;
+                // *** 修复：更稳定的输入容器查找方法 ***
+                // 方法1：从当前聊天页面查找
+                let inputContainer = null;
+                if (currentChatPage) {
+                    inputContainer = currentChatPage.querySelector('.input-container');
+                }
+                
+                // 方法2：查找当前显示的聊天页面（display不为none）
+                if (!inputContainer) {
+                    const visibleChatPages = document.querySelectorAll('.QQ_chat_page');
+                    for (const page of visibleChatPages) {
+                        const style = window.getComputedStyle(page);
+                        if (style.display !== 'none') {
+                            inputContainer = page.querySelector('.input-container');
+                            if (inputContainer) break;
+                        }
+                    }
+                }
+                
+                // 方法3：直接查找第一个可见的输入容器
+                if (!inputContainer) {
+                    const allInputContainers = document.querySelectorAll('.input-container');
+                    for (const container of allInputContainers) {
+                        const style = window.getComputedStyle(container);
+                        if (style.display !== 'none' && style.visibility !== 'hidden') {
+                            inputContainer = container;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!inputContainer) {
+                    console.warn('❌ 未找到输入容器，无法显示输入指示器');
+                    return null;
+                }
                 
                 typingIndicator.style.cssText = `
                     position: absolute;
@@ -20609,16 +20639,18 @@ ${index + 1}. ${space.name}
                     background: rgba(255, 255, 255, 0.9);
                     border-radius: 15px;
                     animation: fadeIn 0.3s ease-out;
-                    z-index: 1001;
+                    z-index: 10;
                     pointer-events: none;
                     max-width: calc(100% - 80px);
                     font-size: 12px;
                 `;
                 
-                // 将输入指示器直接添加到输入框容器内
+                // 将输入指示器添加到输入容器内
                 if (inputContainer) {
-                    inputContainer.style.position = 'relative';
+                    // 不要修改input-container的position，因为它已经是absolute定位
+                    // 只是确保它可以包含绝对定位的子元素
                     inputContainer.appendChild(typingIndicator);
+                    console.log('✅ 输入指示器已添加到输入容器');
                 }
                 
                 // 创建头像 - 私聊固定头像，群聊随机变化
