@@ -8662,6 +8662,9 @@
                     
                     await QQ_Msg_Parse(JSON.stringify(json));
                     console.log("✅ Moment内容QQ_Msg_Parse调用完成");
+                    
+                    // *** 在moment内容处理完成后添加系统时间消息 ***
+                    QQ_AddTimeSystemMessageAfterProcessing();
                     return;
                 }
                 
@@ -8696,10 +8699,57 @@
                     
                     await QQ_Msg_Parse(JSON.stringify(json));
                     console.log("✅ QQ_Msg_Parse调用完成");
+                    
+                    // *** 在消息处理完成后添加系统时间消息 ***
+                    QQ_AddTimeSystemMessageAfterProcessing();
                 } else {
                     console.error("❌ 未找到msg_start...msg_end标签包裹的内容");
                     console.error("❌ 当前content内容:", content);
                     console.error("❌ 这可能是QQ_AutoCompleteMsgTags函数的问题");
+                }
+            }
+            
+            /**
+             * *** 在消息处理完成后添加系统时间消息 ***
+             * 为当前活跃的聊天界面添加时间分隔器，用于区分历史消息和新消息
+             */
+            function QQ_AddTimeSystemMessageAfterProcessing() {
+                try {
+                    console.log("🕒 开始添加系统时间消息...");
+                    
+                    // 查找当前可见的聊天页面
+                    const visibleChatPage = $('.QQ_chat_page:visible').first();
+                    if (visibleChatPage.length > 0) {
+                        const chatName = visibleChatPage.attr('data-name');
+                        const groupId = visibleChatPage.attr('data-group-id');
+                        const chatContainer = visibleChatPage.find('.msgcontent')[0];
+                        
+                        if (chatContainer && chatName) {
+                            console.log(`🕒 为聊天 ${chatName} 添加系统时间消息`);
+                            QQ_AddTimeDividerMessage(chatContainer, chatName);
+                        }
+                    }
+                    
+                    // 如果是群聊页面，也需要处理
+                    const visibleGroupPage = $('.group-chat-page:visible').first();
+                    if (visibleGroupPage.length > 0) {
+                        const groupId = visibleGroupPage.attr('data-group-id');
+                        const chatContainer = visibleGroupPage.find('.group-chat-messages')[0];
+                        
+                        if (chatContainer && groupId) {
+                            // 从存储的群聊数据中找到群聊名称
+                            const storedGroups = window.QQ_Group_Chats_Data || [];
+                            const groupData = storedGroups.find(g => g.id === groupId);
+                            const groupName = groupData ? groupData.name : groupId;
+                            
+                            console.log(`🕒 为群聊 ${groupName} 添加系统时间消息`);
+                            QQ_AddTimeDividerMessage(chatContainer, groupName);
+                        }
+                    }
+                    
+                    console.log("✅ 系统时间消息添加完成");
+                } catch (error) {
+                    console.error("❌ 添加系统时间消息时出错:", error);
                 }
             }
             
@@ -20549,33 +20599,40 @@ ${index + 1}. ${space.name}
                 const userInputRect = userInput ? userInput.getBoundingClientRect() : null;
                 
                 typingIndicator.style.cssText = `
-                    position: fixed;
-                    bottom: ${inputRect ? window.innerHeight - inputRect.top + 15 : 80}px;
-                    left: ${userInputRect ? userInputRect.left : '50%'}px;
-                    transform: ${userInputRect ? 'none' : 'translateX(-50%)'};
+                    position: absolute;
+                    top: 50%;
+                    left: 12px;
+                    transform: translateY(-50%);
                     display: flex;
                     align-items: center;
-                    padding: 8px 12px;
-                    background: transparent;
-                    border-radius: 20px;
+                    padding: 4px 8px;
+                    background: rgba(255, 255, 255, 0.9);
+                    border-radius: 15px;
                     animation: fadeIn 0.3s ease-out;
-                    z-index: 1000;
+                    z-index: 1001;
                     pointer-events: none;
+                    max-width: calc(100% - 80px);
+                    font-size: 12px;
                 `;
                 
-                // 同时调整聊天内容区域的下边距，为输入指示器留出空间
-                const msgContent = currentChatPage.querySelector('.msgcontent');
-                if (msgContent) {
-                    msgContent.style.marginBottom = '70px'; // 增加底部边距
+                // 将输入指示器直接添加到输入框容器内
+                if (inputContainer) {
+                    inputContainer.style.position = 'relative';
+                    inputContainer.appendChild(typingIndicator);
                 }
                 
                 // 创建头像 - 私聊固定头像，群聊随机变化
-                const avatar = document.createElement('img');
+                const avatar = document.createElement('div');
+                avatar.className = 'head'; // 使用角色头像系统的CSS类
                 avatar.style.cssText = `
-                    width: 24px;
-                    height: 24px;
+                    width: 16px;
+                    height: 16px;
                     border-radius: 50%;
-                    margin-right: 8px;
+                    margin-right: 6px;
+                    flex-shrink: 0;
+                    background-size: cover;
+                    background-position: center;
+                    background-repeat: no-repeat;
                 `;
                 
                 if (isGroupChat) {
@@ -20586,38 +20643,40 @@ ${index + 1}. ${space.name}
                     
                     if (groupMembers.length > 0) {
                         // 设置初始头像
-                        avatar.src = QQ_GetUserAvatar(groupMembers[Math.floor(Math.random() * groupMembers.length)]);
+                        let currentMember = groupMembers[Math.floor(Math.random() * groupMembers.length)];
+                        avatar.setAttribute('data-name', currentMember);
                         
                         // 定时切换头像
                         const avatarInterval = setInterval(() => {
-                            const randomMember = groupMembers[Math.floor(Math.random() * groupMembers.length)];
-                            avatar.src = QQ_GetUserAvatar(randomMember);
+                            currentMember = groupMembers[Math.floor(Math.random() * groupMembers.length)];
+                            avatar.setAttribute('data-name', currentMember);
                         }, Math.random() * 2500 + 500); // 0.5-3秒随机间隔
                         
                         // 存储定时器ID以便清理
                         typingIndicator.avatarInterval = avatarInterval;
                     } else {
-                        // 如果没有群成员信息，使用默认头像
-                        avatar.src = QQ_GetUserAvatar(senderName);
+                        // 如果没有群成员信息，使用当前聊天名称作为默认
+                        avatar.setAttribute('data-name', chatName);
                     }
                 } else {
                     // 私聊：使用固定联系人头像
-                    avatar.src = QQ_GetUserAvatar(chatName);
+                    avatar.setAttribute('data-name', chatName);
                 }
                 
                 // 创建动画点点
                 const dots = document.createElement('div');
                 dots.style.cssText = `
                     display: flex;
-                    gap: 3px;
+                    gap: 2px;
+                    align-items: center;
                 `;
                 
                 for (let i = 0; i < 3; i++) {
                     const dot = document.createElement('div');
                     dot.className = `liquid-dot dot-${i}`;
                     dot.style.cssText = `
-                        width: 10px;
-                        height: 10px;
+                        width: 6px;
+                        height: 6px;
                         background: radial-gradient(circle at 30% 30%, #999, #666, #555);
                         border-radius: 50%;
                         position: relative;
@@ -20767,19 +20826,19 @@ ${index + 1}. ${space.name}
                 const displayText = isGroupChat ? '多人正在输入' : `${senderName}正在输入`;
                 typingText.textContent = displayText;
                 typingText.style.cssText = `
-                    font-size: 12px;
+                    font-size: 10px;
                     color: #666;
-                    margin-left: 8px;
+                    margin-left: 6px;
                     opacity: 0.8;
                     animation: typingTextFade 2s infinite ease-in-out;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 `;
                 
                 typingIndicator.appendChild(avatar);
                 typingIndicator.appendChild(dots);
                 typingIndicator.appendChild(typingText);
-                
-                // 添加到页面body，实现悬浮效果
-                document.body.appendChild(typingIndicator);
                 
                 return typingIndicator;
             }
@@ -23239,11 +23298,12 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
-                    // 如果是用户消息，启动状态模拟
+                    // 如果是用户消息，启动状态模拟和长按功能
                     if (isUser) {
                         const lastMessage = $(dom).children().last()[0];
                         if (lastMessage) {
                             QQ_SimulateMessageStatusChange(lastMessage);
+                            QQ_AddLongPressHandler(lastMessage, messageContent, name);
                         }
                     }
                 }
@@ -23367,30 +23427,329 @@ ${index + 1}. ${space.name}
                 
                 console.log(`🎈 为${isUser ? '用户' : '角色'}消息应用气球冒出动画，元素:`, messageElement);
                 
+                // 找到实际的气泡元素
+                let bubbleElement;
+                if (isUser) {
+                    // 用户消息：查找 .QQ_chat_mymsg 元素
+                    bubbleElement = messageElement.classList.contains('QQ_chat_mymsg') 
+                        ? messageElement 
+                        : messageElement.querySelector('.QQ_chat_mymsg');
+                } else {
+                    // 角色消息：查找 .QQ_chat_charmsg 元素
+                    bubbleElement = messageElement.classList.contains('QQ_chat_charmsg') 
+                        ? messageElement 
+                        : messageElement.querySelector('.QQ_chat_charmsg');
+                }
+                
+                if (!bubbleElement) {
+                    console.log(`❌ 未找到气泡元素，isUser: ${isUser}, messageElement:`, messageElement);
+                    // 如果找不到特定的气泡元素，就使用传入的元素
+                    bubbleElement = messageElement;
+                }
+                
+                console.log(`🎯 找到气泡元素:`, bubbleElement);
+                
                 // 选择合适的动画类
                 const animationClass = isUser ? 'bubble-pop-animation-user' : 'bubble-pop-animation';
                 
                 // 重置所有可能影响动画的样式
-                messageElement.style.opacity = '';
-                messageElement.style.transform = '';
-                messageElement.style.animation = '';
-                messageElement.classList.remove('bubble-pop-animation', 'bubble-pop-animation-user');
+                bubbleElement.style.opacity = '';
+                bubbleElement.style.transform = '';
+                bubbleElement.style.animation = '';
+                bubbleElement.classList.remove('bubble-pop-animation', 'bubble-pop-animation-user');
                 
                 // 强制重排，确保样式重置生效
-                messageElement.offsetHeight;
+                bubbleElement.offsetHeight;
                 
                 // 使用 requestAnimationFrame 确保样式应用后再添加动画
                 requestAnimationFrame(() => {
-                    console.log(`🎯 正在添加动画类: ${animationClass}`);
-                    messageElement.classList.add(animationClass);
+                    console.log(`🎯 正在为${isUser ? '用户' : '角色'}气泡添加动画类: ${animationClass}`);
+                    bubbleElement.classList.add(animationClass);
                     
                     // 动画完成后清理样式
                     const animationDuration = isUser ? 700 : 800; // 毫秒 - 匹配新的动画时长
                     setTimeout(() => {
-                        messageElement.classList.remove(animationClass);
-                        console.log(`✅ 气球动画完成并已清理样式`);
+                        bubbleElement.classList.remove(animationClass);
+                        console.log(`✅ ${isUser ? '用户' : '角色'}气球动画完成并已清理样式`);
                     }, animationDuration);
                 });
+            }
+            
+            /**
+             * *** 新增：为用户消息添加长按功能 ***
+             * @param {Element} messageElement - 消息元素
+             * @param {string} messageContent - 消息内容
+             * @param {string} chatName - 聊天名称
+             */
+            function QQ_AddLongPressHandler(messageElement, messageContent, chatName) {
+                if (!messageElement) return;
+                
+                let longPressTimer = null;
+                let startX = 0, startY = 0;
+                let isLongPress = false;
+                
+                // 开始长按检测
+                function startLongPress(e) {
+                    const touch = e.touches ? e.touches[0] : e;
+                    startX = touch.clientX;
+                    startY = touch.clientY;
+                    isLongPress = false;
+                    
+                    longPressTimer = setTimeout(() => {
+                        isLongPress = true;
+                        showLongPressMenu(e, messageElement, messageContent, chatName);
+                    }, 500); // 500ms长按触发
+                }
+                
+                // 检测移动，如果移动太多则取消长按
+                function checkMove(e) {
+                    if (!longPressTimer) return;
+                    
+                    const touch = e.touches ? e.touches[0] : e;
+                    const deltaX = Math.abs(touch.clientX - startX);
+                    const deltaY = Math.abs(touch.clientY - startY);
+                    
+                    if (deltaX > 10 || deltaY > 10) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                }
+                
+                // 结束长按检测
+                function endLongPress(e) {
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                    
+                    // 如果是长按，阻止默认的点击事件
+                    if (isLongPress) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        isLongPress = false;
+                    }
+                }
+                
+                // 添加事件监听器
+                messageElement.addEventListener('touchstart', startLongPress, { passive: false });
+                messageElement.addEventListener('mousedown', startLongPress, { passive: false });
+                
+                messageElement.addEventListener('touchmove', checkMove, { passive: false });
+                messageElement.addEventListener('mousemove', checkMove, { passive: false });
+                
+                messageElement.addEventListener('touchend', endLongPress, { passive: false });
+                messageElement.addEventListener('mouseup', endLongPress, { passive: false });
+                messageElement.addEventListener('mouseleave', endLongPress, { passive: false });
+                
+                // 阻止右键菜单，使用我们自己的长按菜单
+                messageElement.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    showLongPressMenu(e, messageElement, messageContent, chatName);
+                });
+            }
+            
+            /**
+             * *** 新增：显示长按菜单 ***
+             * @param {Event} e - 事件对象
+             * @param {Element} messageElement - 消息元素
+             * @param {string} messageContent - 消息内容
+             * @param {string} chatName - 聊天名称
+             */
+            function showLongPressMenu(e, messageElement, messageContent, chatName) {
+                // 移除已存在的菜单
+                const existingMenu = document.querySelector('.long-press-menu');
+                if (existingMenu) {
+                    existingMenu.remove();
+                }
+                
+                // 创建菜单
+                const menu = document.createElement('div');
+                menu.className = 'long-press-menu';
+                
+                // 编辑选项
+                const editItem = document.createElement('div');
+                editItem.className = 'long-press-menu-item edit';
+                editItem.innerHTML = `
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                    <span>编辑</span>
+                `;
+                
+                // 删除选项
+                const deleteItem = document.createElement('div');
+                deleteItem.className = 'long-press-menu-item delete';
+                deleteItem.innerHTML = `
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                    </svg>
+                    <span>删除</span>
+                `;
+                
+                menu.appendChild(editItem);
+                menu.appendChild(deleteItem);
+                
+                // 添加到页面
+                document.body.appendChild(menu);
+                
+                // 定位菜单
+                const touch = e.touches ? e.touches[0] : e;
+                const x = touch.clientX;
+                const y = touch.clientY;
+                
+                // 确保菜单不会超出屏幕
+                const menuRect = menu.getBoundingClientRect();
+                const maxX = window.innerWidth - menuRect.width - 10;
+                const maxY = window.innerHeight - menuRect.height - 10;
+                
+                menu.style.left = Math.min(x, maxX) + 'px';
+                menu.style.top = Math.min(y, maxY) + 'px';
+                
+                // 添加事件监听器
+                editItem.addEventListener('click', () => {
+                    menu.remove();
+                    QQ_EditUserMessage(messageElement, messageContent, chatName);
+                });
+                
+                deleteItem.addEventListener('click', () => {
+                    menu.remove();
+                    QQ_DeleteUserMessage(messageElement, messageContent, chatName);
+                });
+                
+                // 点击其他地方关闭菜单
+                setTimeout(() => {
+                    const closeMenu = (e) => {
+                        if (!menu.contains(e.target)) {
+                            menu.remove();
+                            document.removeEventListener('click', closeMenu);
+                            document.removeEventListener('touchstart', closeMenu);
+                        }
+                    };
+                    document.addEventListener('click', closeMenu);
+                    document.addEventListener('touchstart', closeMenu);
+                }, 100);
+            }
+            
+            /**
+             * *** 新增：编辑用户消息 ***
+             * @param {Element} messageElement - 消息元素
+             * @param {string} messageContent - 消息内容
+             * @param {string} chatName - 聊天名称
+             */
+            function QQ_EditUserMessage(messageElement, messageContent, chatName) {
+                // 创建编辑输入框
+                const input = document.createElement('textarea');
+                input.value = messageContent;
+                input.style.cssText = `
+                    width: 100%;
+                    min-height: 60px;
+                    padding: 8px;
+                    border: 1px solid #ddd;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    resize: vertical;
+                    outline: none;
+                    font-family: inherit;
+                `;
+                
+                // 创建按钮容器
+                const buttonContainer = document.createElement('div');
+                buttonContainer.style.cssText = `
+                    display: flex;
+                    gap: 8px;
+                    margin-top: 8px;
+                    justify-content: flex-end;
+                `;
+                
+                // 确认按钮
+                const confirmBtn = document.createElement('button');
+                confirmBtn.textContent = '确认';
+                confirmBtn.style.cssText = `
+                    padding: 6px 12px;
+                    background: #1976d2;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                `;
+                
+                // 取消按钮
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '取消';
+                cancelBtn.style.cssText = `
+                    padding: 6px 12px;
+                    background: #f5f5f5;
+                    color: #333;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                `;
+                
+                buttonContainer.appendChild(cancelBtn);
+                buttonContainer.appendChild(confirmBtn);
+                
+                // 保存原始内容
+                const originalContent = messageElement.innerHTML;
+                
+                // 替换消息内容为编辑界面
+                messageElement.innerHTML = '';
+                messageElement.appendChild(input);
+                messageElement.appendChild(buttonContainer);
+                
+                // 聚焦输入框
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+                
+                // 确认编辑
+                confirmBtn.addEventListener('click', () => {
+                    const newContent = input.value.trim();
+                    if (newContent && newContent !== messageContent) {
+                        // 这里可以添加更新消息的逻辑
+                        // 目前只是恢复显示并显示新内容
+                        messageElement.innerHTML = originalContent;
+                        const contentDiv = messageElement.querySelector('div[style*="width:auto"]');
+                        if (contentDiv) {
+                            contentDiv.innerHTML = newContent;
+                        }
+                        console.log(`消息已编辑: "${messageContent}" -> "${newContent}"`);
+                        toastr.success('消息已编辑');
+                    } else {
+                        messageElement.innerHTML = originalContent;
+                    }
+                });
+                
+                // 取消编辑
+                cancelBtn.addEventListener('click', () => {
+                    messageElement.innerHTML = originalContent;
+                });
+                
+                // ESC键取消编辑
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        messageElement.innerHTML = originalContent;
+                    }
+                });
+            }
+            
+            /**
+             * *** 新增：删除用户消息 ***
+             * @param {Element} messageElement - 消息元素
+             * @param {string} messageContent - 消息内容
+             * @param {string} chatName - 聊天名称
+             */
+            function QQ_DeleteUserMessage(messageElement, messageContent, chatName) {
+                if (confirm('确定要删除这条消息吗？')) {
+                    // 添加删除动画
+                    messageElement.style.transition = 'all 0.3s ease-out';
+                    messageElement.style.opacity = '0';
+                    messageElement.style.transform = 'translateX(100%)';
+                    
+                    setTimeout(() => {
+                        messageElement.remove();
+                        console.log(`消息已删除: "${messageContent}"`);
+                        toastr.success('消息已删除');
+                    }, 300);
+                }
             }
             
             function QQ_Chat_AddUserMsg(element, msg) {
@@ -25909,27 +26268,59 @@ ${index + 1}. ${space.name}
             function QQ_OpenPrivateChat(characterName) {
                 console.log(`🔗 打开与 ${characterName} 的私聊`);
                 
-                // 切换到消息页面
-                QQ_Nav('message');
+                // 优先尝试在联系人页面查找并打开私聊
+                // 第一步：切换到联系人页面
+                if (typeof QQ_Nav === 'function') {
+                    QQ_Nav('people');
+                } else {
+                    console.warn('QQ_Nav函数不可用，尝试手动切换页面');
+                    // 手动显示联系人页面
+                    $('.QQ_chat_page').hide();
+                    $('#App_QQ').show();
+                }
                 
-                // 稍等一下确保页面切换完成，然后打开对应私聊
+                // 稍等一下确保页面切换完成，然后查找联系人
                 setTimeout(() => {
-                    // 查找对应的私聊项目并点击
-                    const chatItems = document.querySelectorAll('.QQ_chat_list_item');
-                    for (const item of chatItems) {
-                        const nameElement = item.querySelector('.QQ_chat_list_item_name');
-                        if (nameElement && nameElement.textContent.trim() === characterName) {
-                            // 模拟点击事件
-                            item.click();
-                            console.log(`✅ 已打开与 ${characterName} 的私聊`);
-                            return;
+                    // 第二步：在联系人列表中查找对应角色
+                    const contactItems = document.querySelectorAll('.QQ_home_usermsg');
+                    for (const item of contactItems) {
+                        const nameElement = item.querySelector('.QQ_home_name, .QQ_home_name strong');
+                        if (nameElement) {
+                            const contactName = nameElement.textContent.trim();
+                            if (contactName === characterName) {
+                                console.log(`✅ 找到联系人 ${characterName}，模拟点击`);
+                                // 模拟点击联系人项
+                                item.click();
+                                return;
+                            }
                         }
                     }
                     
-                    // 如果没找到，可能需要创建新的私聊
-                    console.log(`⚠️ 未找到与 ${characterName} 的私聊，尝试创建新对话`);
-                    // 这里可以添加创建新私聊的逻辑
-                    QQ_OpenChat(characterName, false);
+                    // 如果在联系人页面没找到，尝试在消息页面查找
+                    console.log(`⚠️ 在联系人页面未找到 ${characterName}，尝试在消息页面查找`);
+                    
+                    // 切换到消息页面
+                    if (typeof QQ_Nav === 'function') {
+                        QQ_Nav('message');
+                    }
+                    
+                    setTimeout(() => {
+                        // 查找对应的私聊项目并点击
+                        const chatItems = document.querySelectorAll('.QQ_chat_list_item');
+                        for (const item of chatItems) {
+                            const nameElement = item.querySelector('.QQ_chat_list_item_name');
+                            if (nameElement && nameElement.textContent.trim() === characterName) {
+                                // 模拟点击事件
+                                item.click();
+                                console.log(`✅ 在消息页面找到并打开与 ${characterName} 的私聊`);
+                                return;
+                            }
+                        }
+                        
+                        // 最后的备选方案：创建新的私聊
+                        console.log(`⚠️ 未找到与 ${characterName} 的现有对话，尝试创建新对话`);
+                        QQ_OpenChat(characterName, false);
+                    }, 200);
                 }, 200);
             }
             
