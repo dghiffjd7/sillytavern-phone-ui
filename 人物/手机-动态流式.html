@@ -8618,12 +8618,50 @@
              * *** MSG标签自动补全 ***
              */
             function QQ_AutoCompleteMsgTags(content) {
-                // 如果内容包含moment_start，说明是动态内容，应该保持原格式不变
-                if (content.includes('moment_start')) {
-                    console.log("🔧 检测到moment内容，跳过msg标签自动补全");
+                // *** 修复：检测到moment内容时，仍需处理后续的私聊群聊消息 ***
+                let hasStartTag = content.indexOf("msg_start") >= 0;
+                let hasEndTag = content.indexOf("msg_end") >= 0;
+                
+                // 如果已经有完整的msg标签，直接返回
+                if (hasStartTag && hasEndTag) {
+                    console.log("🔧 已有完整msg标签，无需补全");
                     return content;
                 }
                 
+                console.log("🔧 开始msg标签自动补全...");
+                
+                // *** 新增：分离moment内容和消息内容进行处理 ***
+                if (content.includes('moment_start')) {
+                    console.log("🔧 检测到moment内容，进行混合内容处理");
+                    
+                    // 找到moment内容的结束位置
+                    const momentEndIndex = content.lastIndexOf('moment_end');
+                    if (momentEndIndex !== -1) {
+                        const momentPart = content.substring(0, momentEndIndex + 10); // 包含moment_end
+                        let messagePart = content.substring(momentEndIndex + 10).trim();
+                        
+                        // 如果moment后有消息内容，处理消息部分
+                        if (messagePart && (messagePart.includes('聊天') || messagePart.includes('私聊') || messagePart.includes('群聊'))) {
+                            console.log("🔧 moment后发现消息内容，进行处理:", messagePart.substring(0, 100) + '...');
+                            messagePart = QQ_AutoCompleteMsgTagsForMessagePart(messagePart);
+                            return momentPart + '\n' + messagePart;
+                        } else {
+                            console.log("🔧 moment后无消息内容");
+                            return content;
+                        }
+                    }
+                }
+                
+                // *** 继续处理普通消息内容 ***
+                return QQ_AutoCompleteMsgTagsForMessagePart(content);
+            }
+            
+            /**
+             * *** 新增：专门处理消息部分的msg标签补全 ***
+             * @param {string} content - 消息内容
+             * @returns {string} 补全标签后的内容
+             */
+            function QQ_AutoCompleteMsgTagsForMessagePart(content) {
                 if (content.indexOf("msg_start") < 0) {
                     let start = content.match(/<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/);
                     if (start) {
@@ -25223,15 +25261,61 @@ ${index + 1}. ${space.name}
                             currentCharacter = 'Assistant';
                         }
                         
-                        // 构建/sendas指令
-                        const sendAsCommand = `/sendas name=${currentCharacter} ${tableContent}`;
+                        // *** 修复：包含tableEdit标签一起发送，不创建新楼层 ***
+                        const fullTableEditContent = `<tableEdit>${tableContent}</tableEdit>`;
                         
-                        // 使用triggerSlash发送到SillyTavern后端
+                        // 不使用/sendas创建新楼层，而是直接将内容发送到当前楼层让后端处理
+                        // 方法：模拟在当前消息中注入tableEdit内容
                         await new Promise((resolve) => {
-                            // 添加短暂延迟，确保命令按顺序处理
                             setTimeout(() => {
-                                triggerSlash(sendAsCommand);
-                                console.log(`✅ tableEdit内容${i + 1}已发送到后端`);
+                                try {
+                                    // 方法1：尝试通过消息事件系统发送
+                                    if (typeof eventSource !== 'undefined' && eventSource) {
+                                        console.log(`📤 通过事件系统发送tableEdit内容${i + 1}`);
+                                        // 创建一个模拟的消息事件
+                                        const customEvent = new CustomEvent('message_received', {
+                                            detail: {
+                                                message: {
+                                                    mes: fullTableEditContent,
+                                                    name: currentCharacter,
+                                                    is_user: false
+                                                }
+                                            }
+                                        });
+                                        document.dispatchEvent(customEvent);
+                                    }
+                                    // 方法2：尝试直接调用SillyTavern的消息处理函数
+                                    else if (typeof addOneMessage !== 'undefined') {
+                                        console.log(`📤 通过addOneMessage发送tableEdit内容${i + 1}`);
+                                        addOneMessage({
+                                            mes: fullTableEditContent,
+                                            name: currentCharacter,
+                                            is_user: false
+                                        });
+                                    }
+                                    // 方法3：直接添加到聊天历史并触发处理
+                                    else {
+                                        console.log(`📤 通过聊天历史注入tableEdit内容${i + 1}`);
+                                        // 将tableEdit内容添加到当前聊天的最后一条消息中
+                                        if (typeof chat !== 'undefined' && chat && chat.length > 0) {
+                                            const lastMessage = chat[chat.length - 1];
+                                            if (lastMessage && !lastMessage.is_user) {
+                                                // 在最后一条AI消息中注入tableEdit内容
+                                                if (!lastMessage.mes.includes('<tableEdit>')) {
+                                                    lastMessage.mes += '\n' + fullTableEditContent;
+                                                    console.log(`✅ tableEdit内容${i + 1}已注入到当前消息`);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                } catch (error) {
+                                    console.warn(`⚠️ 常规方法失败，尝试备用方法:`, error);
+                                    // 备用方法：使用triggerSlash但不创建新消息
+                                    triggerSlash(`/echo tableEdit: ${tableContent}`);
+                                }
+                                
+                                console.log(`✅ tableEdit内容${i + 1}处理完成`);
                                 resolve();
                             }, i * 100); // 每个tableEdit间隔100ms
                         });
