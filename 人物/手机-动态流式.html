@@ -9319,6 +9319,9 @@
                 
                 console.log('🔍 开始智能提取content内容，原始内容长度:', content.length);
                 
+                // *** 预处理：提取并处理 tableEdit 标签 ***
+                QQ_ProcessTableEdit(content);
+                
                 // *** 第一步：智能提取content内容（包括嵌套情况） ***
                 let extractedContent = QQ_ExtractNestedContentTags(content);
                 
@@ -12761,6 +12764,10 @@
                         if (aiResponse && aiResponse.trim()) {
                             // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
                             const processedResponse = aiResponse.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                            
+                            // *** 处理 tableEdit 标签 ***
+                            QQ_ProcessTableEdit(processedResponse);
+                            
                             // 解析AI回复，提取content内容
                             const contentMatch = processedResponse.match(/<content>([\s\S]*?)<\/content>/i);
                             const interactiveContent = contentMatch ? contentMatch[1].trim() : processedResponse.trim();
@@ -14538,6 +14545,10 @@ ${replyText}
                         if (aiResponse && aiResponse.trim()) {
                             // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
                             const processedResponse = aiResponse.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                            
+                            // *** 处理 tableEdit 标签 ***
+                            QQ_ProcessTableEdit(processedResponse);
+                            
                             // 解析AI回复，提取content内容
                             const contentMatch = processedResponse.match(/<content>([\s\S]*?)<\/content>/i);
                             const newInteractiveContent = contentMatch ? contentMatch[1].trim() : processedResponse.trim();
@@ -20393,7 +20404,13 @@ ${index + 1}. ${space.name}
             function QQ_ShowTypingIndicator(chatContainer, senderName) {
                 // 移除已存在的输入指示器（从所有可能位置移除）
                 const existingIndicators = document.querySelectorAll('.typing-indicator');
-                existingIndicators.forEach(indicator => indicator.remove());
+                existingIndicators.forEach(indicator => {
+                    // 清理定时器
+                    if (indicator.avatarInterval) {
+                        clearInterval(indicator.avatarInterval);
+                    }
+                    indicator.remove();
+                });
                 
                 // 检查是否为群聊
                 const currentChatPage = chatContainer.closest('.QQ_chat_page');
@@ -20407,12 +20424,14 @@ ${index + 1}. ${space.name}
                 // 获取输入框位置信息
                 const inputContainer = currentChatPage.querySelector('.input-container');
                 const inputRect = inputContainer ? inputContainer.getBoundingClientRect() : null;
+                const userInput = inputContainer ? inputContainer.querySelector('.userInput') : null;
+                const userInputRect = userInput ? userInput.getBoundingClientRect() : null;
                 
                 typingIndicator.style.cssText = `
                     position: fixed;
                     bottom: ${inputRect ? window.innerHeight - inputRect.top + 5 : 70}px;
-                    left: 50%;
-                    transform: translateX(-50%);
+                    left: ${userInputRect ? userInputRect.left : '50%'}px;
+                    transform: ${userInputRect ? 'none' : 'translateX(-50%)'};
                     display: flex;
                     align-items: center;
                     padding: 8px 12px;
@@ -20423,7 +20442,7 @@ ${index + 1}. ${space.name}
                     pointer-events: none;
                 `;
                 
-                // 创建头像
+                // 创建头像 - 私聊固定头像，群聊随机变化
                 const avatar = document.createElement('img');
                 avatar.style.cssText = `
                     width: 24px;
@@ -20431,7 +20450,33 @@ ${index + 1}. ${space.name}
                     border-radius: 50%;
                     margin-right: 8px;
                 `;
-                avatar.src = QQ_GetUserAvatar(senderName);
+                
+                if (isGroupChat) {
+                    // 群聊：使用群成员头像随机变化
+                    const groupMembers = QQ_msgjson.群聊 && QQ_msgjson.群聊[chatName] && QQ_msgjson.群聊[chatName].members 
+                        ? QQ_msgjson.群聊[chatName].members 
+                        : [];
+                    
+                    if (groupMembers.length > 0) {
+                        // 设置初始头像
+                        avatar.src = QQ_GetUserAvatar(groupMembers[Math.floor(Math.random() * groupMembers.length)]);
+                        
+                        // 定时切换头像
+                        const avatarInterval = setInterval(() => {
+                            const randomMember = groupMembers[Math.floor(Math.random() * groupMembers.length)];
+                            avatar.src = QQ_GetUserAvatar(randomMember);
+                        }, Math.random() * 2500 + 500); // 0.5-3秒随机间隔
+                        
+                        // 存储定时器ID以便清理
+                        typingIndicator.avatarInterval = avatarInterval;
+                    } else {
+                        // 如果没有群成员信息，使用默认头像
+                        avatar.src = QQ_GetUserAvatar(senderName);
+                    }
+                } else {
+                    // 私聊：使用固定联系人头像
+                    avatar.src = QQ_GetUserAvatar(chatName);
+                }
                 
                 // 创建动画点点
                 const dots = document.createElement('div');
@@ -20689,6 +20734,11 @@ ${index + 1}. ${space.name}
              */
             function QQ_HideTypingIndicator(typingIndicator) {
                 if (typingIndicator) {
+                    // 清理头像切换定时器
+                    if (typingIndicator.avatarInterval) {
+                        clearInterval(typingIndicator.avatarInterval);
+                    }
+                    
                     typingIndicator.style.animation = 'fadeOut 0.3s ease-out';
                     setTimeout(() => {
                         if (typingIndicator.parentNode) {
@@ -25384,6 +25434,154 @@ ${index + 1}. ${space.name}
                         $(this).remove();
                     });
                 }, 5000);
+            }
+            
+            /**
+             * 处理并应用 tableEdit 标签到 SillyTavern 记忆系统
+             * @param {string} content - 包含 tableEdit 标签的内容
+             */
+            function QQ_ProcessTableEdit(content) {
+                if (!content || typeof content !== 'string') {
+                    return;
+                }
+                
+                // 提取所有 tableEdit 标签
+                const tableEditMatches = [...content.matchAll(/<tableEdit>([\s\S]*?)<\/tableEdit>/gi)];
+                
+                if (tableEditMatches.length === 0) {
+                    console.log('🗂️ 未找到 tableEdit 标签');
+                    return;
+                }
+                
+                console.log(`🗂️ 找到 ${tableEditMatches.length} 个 tableEdit 标签，开始处理`);
+                
+                tableEditMatches.forEach((match, index) => {
+                    try {
+                        const tableContent = match[1].trim();
+                        console.log(`🗂️ 处理 tableEdit ${index + 1}:`, tableContent);
+                        
+                        // 尝试解析 JSON 格式的表格数据
+                        let tableData;
+                        try {
+                            tableData = JSON.parse(tableContent);
+                        } catch (jsonError) {
+                            // 如果不是 JSON 格式，尝试解析为简单的键值对
+                            console.log('🗂️ JSON 解析失败，尝试解析为键值对格式');
+                            tableData = QQ_ParseTableEditText(tableContent);
+                        }
+                        
+                        if (tableData) {
+                            // 调用 SillyTavern 的记忆表格 API
+                            QQ_ApplyToMemoryTable(tableData);
+                            console.log(`✅ tableEdit ${index + 1} 已应用到记忆表格`);
+                        } else {
+                            console.warn(`⚠️ 无法解析 tableEdit ${index + 1} 的内容`);
+                        }
+                        
+                    } catch (error) {
+                        console.error(`❌ 处理 tableEdit ${index + 1} 时出错:`, error);
+                    }
+                });
+            }
+            
+            /**
+             * 解析文本格式的 tableEdit 内容
+             * @param {string} text - 文本内容
+             * @returns {Object|null} 解析后的表格数据
+             */
+            function QQ_ParseTableEditText(text) {
+                try {
+                    const lines = text.split('\n').filter(line => line.trim());
+                    const result = {};
+                    
+                    lines.forEach(line => {
+                        // 尝试匹配各种格式: "key: value", "key = value", "key - value"
+                        const match = line.match(/^\s*([^:=\-]+)[:=\-]\s*(.+)$/);
+                        if (match) {
+                            const key = match[1].trim();
+                            const value = match[2].trim();
+                            result[key] = value;
+                        }
+                    });
+                    
+                    return Object.keys(result).length > 0 ? result : null;
+                } catch (error) {
+                    console.error('❌ 解析文本格式表格数据失败:', error);
+                    return null;
+                }
+            }
+            
+            /**
+             * 将表格数据应用到 SillyTavern 记忆表格插件
+             * @param {Object} tableData - 表格数据
+             */
+            function QQ_ApplyToMemoryTable(tableData) {
+                try {
+                    // 检查是否存在记忆表格插件
+                    if (typeof window.memoryTableExtension !== 'undefined') {
+                        // 如果插件存在，直接调用其 API
+                        window.memoryTableExtension.updateTable(tableData);
+                        console.log('🗂️ 已通过记忆表格插件 API 更新数据');
+                    } else if (typeof window.extensions !== 'undefined' && window.extensions['st-memory-enhancement']) {
+                        // 尝试调用 st-memory-enhancement 插件
+                        const memoryExt = window.extensions['st-memory-enhancement'];
+                        if (memoryExt && typeof memoryExt.updateMemory === 'function') {
+                            memoryExt.updateMemory(tableData);
+                            console.log('🗂️ 已通过 st-memory-enhancement 插件更新数据');
+                        } else {
+                            QQ_ApplyToMemoryTableFallback(tableData);
+                        }
+                    } else {
+                        // 如果没有插件，使用备用方法
+                        QQ_ApplyToMemoryTableFallback(tableData);
+                    }
+                } catch (error) {
+                    console.error('❌ 应用表格数据到记忆系统失败:', error);
+                    QQ_ApplyToMemoryTableFallback(tableData);
+                }
+            }
+            
+            /**
+             * 备用方法：直接操作 SillyTavern 的内存或 DOM
+             * @param {Object} tableData - 表格数据
+             */
+            function QQ_ApplyToMemoryTableFallback(tableData) {
+                try {
+                    // 尝试将数据存储到 SillyTavern 的角色记忆中
+                    if (typeof window.characters !== 'undefined' && window.this_chid !== undefined) {
+                        const currentChar = window.characters[window.this_chid];
+                        if (currentChar) {
+                            // 初始化 tableMemory 字段（如果不存在）
+                            if (!currentChar.data.extensions) {
+                                currentChar.data.extensions = {};
+                            }
+                            if (!currentChar.data.extensions.memory_table) {
+                                currentChar.data.extensions.memory_table = {};
+                            }
+                            
+                            // 合并新的表格数据
+                            Object.assign(currentChar.data.extensions.memory_table, tableData);
+                            
+                            console.log('🗂️ 已将表格数据存储到角色记忆中');
+                            
+                            // 触发角色数据保存（如果相关函数存在）
+                            if (typeof window.saveCharacterDebounced === 'function') {
+                                window.saveCharacterDebounced();
+                            }
+                        }
+                    }
+                    
+                    // 发送自定义事件，通知可能的监听器
+                    const event = new CustomEvent('tableEditUpdate', {
+                        detail: { tableData: tableData }
+                    });
+                    document.dispatchEvent(event);
+                    
+                    console.log('🗂️ 已触发 tableEditUpdate 事件');
+                    
+                } catch (error) {
+                    console.error('❌ 备用表格数据处理失败:', error);
+                }
             }
             
             /**
