@@ -25189,7 +25189,39 @@ ${index + 1}. ${space.name}
                         console.log(`📤 发送tableEdit内容${i + 1}到SillyTavern后端:`, tableContent.substring(0, 100) + '...');
                         
                         // 获取当前角色名，用于/sendas指令
-                        const currentCharacter = characters[this_chid]?.name || 'Assistant';
+                        // 尝试从多个可能的全局变量获取角色名
+                        let currentCharacter = 'Assistant';
+                        
+                        try {
+                            // 方法1: 从name2变量获取（SillyTavern常用）
+                            if (typeof name2 !== 'undefined' && name2) {
+                                currentCharacter = name2;
+                            }
+                            // 方法2: 从全局characters数组获取
+                            else if (typeof characters !== 'undefined' && typeof this_chid !== 'undefined' && characters[this_chid]) {
+                                currentCharacter = characters[this_chid].name;
+                            }
+                            // 方法3: 从可能存在的其他全局变量获取
+                            else if (typeof window.name2 !== 'undefined' && window.name2) {
+                                currentCharacter = window.name2;
+                            }
+                            // 方法4: 从当前聊天上下文获取
+                            else if (window.QQ_SystemContext && window.QQ_SystemContext.currentChatName) {
+                                // 如果是私聊，提取角色名
+                                const chatName = window.QQ_SystemContext.currentChatName;
+                                if (chatName.includes('和') && chatName.includes('的聊天')) {
+                                    const parts = chatName.replace('的聊天', '').split('和');
+                                    currentCharacter = parts.find(part => part !== QQ_GetUserName()) || 'Assistant';
+                                } else {
+                                    currentCharacter = chatName;
+                                }
+                            }
+                            
+                            console.log(`🎭 检测到角色名: ${currentCharacter}`);
+                        } catch (error) {
+                            console.warn('⚠️ 获取角色名时出错，使用默认名称:', error);
+                            currentCharacter = 'Assistant';
+                        }
                         
                         // 构建/sendas指令
                         const sendAsCommand = `/sendas name=${currentCharacter} ${tableContent}`;
