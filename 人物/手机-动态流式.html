@@ -8940,8 +8940,11 @@
             function QQ_CleanContentTags(content) {
                 if (!content || typeof content !== 'string') return '';
                 
+                // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
+                const processedContent = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                
                 // 提取content标签内容
-                const contentMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
+                const contentMatch = processedContent.match(/<content>([\s\S]*?)<\/content>/i);
                 if (!contentMatch) {
                     console.log('❌ 没有找到content标签');
                     return '';
@@ -9323,8 +9326,12 @@
              * @returns {string|null} 提取的content内容，如果没有找到返回null
              */
             function QQ_ExtractNestedContentTags(content) {
+                // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
+                let processedContent = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                console.log('🧠 已移除thinking标签内容，避免误读content引用');
+                
                 // 方法1：直接匹配完整的content标签（优先级最高）
-                let match = content.match(/<content>([\s\S]*?)<\/content>/i);
+                let match = processedContent.match(/<content>([\s\S]*?)<\/content>/i);
                 if (match) {
                     console.log('📝 找到完整的content标签');
                     return match[1];
@@ -9332,14 +9339,14 @@
                 
                 // 方法2：处理不完整的content标签（<content>开头，但在遇到其他标签前结束）
                 // 这种情况需要特别小心，要在遇到系统标签前停止提取
-                match = content.match(/<content>([\s\S]*?)(?=<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink|tableEdit)[^>]*>|$)/i);
+                match = processedContent.match(/<content>([\s\S]*?)(?=<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink|tableEdit)[^>]*>|$)/i);
                 if (match) {
                     console.log('📝 找到不完整的content标签，在系统标签前停止提取');
                     return match[1];
                 }
                 
                 // 方法3：处理完全不完整的content标签（直接到结尾，但需要清理系统标签）
-                match = content.match(/<content>([\s\S]*)$/i);
+                match = processedContent.match(/<content>([\s\S]*)$/i);
                 if (match) {
                     console.log('📝 找到不完整的content标签，提取到结尾并准备清理');
                     let extractedContent = match[1];
@@ -12730,9 +12737,11 @@
                 QQ_Gen(interactiveRequest, async function(aiResponse) {
                     try {
                         if (aiResponse && aiResponse.trim()) {
+                            // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
+                            const processedResponse = aiResponse.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
                             // 解析AI回复，提取content内容
-                            const contentMatch = aiResponse.match(/<content>([\s\S]*?)<\/content>/i);
-                            const interactiveContent = contentMatch ? contentMatch[1].trim() : aiResponse.trim();
+                            const contentMatch = processedResponse.match(/<content>([\s\S]*?)<\/content>/i);
+                            const interactiveContent = contentMatch ? contentMatch[1].trim() : processedResponse.trim();
                             
                             if (interactiveContent) {
                                 // 创建新的互动空间
@@ -14505,9 +14514,11 @@ ${replyText}
                 QQ_Gen(interactiveRequest, async function(aiResponse) {
                     try {
                         if (aiResponse && aiResponse.trim()) {
+                            // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
+                            const processedResponse = aiResponse.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
                             // 解析AI回复，提取content内容
-                            const contentMatch = aiResponse.match(/<content>([\s\S]*?)<\/content>/i);
-                            const newInteractiveContent = contentMatch ? contentMatch[1].trim() : aiResponse.trim();
+                            const contentMatch = processedResponse.match(/<content>([\s\S]*?)<\/content>/i);
+                            const newInteractiveContent = contentMatch ? contentMatch[1].trim() : processedResponse.trim();
                             
                             if (newInteractiveContent) {
                                 // 添加新页面到互动空间
@@ -21259,6 +21270,11 @@ ${index + 1}. ${space.name}
                                 QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
                             }
                             
+                            // 在新消息开始前添加时间分隔线（仅当有旧消息时）
+                            if (existingMessages.length > 0) {
+                                QQ_AddTimeDividerMessage($msgContent[0], name);
+                            }
+                            
                             // 使用流式显示新消息（传入完整消息，不需要额外处理）
                             QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
                         } else {
@@ -21267,12 +21283,26 @@ ${index + 1}. ${space.name}
                                 const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
                                 QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
                             }
+                            
+                            // 如果是首次加载且有消息，在最后添加时间分隔线
+                            if (json.私聊[str] && json.私聊[str].length > 0) {
+                                QQ_CheckAndAddTimeDivider($msgContent[0], name);
+                            }
                         }
                         
-                        // *** 新的未读消息计算逻辑：使用QQ_CalculateUnreadCount ***
-                        NewMsgCount = QQ_CalculateUnreadCount(name, QQ_msgjson.私聊[str], 'private');
-                        console.log(`私聊 ${name} 计算未读消息: ${NewMsgCount}`);
-                        // 设置红点和首页显示的消息
+                        // *** 新的未读消息计算逻辑：优先使用主动消息计数 ***
+                        // 如果有主动消息计数，使用它；否则计算新消息数量
+                        const proactiveCount = proactiveMessageUnreadCounts.get(name) || 0;
+                        if (proactiveCount > 0) {
+                            NewMsgCount = proactiveCount;
+                            console.log(`私聊 ${name} 使用主动消息计数: ${NewMsgCount}`);
+                        } else {
+                            // 只计算本次新增的消息数量
+                            NewMsgCount = newMessages.length;
+                            console.log(`私聊 ${name} 新消息数量: ${NewMsgCount}`);
+                        }
+                        
+                        // 如果聊天窗口打开，清除未读计数
                         if (
                             $(`.QQ_chat_page[data-name='${name}']`).css(
                                 "display",
@@ -21281,6 +21311,7 @@ ${index + 1}. ${space.name}
                         ) {
                             console.log(`display不为none,红点为0  ${name}`);
                             NewMsgCount = 0;
+                            QQ_ClearUnreadCount(name);
                         }
                         $(
                             `.QQ_home_usermsg[data-name='${name}'] .QQ_home_lastmsg`,
@@ -21594,6 +21625,11 @@ ${index + 1}. ${space.name}
                                 QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
                             }
                             
+                            // 在新消息开始前添加时间分隔线（仅当有旧消息时）
+                            if (existingMessages.length > 0) {
+                                QQ_AddTimeDividerMessage($msgContent[0], name);
+                            }
+                            
                             // 使用流式显示新消息（传入完整消息，不需要额外处理）
                             QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
                         } else {
@@ -21601,6 +21637,11 @@ ${index + 1}. ${space.name}
                             for (let msg of json.群聊[name]["msgs"]) {
                                 const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
                                 QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                            }
+                            
+                            // 如果是首次加载且有消息，在最后添加时间分隔线
+                            if (json.群聊[name]["msgs"] && json.群聊[name]["msgs"].length > 0) {
+                                QQ_CheckAndAddTimeDivider($msgContent[0], name);
                             }
                         }
                         
@@ -25319,6 +25360,60 @@ ${index + 1}. ${space.name}
                         $(this).remove();
                     });
                 }, 5000);
+            }
+            
+            /**
+             * 添加时间分隔系统消息
+             * @param {Element} chatContainer - 聊天容器
+             * @param {string} chatName - 聊天名称
+             * @param {string} timeText - 时间文本，可选，默认使用当前时间
+             */
+            function QQ_AddTimeDividerMessage(chatContainer, chatName, timeText = null) {
+                if (!timeText) {
+                    const now = new Date();
+                    timeText = now.toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                }
+                
+                const timeDividerHtml = `
+                    <div class="system-message time-divider" data-timestamp="${Date.now()}">
+                        <span style="
+                            background: rgba(255,255,255,0.9);
+                            padding: 4px 12px;
+                            border-radius: 12px;
+                            border: 1px solid #e0e0e0;
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                            font-weight: 500;
+                        ">📅 ${timeText}</span>
+                    </div>
+                `;
+                
+                $(chatContainer).append(timeDividerHtml);
+                console.log(`⏰ 为 ${chatName} 添加时间分隔消息: ${timeText}`);
+                
+                // 滚动到底部
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            /**
+             * 检查是否需要添加时间分隔消息
+             * @param {Element} chatContainer - 聊天容器
+             * @param {string} chatName - 聊天名称
+             */
+            function QQ_CheckAndAddTimeDivider(chatContainer, chatName) {
+                const existingTimeDivider = chatContainer.querySelector('.time-divider');
+                if (!existingTimeDivider) {
+                    // 没有时间分隔器，添加一个
+                    QQ_AddTimeDividerMessage(chatContainer, chatName);
+                    return true;
+                }
+                return false;
             }
             
             /**
