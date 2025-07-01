@@ -7382,6 +7382,9 @@
                     if (json.私聊[str].length == 0) {
                         continue;
                     }
+                    
+                    // *** 修复：增强的用户消息重复过滤 ***
+                    json.私聊[str] = QQ_FilterDuplicateUserMessages(json.私聊[str], name);
                     // 反向找自己发的最后一条的位置
                     let lastSelfMsgIndex = -1;
                     for (let i = json.私聊[str].length - 1; i >= 0; i--) {
@@ -7419,6 +7422,9 @@
                     if (json.群聊[name].msgs.length == 0) {
                         continue;
                     }
+                    
+                    // *** 修复：增强的用户消息重复过滤 ***
+                    json.群聊[name].msgs = QQ_FilterDuplicateUserMessages(json.群聊[name].msgs, name);
                     // 反向找自己发的最后一条的位置
                     let lastSelfMsgIndex = -1;
                     for (let i = json.群聊[name].msgs.length - 1; i >= 0; i--) {
@@ -7689,13 +7695,16 @@
                         await QQ_Save_Chat_Backup();
                         console.log(`✅ 用户消息已记录并保存: ${userMessage}`);
                     }
-                    // 整合缓存消息
-                    value = QQ_CacheSendMsg;
-                            if (content) {
+                    // *** 修复：更安全的缓存消息处理 ***
+                    // 保存当前缓存内容，避免过早清空
+                    const currentCache = QQ_CacheSendMsg;
+                    value = currentCache;
+                    if (content) {
                         const actionText = QQ_Groups.includes(name) ? `\n在群聊"${name}"中发送:${content}` : `\n给${name}发消息:${content}`;
                         value += actionText;
-                            }
-                    QQ_CacheSendMsg = "";
+                    }
+                    // *** 修复：只在确认消息已经处理后才清空缓存 ***
+                    // 不在这里清空，等待AI回复处理完成后再清空
                         } else {
                     name = SendName || "未知用户";
                     content = SendValue;
@@ -20676,7 +20685,7 @@ ${index + 1}. ${space.name}
                 typingIndicator.style.cssText = `
                     position: absolute;
                     top: 50%;
-                    left: 18px;
+                    left: 28px;
                     transform: translateY(-50%);
                     display: flex;
                     align-items: center;
@@ -20689,7 +20698,7 @@ ${index + 1}. ${space.name}
                     min-width: 140px;
                     max-width: calc(100% - 40px);
                     font-size: 12px;
-                    height: 40px;
+                    height: 28px;
                 `;
                 
                 // 将输入指示器添加到输入容器内
@@ -21050,6 +21059,12 @@ ${index + 1}. ${space.name}
                             QQ_AddTimeDividerMessage(chatContainer, chatName);
                         }, 1000); // 1秒延迟显示时间消息
                         
+                        // *** 修复：在AI回复完成后清空缓存，确保所有消息都已处理 ***
+                        setTimeout(() => {
+                            QQ_CacheSendMsg = "";
+                            console.log('✅ AI回复完成，缓存消息已清空');
+                        }, 1500);
+                        
                         return;
                     }
                     
@@ -21115,6 +21130,12 @@ ${index + 1}. ${space.name}
                         setTimeout(() => {
                             QQ_AddTimeDividerMessage(chatContainer, chatName);
                         }, 1000); // 1秒延迟显示时间消息
+                        
+                        // *** 修复：在AI回复完成后清空缓存，确保所有消息都已处理 ***
+                        setTimeout(() => {
+                            QQ_CacheSendMsg = "";
+                            console.log('✅ AI回复完成，缓存消息已清空');
+                        }, 1500);
                         
                         return;
                     }
@@ -22245,7 +22266,11 @@ ${index + 1}. ${space.name}
                     // 8. 组合最终发送内容
                     let sendvalue = (QQ_CacheSendMsg ? `${QQ_CacheSendMsg.trim()}\n\n` : '') + `用户在${name}的动态下评论：${value}`;
                     const finalPayload = `${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
-                    QQ_CacheSendMsg = ""; // 清空缓存
+                    // *** 修复：延迟清空缓存，确保所有消息都已处理 ***
+                    setTimeout(() => {
+                        QQ_CacheSendMsg = ""; // 清空缓存
+                        console.log('✅ 缓存消息已清空');
+                    }, 2000); // 2秒延迟清空，给AI回复处理时间
 
                     // 9. 设置请求上下文并发送请求
                     QQ_LastRequest = finalPayload;
@@ -23600,6 +23625,112 @@ ${index + 1}. ${space.name}
              * @param {string} characterName - 角色名称
              * @returns {Array} 私聊消息数组
              */
+            /**
+             * *** 新增：强化的用户消息重复过滤机制 ***
+             * 智能检测并移除AI回复中重复的用户消息
+             * @param {Array} messages - 消息数组
+             * @param {string} chatName - 聊天名称
+             * @returns {Array} 过滤后的消息数组
+             */
+            function QQ_FilterDuplicateUserMessages(messages, chatName) {
+                if (!messages || messages.length === 0) return messages;
+                
+                const filteredMessages = [];
+                const userMessageHistory = new Set();
+                
+                // 获取最近的用户消息作为参考
+                const lastUserMessage = User_LastMsgMap.私聊?.[chatName] || User_LastMsgMap.群聊?.[chatName];
+                let lastUserContent = '';
+                if (lastUserMessage) {
+                    const parts = lastUserMessage.split('--');
+                    if (parts.length >= 2) {
+                        lastUserContent = parts[1].trim().toLowerCase();
+                    }
+                }
+                
+                for (const message of messages) {
+                    const parts = message.split('--');
+                    if (parts.length < 2) {
+                        filteredMessages.push(message);
+                        continue;
+                    }
+                    
+                    const sender = parts[0].trim();
+                    const content = parts[1].trim();
+                    const contentLower = content.toLowerCase();
+                    
+                    // 检查是否为用户消息的重复
+                    if (sender === UserName) {
+                        // 检查是否与历史消息重复
+                        const messageKey = `${sender}:${contentLower}`;
+                        if (userMessageHistory.has(messageKey)) {
+                            console.log(`🚫 过滤重复的用户消息: ${content.substring(0, 30)}...`);
+                            continue;
+                        }
+                        userMessageHistory.add(messageKey);
+                        
+                        // 检查是否与最近发送的消息重复
+                        if (lastUserContent && contentLower === lastUserContent) {
+                            console.log(`🚫 过滤AI回复中重复的用户消息: ${content.substring(0, 30)}...`);
+                            continue;
+                        }
+                    } else {
+                        // 对于非用户消息，检查是否包含用户消息内容
+                        if (lastUserContent && lastUserContent.length > 10) {
+                            // 检查AI消息是否几乎完全重复了用户消息
+                            const similarity = QQ_CalculateTextSimilarity(contentLower, lastUserContent);
+                            if (similarity > 0.8) {
+                                console.log(`🚫 过滤AI消息中重复的用户内容 (相似度: ${(similarity*100).toFixed(1)}%): ${content.substring(0, 30)}...`);
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    filteredMessages.push(message);
+                }
+                
+                if (filteredMessages.length !== messages.length) {
+                    console.log(`✅ 过滤完成: ${messages.length} -> ${filteredMessages.length} 条消息`);
+                }
+                
+                return filteredMessages;
+            }
+            
+            /**
+             * *** 新增：计算文本相似度 ***
+             * @param {string} text1 - 文本1
+             * @param {string} text2 - 文本2
+             * @returns {number} 相似度 (0-1)
+             */
+            function QQ_CalculateTextSimilarity(text1, text2) {
+                if (!text1 || !text2) return 0;
+                
+                // 简单的字符级相似度计算
+                const len1 = text1.length;
+                const len2 = text2.length;
+                const maxLen = Math.max(len1, len2);
+                
+                if (maxLen === 0) return 1;
+                
+                // 计算编辑距离
+                const dp = Array(len1 + 1).fill().map(() => Array(len2 + 1).fill(0));
+                
+                for (let i = 0; i <= len1; i++) dp[i][0] = i;
+                for (let j = 0; j <= len2; j++) dp[0][j] = j;
+                
+                for (let i = 1; i <= len1; i++) {
+                    for (let j = 1; j <= len2; j++) {
+                        if (text1[i-1] === text2[j-1]) {
+                            dp[i][j] = dp[i-1][j-1];
+                        } else {
+                            dp[i][j] = Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]) + 1;
+                        }
+                    }
+                }
+                
+                return 1 - (dp[len1][len2] / maxLen);
+            }
+            
             function QQ_LoadPrivateChatMessages(characterName) {
                 if (!QQ_msgjson.私聊) {
                     return [];
