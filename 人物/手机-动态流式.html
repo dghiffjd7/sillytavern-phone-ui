@@ -7720,6 +7720,9 @@
                 // *** 阶段三：提取并处理主动消息（在清理之前，避免被误删） ***
                 await QQ_ExtractProactiveMessages(result);
                 
+                // *** 新增：提取并处理tableEdit标签，发送给SillyTavern后端 ***
+                await QQ_ExtractAndProcessTableEdit(result);
+                
                 // *** 清理主动消息格式，避免被当作普通消息显示 ***
                 result = QQ_CleanProactiveMessageFormats(result);
                 
@@ -25149,6 +25152,64 @@ ${index + 1}. ${space.name}
                 }
                 
                 return cleanedText;
+            }
+            
+            /**
+             * *** 新增：提取并处理tableEdit标签 ***
+             * 提取AI回复中的tableEdit标签内容，通过SillyTavern后端进行正常处理
+             * @param {string} result - AI回复内容
+             */
+            async function QQ_ExtractAndProcessTableEdit(result) {
+                if (!result || typeof result !== 'string') {
+                    return;
+                }
+                
+                console.log('🗂️ 开始检查tableEdit标签...');
+                
+                // 提取tableEdit标签内容
+                const tableEditMatches = [...result.matchAll(/<tableEdit>([\s\S]*?)<\/tableEdit>/gi)];
+                
+                if (tableEditMatches.length === 0) {
+                    console.log('🔍 未发现tableEdit标签');
+                    return;
+                }
+                
+                console.log(`🎯 发现${tableEditMatches.length}个tableEdit标签，开始处理`);
+                
+                for (let i = 0; i < tableEditMatches.length; i++) {
+                    const match = tableEditMatches[i];
+                    const tableContent = match[1].trim();
+                    
+                    if (!tableContent) {
+                        console.log(`⚠️ tableEdit标签${i + 1}内容为空，跳过`);
+                        continue;
+                    }
+                    
+                    try {
+                        console.log(`📤 发送tableEdit内容${i + 1}到SillyTavern后端:`, tableContent.substring(0, 100) + '...');
+                        
+                        // 获取当前角色名，用于/sendas指令
+                        const currentCharacter = characters[this_chid]?.name || 'Assistant';
+                        
+                        // 构建/sendas指令
+                        const sendAsCommand = `/sendas name=${currentCharacter} ${tableContent}`;
+                        
+                        // 使用triggerSlash发送到SillyTavern后端
+                        await new Promise((resolve) => {
+                            // 添加短暂延迟，确保命令按顺序处理
+                            setTimeout(() => {
+                                triggerSlash(sendAsCommand);
+                                console.log(`✅ tableEdit内容${i + 1}已发送到后端`);
+                                resolve();
+                            }, i * 100); // 每个tableEdit间隔100ms
+                        });
+                        
+                    } catch (error) {
+                        console.error(`❌ 发送tableEdit内容${i + 1}时出错:`, error);
+                    }
+                }
+                
+                console.log(`🎉 tableEdit处理完成，共处理${tableEditMatches.length}个标签`);
             }
             
             /**
