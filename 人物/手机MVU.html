@@ -5246,6 +5246,215 @@
 关键词=/查看(.+?)消息/, 发送消息, 回复, /给(.+?)发消息/, 在群聊, 动态, 空间, discord, dc, 论坛, 帖子, QQ, qq, 手机
 顺序=5564`;
             }
+            
+            // ========== MVU数据聚合逻辑 ==========
+            
+            /**
+             * 从聊天历史中生成用于渲染的聊天列表数据
+             * 这个函数将原始的QQ_msgjson数据转换为专门用于渲染的干净数组
+             * @param {Object} model - 当前的MVU模型
+             * @returns {Array} 渲染用的聊天列表数组
+             */
+            function generateChatListFromHistory(model) {
+                const chatList = [];
+                const currentTime = new Date();
+                
+                console.log('🔄 开始生成聊天列表数据...');
+                
+                // 处理群聊数据
+                if (model.qq && model.qq.group_chat && QQ_Groups && QQ_Groups.length > 0) {
+                    QQ_Groups.forEach(groupName => {
+                        const groupData = model.qq.group_chat[groupName];
+                        if (groupData && groupData.msgs && groupData.msgs.length > 0) {
+                            const lastMessage = extractLastMessageInfo(groupData.msgs, 'group');
+                            
+                            if (lastMessage) {
+                                chatList.push({
+                                    id: `group_${groupName}`,
+                                    type: 'group',
+                                    name: groupName,
+                                    avatar: generateGroupAvatar(groupName),
+                                    lastMessage: lastMessage.content,
+                                    lastSender: lastMessage.sender,
+                                    lastTime: lastMessage.time,
+                                    timestamp: lastMessage.timestamp,
+                                    unread: 0, // TODO: 实现未读计数
+                                    isGroup: true
+                                });
+                            }
+                        }
+                    });
+                }
+                
+                // 处理私聊数据
+                if (model.qq && model.qq.private_chat) {
+                    const privateChatKeys = Object.keys(model.qq.private_chat);
+                    const processedCharacters = new Set();
+                    
+                    privateChatKeys.forEach(chatKey => {
+                        const messages = model.qq.private_chat[chatKey];
+                        if (messages && messages.length > 0) {
+                            // 解析聊天键名，提取角色名
+                            const characterName = extractCharacterNameFromChatKey(chatKey);
+                            
+                            if (characterName && !processedCharacters.has(characterName)) {
+                                processedCharacters.add(characterName);
+                                
+                                const lastMessage = extractLastMessageInfo(messages, 'private');
+                                
+                                if (lastMessage) {
+                                    chatList.push({
+                                        id: `char_${characterName}`,
+                                        type: 'character',
+                                        name: characterName,
+                                        avatar: getCharacterAvatar(characterName),
+                                        lastMessage: lastMessage.content,
+                                        lastSender: lastMessage.sender,
+                                        lastTime: lastMessage.time,
+                                        timestamp: lastMessage.timestamp,
+                                        unread: 0, // TODO: 实现未读计数
+                                        isGroup: false
+                                    });
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // 按时间戳降序排序（最新的在前）
+                chatList.sort((a, b) => b.timestamp - a.timestamp);
+                
+                console.log(`✅ 聊天列表生成完成，共 ${chatList.length} 个会话`);
+                return chatList;
+            }
+            
+            /**
+             * 从消息数组中提取最后一条消息的信息
+             * @param {Array} messages - 消息数组
+             * @param {string} chatType - 聊天类型 ('private' 或 'group')
+             * @returns {Object|null} 最后一条消息的信息
+             */
+            function extractLastMessageInfo(messages, chatType) {
+                if (!messages || messages.length === 0) return null;
+                
+                // 获取最后一条消息
+                const lastMsg = messages[messages.length - 1];
+                
+                // 解析消息格式：发送者名称--消息内容--时间戳
+                const parts = lastMsg.split("--");
+                if (parts.length < 2) return null;
+                
+                const sender = parts[0];
+                let content = parts[1];
+                const timeStr = parts.length >= 3 ? parts[2] : '';
+                
+                // 清理消息内容中的HTML标签
+                content = QQ_CleanNestedTags ? QQ_CleanNestedTags(content) : content;
+                
+                // 限制消息内容长度
+                if (content.length > 30) {
+                    content = content.substring(0, 30) + '...';
+                }
+                
+                // 格式化显示内容
+                let displayContent;
+                if (chatType === 'group') {
+                    // 群聊显示格式：发送者:消息内容
+                    displayContent = sender === UserName ? content : `${sender}:${content}`;
+                } else {
+                    // 私聊只显示消息内容
+                    displayContent = content;
+                }
+                
+                // 解析时间戳
+                let timestamp = Date.now();
+                let displayTime = formatDisplayTime(new Date());
+                
+                if (timeStr) {
+                    try {
+                        const msgDate = new Date(timeStr);
+                        if (!isNaN(msgDate.getTime())) {
+                            timestamp = msgDate.getTime();
+                            displayTime = formatDisplayTime(msgDate);
+                        }
+                    } catch (e) {
+                        console.warn('时间戳解析失败:', timeStr);
+                    }
+                }
+                
+                return {
+                    content: displayContent,
+                    sender: sender,
+                    time: displayTime,
+                    timestamp: timestamp
+                };
+            }
+            
+            /**
+             * 从聊天键名中提取角色名
+             * 支持 "用户名和角色名的聊天" 和 "角色名和用户名的聊天" 两种格式
+             * @param {string} chatKey - 聊天键名
+             * @returns {string|null} 角色名
+             */
+            function extractCharacterNameFromChatKey(chatKey) {
+                const match1 = chatKey.match(/^(.+)和(.+)的聊天$/);
+                if (match1) {
+                    const [, name1, name2] = match1;
+                    // 返回不是用户名的那个名字
+                    if (name1 === UserName) return name2;
+                    if (name2 === UserName) return name1;
+                    // 如果都不是用户名，返回第一个（向后兼容）
+                    return name1;
+                }
+                return null;
+            }
+            
+            /**
+             * 格式化显示时间
+             * @param {Date} date - 日期对象
+             * @returns {string} 格式化后的时间字符串
+             */
+            function formatDisplayTime(date) {
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                
+                if (msgDate.getTime() === today.getTime()) {
+                    // 今天的消息显示时:分
+                    return date.toLocaleTimeString('zh-CN', { 
+                        hour: '2-digit', 
+                        minute: '2-digit',
+                        hour12: false 
+                    });
+                } else if (msgDate.getTime() === today.getTime() - 24 * 60 * 60 * 1000) {
+                    // 昨天的消息显示"昨天"
+                    return '昨天';
+                } else if (date.getFullYear() === now.getFullYear()) {
+                    // 今年的消息显示月-日
+                    return date.toLocaleDateString('zh-CN', { 
+                        month: '2-digit', 
+                        day: '2-digit' 
+                    });
+                } else {
+                    // 往年的消息显示年-月-日
+                    return date.toLocaleDateString('zh-CN', { 
+                        year: 'numeric',
+                        month: '2-digit', 
+                        day: '2-digit' 
+                    });
+                }
+            }
+            
+            /**
+             * 获取角色头像
+             * @param {string} characterName - 角色名
+             * @returns {string} 头像CSS类名或URL
+             */
+            function getCharacterAvatar(characterName) {
+                // 返回CSS类名，让现有的头像系统处理
+                return `head${characterName}`;
+            }
+            
             // ========== MVU架构核心组件 ==========
             
             // MVU架构状态管理：统一的应用状态Model
@@ -5327,6 +5536,13 @@
                     moments: []       // 动态数据
                 },
                 
+                // QQ数据结构（兼容原有系统）
+                qq: {
+                    private_chat: {}, // 私聊历史记录
+                    group_chat: {},   // 群聊历史记录
+                    chatList: []      // 聚合后的聊天列表，专为渲染优化
+                },
+                
                 // 用户数据
                 user: {
                     name: '',
@@ -5359,6 +5575,11 @@
                 AI_CHAT_RECEIVED: 'AI_CHAT_RECEIVED',
                 AI_MOMENT_RECEIVED: 'AI_MOMENT_RECEIVED',
                 AI_INTERACTIVE_RECEIVED: 'AI_INTERACTIVE_RECEIVED',
+                
+                // 数据初始化
+                INITIAL_LOAD_COMPLETE: 'INITIAL_LOAD_COMPLETE',
+                CHAT_DATA_LOADED: 'CHAT_DATA_LOADED',
+                REGENERATE_CHAT_LIST: 'REGENERATE_CHAT_LIST',
                 
                 // 页面导航
                 NAVIGATE_TO_APP: 'NAVIGATE_TO_APP',
@@ -5673,6 +5894,71 @@
                         
                     case MessageTypes.UPDATE_RELATIONSHIP_MEMORY:
                         updateRelationshipMemory(message.payload, newModel);
+                        break;
+                        
+                    // ========== 数据初始化处理 ==========
+                    
+                    case MessageTypes.INITIAL_LOAD_COMPLETE:
+                        // 初始数据加载完成
+                        console.log('🎯 初始数据加载完成，开始生成聊天列表');
+                        
+                        // 将原始聊天数据同步到Model
+                        if (message.payload) {
+                            if (message.payload.private_chat) {
+                                newModel.qq.private_chat = message.payload.private_chat;
+                            }
+                            if (message.payload.group_chat) {
+                                newModel.qq.group_chat = message.payload.group_chat;
+                            }
+                        }
+                        
+                        // 生成聊天列表
+                        newModel.qq.chatList = generateChatListFromHistory(newModel);
+                        
+                        // 标记初始化完成
+                        newModel.system.isInitialized = true;
+                        newModel.system.loadingState = 'complete';
+                        break;
+                        
+                    case MessageTypes.CHAT_DATA_LOADED:
+                        // 聊天数据已加载
+                        console.log('📊 聊天数据加载完成');
+                        if (message.payload) {
+                            newModel.qq = { ...newModel.qq, ...message.payload };
+                            // 重新生成聊天列表
+                            newModel.qq.chatList = generateChatListFromHistory(newModel);
+                        }
+                        break;
+                        
+                    case MessageTypes.REGENERATE_CHAT_LIST:
+                        // 重新生成聊天列表
+                        console.log('🔄 重新生成聊天列表');
+                        newModel.qq.chatList = generateChatListFromHistory(newModel);
+                        break;
+                        
+                    // 在消息发送和AI回复处理后，触发聊天列表更新
+                    case MessageTypes.AI_REPLY_PROCESSED:
+                        // 处理AI回复后，更新聊天列表
+                        if (message.payload && message.payload.updateChatData) {
+                            // 更新原始聊天数据
+                            if (message.payload.chatType === 'private') {
+                                const chatKey = message.payload.chatKey;
+                                if (chatKey && message.payload.messages) {
+                                    newModel.qq.private_chat[chatKey] = message.payload.messages;
+                                }
+                            } else if (message.payload.chatType === 'group') {
+                                const groupName = message.payload.groupName;
+                                if (groupName && message.payload.messages) {
+                                    if (!newModel.qq.group_chat[groupName]) {
+                                        newModel.qq.group_chat[groupName] = { msgs: [] };
+                                    }
+                                    newModel.qq.group_chat[groupName].msgs = message.payload.messages;
+                                }
+                            }
+                            
+                            // 重新生成聊天列表
+                            newModel.qq.chatList = generateChatListFromHistory(newModel);
+                        }
                         break;
                         
                     // ========== 新增功能处理 ==========
@@ -7098,9 +7384,77 @@
             
             // ========== View渲染函数实现 ==========
             
+            /**
+             * 使用聚合后的聊天列表数据渲染联系人列表
+             * @param {Array} chatList - 聚合后的聊天列表数组
+             * @param {string} containerSelector - 容器选择器
+             */
+            function renderChatListFromAggregatedData(chatList, containerSelector) {
+                const $container = $(containerSelector);
+                if (!$container.length) {
+                    console.warn('❌ 聊天列表容器不存在:', containerSelector);
+                    return;
+                }
+                
+                console.log(`🎨 开始渲染 ${chatList.length} 个聊天项...`);
+                
+                // 清空容器
+                $container.empty();
+                
+                // 渲染每个聊天项
+                chatList.forEach((chatItem, index) => {
+                    try {
+                        const $chatElement = createChatElementFromAggregatedData(chatItem);
+                        if ($chatElement) {
+                            $container.append($chatElement);
+                        }
+                    } catch (error) {
+                        console.error('❌ 渲染聊天项失败:', chatItem.name, error);
+                    }
+                });
+                
+                console.log(`✅ 聊天列表渲染完成，共 ${chatList.length} 项`);
+            }
+            
+            /**
+             * 从聚合数据创建单个聊天元素
+             * @param {Object} chatItem - 聊天项数据
+             * @returns {jQuery} 聊天元素
+             */
+            function createChatElementFromAggregatedData(chatItem) {
+                const $element = $(`
+                    <div class="QQ_home_usermsg" 
+                         data-name="${chatItem.name}" 
+                         data-group-type="${chatItem.isGroup}"
+                         onclick="handleViewAction({type: 'CHAT_ITEM_CLICK', payload: {chatName: '${chatItem.name}', isGroup: ${chatItem.isGroup}}}, event)">
+                        <div class="contact-avatar">
+                            <div class="${chatItem.avatar}" data-name="${chatItem.name}"></div>
+                        </div>
+                        <div class="contact-info">
+                            <div class="QQ_home_name">${chatItem.name}</div>
+                            <div class="QQ_home_lastmsg">${chatItem.lastMessage || '暂无消息'}</div>
+                        </div>
+                        <div class="contact-meta">
+                            <div class="QQ_home_lasttime">${chatItem.lastTime || ''}</div>
+                            ${chatItem.unread > 0 ? `<div class="unread-badge">${chatItem.unread}</div>` : ''}
+                        </div>
+                    </div>
+                `);
+                
+                return $element;
+            }
+            
             // 渲染主页
             function renderHomePage(model) {
-                renderContactList(model.chats.private, model.chats.group, '#QQ_home_chars');
+                // 使用新的聚合数据渲染
+                if (model.qq && model.qq.chatList && model.qq.chatList.length > 0) {
+                    console.log('🎨 使用聚合数据渲染主页，共' + model.qq.chatList.length + '个会话');
+                    renderChatListFromAggregatedData(model.qq.chatList, '#QQ_home_chars');
+                } else {
+                    console.log('📝 使用传统方式渲染主页（聚合数据未准备好）');
+                    renderContactList(model.chats.private, model.chats.group, '#QQ_home_chars');
+                }
+                
                 renderUnreadCounts(model.chats.private, model.chats.group);
                 renderOnlineStatus(model.system.isOnline);
             }
@@ -10348,6 +10702,13 @@
                 // 8. 异步保存数据
                 scheduleDataSave();
                 
+                // 9. 触发聊天列表更新
+                setTimeout(() => {
+                    dispatch({
+                        type: MessageTypes.REGENERATE_CHAT_LIST
+                    });
+                }, 100);
+                
                 return model;
             }
             
@@ -10791,6 +11152,16 @@ ${character.significantEvents && character.significantEvents.length > 0
                 try {
                     // 1. 同步现有数据到AppModel
                     syncLegacyVariablesToModel();
+                    
+                    // 1.5. 触发数据聚合处理
+                    console.log('📊 触发初始数据聚合...');
+                    dispatch({
+                        type: MessageTypes.INITIAL_LOAD_COMPLETE,
+                        payload: {
+                            private_chat: QQ_msgjson?.私聊 || {},
+                            group_chat: QQ_msgjson?.群聊 || {}
+                        }
+                    });
                     
                     // 2. 从世界书加载记忆数据
                     loadMemoryFromWorldbook();
