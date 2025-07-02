@@ -3887,7 +3887,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月4日</span>
+                            <span>台北</span> <span id="day">7月3日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -6528,9 +6528,12 @@
                         
                     case 'CHAT_ITEM_CLICK':
                         const selectedChatName = message.payload.chatName;
+                        const isGroupChat = message.payload.isGroup || false;
                         newModel.ui.activeChat = selectedChatName;
+                        newModel.ui.activeChatType = isGroupChat ? 'group' : 'private';
                         newModel.ui.currentPage = getQQPageState('chat');
                         newModel.ui.showBottomNav = false;
+                        console.log(`📱 打开聊天: ${selectedChatName} (${isGroupChat ? '群聊' : '私聊'})`);
                         break;
                         
                     case 'SEND_BUTTON_CLICK':
@@ -7863,31 +7866,60 @@
                     avatar = '';
                 }
                 
-                // 调试输出，确认头像提取结果
+                // 如果无法提取有效的头像URL，使用默认处理
                 if (chatItem.avatar && !avatar) {
-                    console.warn(`❌ 无法从头像数据中提取有效URL:`, chatItem.avatar);
+                    console.log(`使用默认头像处理，原数据:`, chatItem.avatar);
+                    // 如果头像对象有textContent，使用它作为文字头像
+                    if (chatItem.avatar.textContent) {
+                        avatar = ''; // 空字符串，后续会生成文字头像
+                    } else {
+                        // 使用默认头像URL
+                        avatar = 'https://patchwiki.biligame.com/images/blhx/thumb/c/c3/sprm1l5vl1t1sjfrbh21o61zr58c9jn.gif';
+                    }
                 }
                 
                 // 处理头像 - 使用原版的头像逻辑
                 let avatarStyle = '';
                 let avatarText = '';
                 
-                if (avatar && typeof avatar === 'string') {
-                    if (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('data:')) {
-                        // URL头像
-                        avatarStyle = `background-image: url('${avatar}'); background-size: cover; background-position: center;`;
-                    } else if (avatar.startsWith('head')) {
-                        // CSS类名头像，保持原样
-                        avatarStyle = '';
-                    } else {
-                        // 其他情况，使用渐变背景
-                        avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
-                        avatarText = (name && typeof name === 'string') ? name.charAt(0) : '';
+                // 如果原始头像数据是对象且包含渐变背景信息，优先使用
+                if (chatItem.avatar && typeof chatItem.avatar === 'object') {
+                    if (chatItem.avatar.textContent) {
+                        // 使用对象中的文字内容
+                        avatarText = chatItem.avatar.textContent;
                     }
-                } else {
-                    // 默认头像：首字母 + 渐变背景
-                    avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
-                    avatarText = (name && typeof name === 'string') ? name.charAt(0) : '';
+                    if (chatItem.avatar.background && chatItem.avatar.background.includes('gradient')) {
+                        // 使用对象中的渐变背景
+                        avatarStyle = `background: ${chatItem.avatar.background};`;
+                    } else if (chatItem.avatar.backgroundImage && chatItem.avatar.backgroundImage.includes('gradient')) {
+                        // 或者使用backgroundImage中的渐变
+                        avatarStyle = `background: ${chatItem.avatar.backgroundImage};`;
+                    }
+                }
+                
+                // 如果还没有设置样式，使用传统的字符串处理逻辑
+                if (!avatarStyle) {
+                    if (avatar && typeof avatar === 'string') {
+                        if (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('data:')) {
+                            // URL头像
+                            avatarStyle = `background-image: url('${avatar}'); background-size: cover; background-position: center;`;
+                        } else if (avatar.startsWith('head')) {
+                            // CSS类名头像，保持原样
+                            avatarStyle = '';
+                        } else {
+                            // 其他情况，使用渐变背景
+                            avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
+                            if (!avatarText) {
+                                avatarText = (name && typeof name === 'string') ? name.charAt(0) : '';
+                            }
+                        }
+                    } else {
+                        // 默认头像：首字母 + 渐变背景
+                        avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
+                        if (!avatarText) {
+                            avatarText = (name && typeof name === 'string') ? name.charAt(0) : '';
+                        }
+                    }
                 }
                 
                 const $element = $(`
@@ -8281,6 +8313,35 @@
                 const $messageChars = $("#QQ_message_list_chars");
                 if (!$messageChars.length) {
                     console.warn('❌ 消息列表容器不存在');
+                    return;
+                }
+                
+                // 检查是否需要重新渲染（避免频繁闪烁）
+                const currentContactCount = $messageChars.children().length;
+                let expectedContactCount = 0;
+                
+                // 计算预期的联系人数量
+                if (model.qq && model.qq.private_chat) {
+                    const processedContacts = new Set();
+                    Object.keys(model.qq.private_chat).forEach(chatKey => {
+                        const messages = model.qq.private_chat[chatKey];
+                        if (messages && messages.length > 0) {
+                            const characterName = extractCharacterNameFromChatKey(chatKey);
+                            if (characterName) {
+                                processedContacts.add(characterName);
+                            }
+                        }
+                    });
+                    expectedContactCount += processedContacts.size;
+                }
+                
+                if (model.qq && model.qq.group_chat && QQ_Groups) {
+                    expectedContactCount += QQ_Groups.length;
+                }
+                
+                // 如果联系人数量没有变化，跳过重新渲染
+                if (currentContactCount === expectedContactCount && currentContactCount > 0) {
+                    console.log('⚡ 跳过消息列表重新渲染，联系人数量未变化');
                     return;
                 }
                 
