@@ -3887,7 +3887,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月2日</span>
+                            <span>台北</span> <span id="day">7月3日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5476,16 +5476,42 @@
                         
                         // 其他字符串情况，直接返回
                         return avatarData;
-                    } else {
+                    } else if (avatarData && typeof avatarData === 'object') {
                         // 如果是对象，尝试提取URL
-                        console.warn(`角色 ${characterName} 的头像数据是对象类型:`, avatarData);
-                        if (avatarData && typeof avatarData === 'object') {
-                            // 尝试从对象中提取URL
-                            const url = avatarData.url || avatarData.avatar || avatarData.src || avatarData.imageData;
-                            if (url && typeof url === 'string') {
-                                return url;
+                        console.log(`角色 ${characterName} 的头像数据是对象类型，尝试提取URL...`);
+                        
+                        // 优先尝试 avatarUrl 属性（从调试信息看到的结构）
+                        if (avatarData.avatarUrl && typeof avatarData.avatarUrl === 'string') {
+                            console.log(`✅ 成功提取头像URL: ${avatarData.avatarUrl}`);
+                            return avatarData.avatarUrl;
+                        }
+                        
+                        // 尝试其他可能的URL属性
+                        const possibleUrls = [
+                            avatarData.url,
+                            avatarData.avatar, 
+                            avatarData.src,
+                            avatarData.imageData,
+                            avatarData.backgroundImage // 可能包含 url("...") 格式
+                        ];
+                        
+                        for (const urlField of possibleUrls) {
+                            if (urlField && typeof urlField === 'string') {
+                                // 如果是 backgroundImage 格式：url("https://...") 
+                                if (urlField.startsWith('url("') && urlField.endsWith('")')) {
+                                    const extractedUrl = urlField.slice(5, -2); // 移除 url(" 和 ")
+                                    console.log(`✅ 从backgroundImage提取头像URL: ${extractedUrl}`);
+                                    return extractedUrl;
+                                }
+                                // 直接的URL
+                                else if (urlField.startsWith('http') || urlField.startsWith('data:')) {
+                                    console.log(`✅ 成功提取头像URL: ${urlField}`);
+                                    return urlField;
+                                }
                             }
                         }
+                        
+                        console.warn(`❌ 无法从头像对象中提取有效URL:`, avatarData);
                     }
                 }
                 
@@ -7844,12 +7870,12 @@
                         <div class="QQ_home_head ${avatar && typeof avatar === 'string' && avatar.startsWith('head') ? avatar : ''}" 
                              data-name="${name}" 
                              style="${avatarStyle}">${avatarText}</div>
-                        <div class="QQ_home_info">
-                            <div class="QQ_home_name">${name}</div>
-                            <div class="QQ_home_lastmsg">${lastMessage || '暂无消息'}</div>
-                            <div class="QQ_home_lasttime">${lastTime}</div>
+                        <div style="width:100%;display:grid;grid-template-columns:1fr auto;grid-template-rows:1fr 1fr;row-gap:4px">
+                            <span class="QQ_home_name"><strong>${name}</strong></span>
+                            <span class="QQ_home_lasttime" style="color:#626367;justify-self:end">${lastTime}</span>
+                            <span class="QQ_home_lastmsg" style="color:#626367;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lastMessage || '暂无消息'}</span>
+                            ${(chatItem.unread && chatItem.unread > 0) ? `<div class="QQ_home_usermsg_new" style="justify-self:end">${chatItem.unread}</div>` : ''}
                         </div>
-                        ${(chatItem.unread && chatItem.unread > 0) ? `<div class="QQ_home_usermsg_new">${chatItem.unread}</div>` : ''}
                     </div>
                 `);
                 
