@@ -3821,7 +3821,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>臺北</span> <span id="day">7月2日</span>
+                            <span>臺北</span> <span id="day">7月1日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5507,16 +5507,24 @@
                 // 获取最后一条消息
                 const lastMsg = messages[messages.length - 1];
                 
+                // 类型检查：确保lastMsg是字符串
+                if (typeof lastMsg !== 'string') {
+                    console.warn('消息格式错误，期望字符串，实际收到:', typeof lastMsg, lastMsg);
+                    return null;
+                }
+                
                 // 解析消息格式：发送者名称--消息内容--时间戳
                 const parts = lastMsg.split("--");
                 if (parts.length < 2) return null;
                 
-                const sender = parts[0];
-                let content = parts[1];
+                const sender = parts[0] || '';
+                let content = parts[1] || '';
                 const timeStr = parts.length >= 3 ? parts[2] : '';
                 
                 // 清理消息内容中的HTML标签
-                content = QQ_CleanNestedTags ? QQ_CleanNestedTags(content) : content;
+                if (typeof content === 'string') {
+                    content = QQ_CleanNestedTags ? QQ_CleanNestedTags(content) : content;
+                }
                 
                 // 限制消息内容长度
                 if (content.length > 30) {
@@ -5535,14 +5543,14 @@
                 
                 // 解析时间戳
                 let timestamp = Date.now();
-                let displayTime = formatDisplayTime(new Date());
+                let displayTime = formatDateToDisplayTime(new Date());
                 
                 if (timeStr) {
                     try {
                         const msgDate = new Date(timeStr);
                         if (!isNaN(msgDate.getTime())) {
                             timestamp = msgDate.getTime();
-                            displayTime = formatDisplayTime(msgDate);
+                            displayTime = formatDateToDisplayTime(msgDate);
                         }
                     } catch (e) {
                         console.warn('时间戳解析失败:', timeStr);
@@ -5564,6 +5572,12 @@
              * @returns {string|null} 角色名
              */
             function extractCharacterNameFromChatKey(chatKey) {
+                // 类型检查
+                if (typeof chatKey !== 'string') {
+                    console.warn('聊天键格式错误，期望字符串，实际收到:', typeof chatKey, chatKey);
+                    return null;
+                }
+                
                 const match1 = chatKey.match(/^(.+)和(.+)的聊天$/);
                 if (match1) {
                     const [, name1, name2] = match1;
@@ -5577,11 +5591,11 @@
             }
             
             /**
-             * 格式化显示时间
+             * 格式化日期对象为显示时间（MVU专用）
              * @param {Date} date - 日期对象
              * @returns {string} 格式化后的时间字符串
              */
-            function formatDisplayTime(date) {
+            function formatDateToDisplayTime(date) {
                 const now = new Date();
                 const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
                 const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -7684,31 +7698,44 @@
              * @returns {jQuery} 聊天元素
              */
             function createChatElementFromAggregatedData(chatItem) {
+                // 数据类型检查
+                if (!chatItem || typeof chatItem !== 'object') {
+                    console.warn('聊天项数据格式错误:', chatItem);
+                    return null;
+                }
+                
+                // 确保必要字段存在
+                const name = chatItem.name || '';
+                const lastMessage = chatItem.lastMessage || '';
+                const lastTime = chatItem.lastTime || '';
+                const isGroup = Boolean(chatItem.isGroup);
+                const avatar = chatItem.avatar || '';
+                
                 // 智能处理头像数据
-                const isAvatarUrl = chatItem.avatar && 
-                                  (chatItem.avatar.startsWith('http://') || 
-                                   chatItem.avatar.startsWith('https://') || 
-                                   chatItem.avatar.startsWith('data:'));
+                const isAvatarUrl = avatar && typeof avatar === 'string' && 
+                                  (avatar.startsWith('http://') || 
+                                   avatar.startsWith('https://') || 
+                                   avatar.startsWith('data:'));
                 
                 const avatarContent = isAvatarUrl 
-                    ? `<div class="contact-avatar-img" data-name="${chatItem.name}" style="background-image: url('${chatItem.avatar}');"></div>`
-                    : `<div class="${chatItem.avatar || 'default-avatar'}" data-name="${chatItem.name}"></div>`;
+                    ? `<div class="contact-avatar-img" data-name="${name}" style="background-image: url('${avatar}');"></div>`
+                    : `<div class="${avatar || 'default-avatar'}" data-name="${name}"></div>`;
                 
                 const $element = $(`
                     <div class="QQ_home_usermsg" 
-                         data-name="${chatItem.name}" 
-                         data-group-type="${chatItem.isGroup}"
-                         onclick="handleViewAction({type: 'CHAT_ITEM_CLICK', payload: {chatName: '${chatItem.name}', isGroup: ${chatItem.isGroup}}}, event)">
+                         data-name="${name}" 
+                         data-group-type="${isGroup}"
+                         onclick="handleViewAction({type: 'CHAT_ITEM_CLICK', payload: {chatName: '${name}', isGroup: ${isGroup}}}, event)">
                         <div class="contact-avatar">
                             ${avatarContent}
                         </div>
                         <div class="contact-info">
-                            <div class="QQ_home_name">${chatItem.name}</div>
-                            <div class="QQ_home_lastmsg">${chatItem.lastMessage || '暂无消息'}</div>
+                            <div class="QQ_home_name">${name}</div>
+                            <div class="QQ_home_lastmsg">${lastMessage || '暂无消息'}</div>
                         </div>
                         <div class="contact-meta">
-                            <div class="QQ_home_lasttime">${chatItem.lastTime || ''}</div>
-                            ${chatItem.unread > 0 ? `<div class="unread-badge">${chatItem.unread}</div>` : ''}
+                            <div class="QQ_home_lasttime">${lastTime}</div>
+                            ${(chatItem.unread && chatItem.unread > 0) ? `<div class="unread-badge">${chatItem.unread}</div>` : ''}
                         </div>
                     </div>
                 `);
@@ -24259,7 +24286,7 @@ ${index + 1}. ${space.name}
              * *** 新增：格式化显示时间 - 为消息显示提供时间格式化 ***
              */
             function formatDisplayTime(timeStr) {
-                if (!timeStr || timeStr.trim() === '') {
+                if (!timeStr || typeof timeStr !== 'string' || timeStr.trim() === '') {
                     return '';
                 }
                 
