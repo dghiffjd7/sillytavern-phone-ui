@@ -5468,7 +5468,9 @@
                     isGenerating: false,
                     showChatSettings: false,
                     activeChat: null,
+                    activeChatType: null, // 'private' 或 'group'
                     activeGroupChat: null,
+                    showChatPage: false,
                     scrollPosition: 0,
                     theme: 'default',
                     navigationIcons: {
@@ -5585,6 +5587,8 @@
                 NAVIGATE_TO_APP: 'NAVIGATE_TO_APP',
                 NAVIGATE_QQ_PAGE: 'NAVIGATE_QQ_PAGE', 
                 NAVIGATE_HOME: 'NAVIGATE_HOME',
+                CHANGE_CHAT_PAGE: 'CHANGE_CHAT_PAGE',
+                GO_HOME: 'GO_HOME',
                 
                 // UI状态更新
                 UPDATE_UI_STATE: 'UPDATE_UI_STATE',
@@ -5961,6 +5965,39 @@
                         }
                         break;
                         
+                    // ========== 页面导航处理 ==========
+                    
+                    case MessageTypes.CHANGE_CHAT_PAGE:
+                        // 切换到聊天页面
+                        const chatName = message.payload.chatName;
+                        const isGroup = message.payload.isGroup || QQ_Groups.includes(chatName);
+                        
+                        console.log('🎯 切换到聊天页面:', chatName, isGroup ? '群聊' : '私聊');
+                        
+                        newModel.ui.currentPage = 'QQ_CHAT';
+                        newModel.ui.activeChat = chatName;
+                        newModel.ui.activeChatType = isGroup ? 'group' : 'private';
+                        newModel.ui.showHomePage = false;
+                        newModel.ui.showChatPage = true;
+                        
+                        // 更新系统上下文
+                        if (typeof window !== 'undefined' && window.QQ_SystemContext) {
+                            window.QQ_SystemContext.currentChatName = chatName;
+                            window.QQ_SystemContext.currentChatType = isGroup ? 'group' : 'private';
+                        }
+                        break;
+                        
+                    case MessageTypes.GO_HOME:
+                        // 返回主页
+                        console.log('🏠 返回主页');
+                        
+                        newModel.ui.currentPage = 'QQ_HOME';
+                        newModel.ui.activeChat = null;
+                        newModel.ui.activeChatType = null;
+                        newModel.ui.showHomePage = true;
+                        newModel.ui.showChatPage = false;
+                        break;
+                        
                     // ========== 新增功能处理 ==========
                     
                     case 'SHOW_ERROR':
@@ -6133,8 +6170,8 @@
                         break;
                         
                     case 'CHAT_ITEM_CLICK':
-                        const chatName = message.payload.chatName;
-                        newModel.ui.activeChat = chatName;
+                        const selectedChatName = message.payload.chatName;
+                        newModel.ui.activeChat = selectedChatName;
                         newModel.ui.currentPage = getQQPageState('chat');
                         newModel.ui.showBottomNav = false;
                         break;
@@ -7459,6 +7496,189 @@
                 renderOnlineStatus(model.system.isOnline);
             }
             
+            /**
+             * 渲染聊天页面
+             * @param {Object} model - MVU模型
+             */
+            function renderChatPage(model) {
+                const chatName = model.ui.activeChat;
+                const isGroup = model.ui.activeChatType === 'group';
+                
+                if (!chatName) {
+                    console.warn('❌ 无法渲染聊天页面：缺少activeChat');
+                    return;
+                }
+                
+                console.log(`🎨 渲染聊天页面: ${chatName} (${isGroup ? '群聊' : '私聊'})`);
+                
+                // 查找或创建聊天页面容器
+                let $chatPage = $(`.QQ_chat_page[data-name='${chatName}']`);
+                if ($chatPage.length === 0) {
+                    console.log(`📝 创建新的聊天页面: ${chatName}`);
+                    $chatPage = createChatPageElement(chatName, isGroup);
+                    $('#App_QQ').append($chatPage);
+                }
+                
+                // 显示当前聊天页面，隐藏其他页面
+                $('.QQ_chat_page').hide();
+                $('#QQ_home_page').hide();
+                $('#QQ_message_list_page').hide();
+                $('#QQ_space_page').hide();
+                $('.QQ_bottom_nav').hide();
+                $chatPage.show();
+                
+                // 加载聊天消息
+                loadChatMessages($chatPage, chatName, isGroup, model);
+            }
+            
+            /**
+             * 创建聊天页面元素
+             * @param {string} chatName - 聊天对象名称
+             * @param {boolean} isGroup - 是否为群聊
+             * @returns {jQuery} 聊天页面元素
+             */
+            function createChatPageElement(chatName, isGroup) {
+                const $chatPage = $(`
+                    <div data-name="${chatName}" class="QQ_chat_page" style="width:100%;height:100%;padding-top:0;display:none;">
+                        <!-- 聊天页面头部 -->
+                        <div style="padding-top:10px;backdrop-filter:blur(1px);background-color:rgb(255,255,255,.1)">
+                            <div style="width:100%;height:20px;display:grid;top:0;left:0;grid-template-columns:auto 1fr auto;align-items:center;margin-top:20px">
+                                <!-- 返回按钮 -->
+                                <svg class="QQ-close-btn" viewBox="0 0 1024 1024" style="height:18px;width:18px;margin-left:8px;cursor:pointer;" 
+                                     onclick="handleViewAction({type: 'GO_HOME'}, event)">
+                                    <path d="M769.137778 153.372444L444.984889 512l324.152889 358.684444c36.408889 35.043556 36.408889 91.989333 0 126.976a95.744 95.744 0 0 1-131.868445 0l-377.571555-417.678222c-1.536-1.365333-3.584-1.877333-5.063111-3.299555A87.438222 87.438222 0 0 1 227.555556 512c-0.341333-23.324444 8.533333-46.876444 27.079111-64.739556 1.479111-1.422222 3.527111-1.934222 5.063111-3.185777L637.269333 26.339556a95.744 95.744 0 0 1 131.868445 0c36.408889 35.043556 36.408889 91.932444 0 127.032888z" fill="#666666" p-id="1570"></path>
+                                </svg>
+                                
+                                <!-- 标题区域 -->
+                                <div style="display:flex;align-items:center;position:relative">
+                                    <span style="margin-left:8px;color:#000;font-size:16px" id="QQ_chat_username">${chatName}</span>
+                                </div>
+                                
+                                <!-- 设置按钮 -->
+                                <svg id="QQ_chat_page_setting" viewBox="0 0 1024 1024" style="height:20px;width:20px;margin-right:20px;cursor:pointer;"
+                                     onclick="handleViewAction({type: 'SHOW_CHAT_SETTINGS', payload: {chatName: '${chatName}'}}, event)">
+                                    <path d="M901.632 896H122.368c-30.72 0-55.808-25.088-55.808-55.808v-1.536c0-30.72 25.088-55.808 55.808-55.808h779.776c30.72 0 55.808 25.088 55.808 55.808v1.536c-0.512 30.72-25.6 55.808-56.32 55.808z" fill="#666666"></path>
+                                </svg>
+                            </div>
+                            <div style="width:100%;height:.5px;background-color:#eee;margin-top:10px;border-top:1px solid #9a9a9a"></div>
+                        </div>
+                        
+                        <!-- 消息内容区域 -->
+                        <div class="msgcontent" style="padding-top:15px;padding-bottom:0;flex:1;overflow-y:auto;box-sizing:border-box;margin-bottom:50px;padding-left:8px;padding-right:8px;scrollbar-width:none;-ms-overflow-style:none;"></div>
+                        
+                        <!-- 输入容器 -->
+                        <div class="input-container">
+                            <div style="display:flex;align-items:center;width:100%">
+                                <!-- 语音输入图标 -->
+                                <svg viewBox="0 0 1024 1024" width="25" height="25" style="margin-left:10px">
+                                    <path d="M512 62a184.09090869 184.09090869 0 0 1 184.09090869 184.09090869v204.54545478a184.09090869 184.09090869 0 1 1-368.18181738 1e-8v-204.54545479A184.09090869 184.09090869 0 0 1 512 62z" fill="#666666"></path>
+                                </svg>
+                                
+                                <!-- 文本输入框 -->
+                                <div style="flex-grow:1;margin-left:5px;margin-right:2%">
+                                    <input class="userInput" type="text" name="" style="box-sizing:border-box;background-color:transparent"
+                                           onkeypress="if(event.key==='Enter') handleViewAction({type: 'SEND_USER_MESSAGE', payload: {text: this.value, target: '${chatName}', type: '${isGroup ? 'group' : 'private'}', timeContext: null, event: event}}, event)"
+                                           placeholder="输入消息..."/>
+                                </div>
+                                
+                                <!-- 发送按钮 -->
+                                <div style="margin-right:7px" id="QQ_chat_send-btn">
+                                    <button style="background-color:#fff;border-radius:30px;height:31px;display:block;width:3.5rem;background-color:transparent;border:1px solid rgb(0,0,0,.5)"
+                                            onclick="handleViewAction({type: 'SEND_USER_MESSAGE', payload: {text: document.querySelector('.QQ_chat_page[data-name=\\\"${chatName}\\\"] .userInput').value, target: '${chatName}', type: '${isGroup ? 'group' : 'private'}', timeContext: null, event: event}}, event)">发送</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `);
+                
+                return $chatPage;
+            }
+            
+            /**
+             * 加载聊天消息到页面
+             * @param {jQuery} $chatPage - 聊天页面元素
+             * @param {string} chatName - 聊天对象名称
+             * @param {boolean} isGroup - 是否为群聊
+             * @param {Object} model - MVU模型
+             */
+            function loadChatMessages($chatPage, chatName, isGroup, model) {
+                const $msgContent = $chatPage.find('.msgcontent');
+                
+                // 获取聊天消息
+                let messages = [];
+                if (isGroup && model.qq && model.qq.group_chat && model.qq.group_chat[chatName]) {
+                    messages = model.qq.group_chat[chatName].msgs || [];
+                } else if (!isGroup && model.qq && model.qq.private_chat) {
+                    // 查找私聊消息
+                    const chatKey1 = `${UserName}和${chatName}的聊天`;
+                    const chatKey2 = `${chatName}和${UserName}的聊天`;
+                    messages = model.qq.private_chat[chatKey1] || model.qq.private_chat[chatKey2] || [];
+                }
+                
+                // 清空现有消息
+                $msgContent.empty();
+                
+                // 渲染消息（显示最近的消息）
+                const displayLimit = 50; // 最多显示50条消息
+                const startIndex = Math.max(0, messages.length - displayLimit);
+                const messagesToShow = messages.slice(startIndex);
+                
+                messagesToShow.forEach(msgStr => {
+                    addMessageToChat($msgContent, msgStr, chatName, isGroup);
+                });
+                
+                // 滚动到底部
+                $msgContent.scrollTop($msgContent[0].scrollHeight);
+                
+                console.log(`📨 加载了 ${messagesToShow.length} 条消息到聊天页面`);
+            }
+            
+            /**
+             * 添加消息到聊天界面
+             * @param {jQuery} $msgContent - 消息容器
+             * @param {string} msgStr - 消息字符串 (格式: "发送者--内容--时间")
+             * @param {string} chatName - 聊天对象名称
+             * @param {boolean} isGroup - 是否为群聊
+             */
+            function addMessageToChat($msgContent, msgStr, chatName, isGroup) {
+                const parts = msgStr.split("--");
+                if (parts.length < 2) return;
+                
+                const sender = parts[0];
+                const content = parts[1];
+                const timestamp = parts.length >= 3 ? parts[2] : new Date().toLocaleTimeString();
+                
+                const isUserMessage = sender === UserName;
+                
+                let messageHtml;
+                if (isUserMessage) {
+                    // 用户消息
+                    messageHtml = `
+                        <div class="QQ_chat_mymsg" style="margin-top:8px;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:4px;max-width:100%">
+                            <div style="width:auto;height:auto;margin-top:4px;grid-column:1;grid-row:1;justify-self:end;background:#007aff;color:white;padding:8px 12px;border-radius:18px;max-width:280px;word-wrap:break-word;font-size:16px;line-height:1.4">${content}</div>
+                            <div class="user_avatar Chat_MyHead" style="grid-column:2;grid-row:1;width:40px;height:40px;border-radius:50%;margin-left:8px;background-image:url('${userAvatarPath}');background-size:cover;background-position:center"></div>
+                            <div class="message-status" style="font-size:12px;color:#1976d2;font-weight:500;margin-top:2px;opacity:1;display:flex;align-items:center;justify-content:flex-end;gap:4px;grid-column:1;grid-row:2;margin-right:0;padding-right:8px">
+                                <span class="status-text">已发送</span>
+                                <span class="status-icon" style="color:#4caf50;font-weight:bold">✓</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // 角色消息
+                    messageHtml = `
+                        <div class="QQ_chat_charmsg" style="margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:8px;max-width:100%">
+                            <div data-name="${sender}" class="QQ_chat_head head${sender}" style="width:40px;height:40px;border-radius:50%;background-size:cover;background-position:center"></div>
+                            <div style="width:auto;height:auto;margin-top:4px">
+                                ${isGroup ? `<span class="name" style="font-weight:bold;color:#666;font-size:14px">${sender}</span><br/>` : ''}
+                                <div style="background:#f0f0f0;color:#333;padding:8px 12px;border-radius:18px;max-width:280px;word-wrap:break-word;font-size:16px;line-height:1.4">${content}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                $msgContent.append(messageHtml);
+            }
+            
             // 渲染QQ应用UI状态 (MVU style)
             function renderQQUIState(model) {
                 // 更新导航图标颜色
@@ -7919,6 +8139,14 @@
             function renderMomentsPage(model) {
                 const moments = model.memory.shortTerm.momentRecent || [];
                 renderMoments(moments, '.moments-container');
+            }
+            
+            // 渲染群聊页面
+            function renderGroupChatPage(model) {
+                console.log('渲染群聊页面', model);
+                // TODO: 实现群聊页面渲染逻辑
+                // 暂时显示占位内容
+                $('.main-content').html('<div class="placeholder">群聊功能开发中...</div>');
             }
             
             // 渲染聊天消息
