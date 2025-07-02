@@ -3887,7 +3887,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月4日</span>
+                            <span>台北</span> <span id="day">7月6日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -6536,6 +6536,69 @@
                         console.log(`📱 打开聊天: ${selectedChatName} (${isGroupChat ? '群聊' : '私聊'})`);
                         break;
                         
+                    case 'SHOW_CHAT_SETTINGS':
+                        // 显示聊天菜单
+                        const chatMenuName = message.payload.chatName;
+                        console.log(`📱 显示聊天菜单: ${chatMenuName}`);
+                        
+                        // 设置模态状态
+                        newModel.ui.modal.activeModal = 'chat_menu';
+                        newModel.ui.modal.isVisible = true;
+                        newModel.ui.modal.modalData = {
+                            chatName: chatMenuName,
+                            isGroup: AppModel.ui.activeChatType === 'group'
+                        };
+                        break;
+                        
+                    case 'LIKE_MOMENT':
+                        // 处理动态点赞
+                        const likeIndex = message.payload.index;
+                        if (newModel.memory.shortTerm.momentRecent && newModel.memory.shortTerm.momentRecent[likeIndex]) {
+                            const moment = newModel.memory.shortTerm.momentRecent[likeIndex];
+                            if (!moment.likes) moment.likes = { count: 0, userLiked: false };
+                            
+                            // 切换点赞状态
+                            if (moment.likes.userLiked) {
+                                moment.likes.count = Math.max(0, moment.likes.count - 1);
+                                moment.likes.userLiked = false;
+                                console.log(`👍 取消点赞动态 ${likeIndex}`);
+                            } else {
+                                moment.likes.count++;
+                                moment.likes.userLiked = true;
+                                console.log(`❤️ 点赞动态 ${likeIndex}`);
+                            }
+                        }
+                        break;
+                        
+                    case 'COMMENT_MOMENT':
+                        // 处理动态评论
+                        const commentIndex = message.payload.index;
+                        const commentText = message.payload.text;
+                        
+                        if (commentText && newModel.memory.shortTerm.momentRecent && newModel.memory.shortTerm.momentRecent[commentIndex]) {
+                            const moment = newModel.memory.shortTerm.momentRecent[commentIndex];
+                            if (!moment.comments) moment.comments = [];
+                            
+                            // 添加新评论
+                            moment.comments.push({
+                                id: Date.now(),
+                                author: UserName,
+                                content: commentText,
+                                timestamp: Date.now()
+                            });
+                            
+                            console.log(`💬 添加评论到动态 ${commentIndex}: ${commentText}`);
+                        } else if (!commentText) {
+                            // 如果没有评论文本，显示评论输入框
+                            newModel.ui.modal.activeModal = 'comment_input';
+                            newModel.ui.modal.isVisible = true;
+                            newModel.ui.modal.modalData = {
+                                momentIndex: commentIndex,
+                                moment: newModel.memory.shortTerm.momentRecent[commentIndex]
+                            };
+                        }
+                        break;
+                        
                     case 'SEND_BUTTON_CLICK':
                         // 发送按钮点击，触发消息发送流程
                         const inputElement = message.payload.inputElement;
@@ -7942,38 +8005,146 @@
                 return $element;
             }
             
-            // 渲染主页
+            // 渲染主页（联系人列表）
             function renderHomePage(model) {
-                console.log('🎨 渲染主页...');
+                console.log('🎨 渲染主页（联系人列表）...');
                 
-                // 优先使用聚合数据渲染
-                if (model.qq && model.qq.chatList && model.qq.chatList.length > 0) {
-                    console.log('✅ 使用聚合数据渲染主页，共' + model.qq.chatList.length + '个会话');
-                    renderChatListFromAggregatedData(model.qq.chatList, '#QQ_home_chars');
-                } else {
-                    console.log('⚠️  聚合数据未准备好，尝试从联系人数据渲染...');
-                    
-                    // 回退方案：从联系人数据渲染
-                    if (model.contacts && model.contacts.length > 0) {
-                        console.log('📋 使用联系人数据渲染主页，共' + model.contacts.length + '个联系人');
-                        renderContactsAsHomePage(model.contacts, '#QQ_home_chars');
-                    } else {
-                        console.log('⚠️  联系人数据也不存在，尝试使用传统数据源...');
+                const $container = $('#QQ_home_chars');
+                $container.empty();
+                
+                // 联系人页面应该显示所有联系人，不只是有聊天记录的
+                let allContacts = [];
+                
+                // 1. 首先添加所有群聊
+                if (QQ_Groups && QQ_Groups.length > 0) {
+                    console.log(`📁 添加 ${QQ_Groups.length} 个群聊`);
+                    QQ_Groups.forEach(groupName => {
+                        const groupData = getGroupDataByName(groupName);
+                        allContacts.push({
+                            id: `group_${groupName}`,
+                            type: 'group',
+                            name: groupName,
+                            avatar: groupData ? groupData.avatar : generateGroupAvatar(groupName),
+                            lastMessage: getLastMessageForChat(groupName, true, model),
+                            lastTime: getLastTimeForChat(groupName, true, model),
+                            isGroup: true,
+                            unread: 0
+                        });
+                    });
+                }
+                
+                // 2. 添加所有角色联系人
+                if (model.contacts && model.contacts.length > 0) {
+                    console.log(`👥 添加 ${model.contacts.length} 个角色联系人`);
+                    model.contacts.forEach(contact => {
+                        const lastMessage = getLastMessageForChat(contact.name, false, model);
+                        const lastTime = getLastTimeForChat(contact.name, false, model);
                         
-                        // 最后的回退方案：使用传统全局变量
-                        if (typeof QQ_msgjson !== 'undefined' && (QQ_msgjson.私聊 || QQ_msgjson.群聊)) {
-                            console.log('📝 使用传统全局变量渲染主页');
-                            renderFromLegacyData('#QQ_home_chars', model);
-                        } else {
-                            console.log('❌ 没有可用的数据源，显示空页面');
-                            $('#QQ_home_chars').html('<div class="no-contacts">暂无联系人</div>');
-                        }
+                        allContacts.push({
+                            id: contact.id,
+                            type: 'character',
+                            name: contact.name,
+                            avatar: contact.avatar || getCharacterAvatarFromModel(contact.name, model),
+                            lastMessage: lastMessage || '点击开始聊天',
+                            lastTime: lastTime || '',
+                            isGroup: false,
+                            unread: 0
+                        });
+                    });
+                } else if (model.characters) {
+                    // 如果没有contacts，从characters生成
+                    console.log('📝 从characters数据生成联系人列表');
+                    for (const [characterName, characterInfo] of Object.entries(model.characters)) {
+                        const lastMessage = getLastMessageForChat(characterName, false, model);
+                        const lastTime = getLastTimeForChat(characterName, false, model);
+                        
+                        allContacts.push({
+                            id: `char_${characterName}`,
+                            type: 'character',
+                            name: characterName,
+                            avatar: characterInfo.avatar || getCharacterAvatarFromModel(characterName, model),
+                            lastMessage: lastMessage || '点击开始聊天',
+                            lastTime: lastTime || '',
+                            isGroup: false,
+                            unread: 0
+                        });
                     }
                 }
+                
+                // 3. 渲染所有联系人
+                console.log(`✅ 渲染联系人列表，共 ${allContacts.length} 个联系人`);
+                renderChatListFromAggregatedData(allContacts, '#QQ_home_chars');
                 
                 // 渲染其他UI元素
                 renderUnreadCounts(model);
                 renderOnlineStatus(model.system && model.system.isOnline);
+                
+                // 初始化联系人分组功能（如果有）
+                if (typeof initContactGroups === 'function') {
+                    setTimeout(initContactGroups, 200);
+                }
+            }
+            
+            // 获取聊天的最后一条消息
+            function getLastMessageForChat(chatName, isGroup, model) {
+                if (isGroup && model.qq && model.qq.group_chat && model.qq.group_chat[chatName]) {
+                    const messages = model.qq.group_chat[chatName].msgs || [];
+                    if (messages.length > 0) {
+                        const lastMsg = messages[messages.length - 1];
+                        const parts = lastMsg.split("--");
+                        if (parts.length >= 2) {
+                            const sender = parts[0];
+                            const content = parts[1];
+                            return sender === UserName ? content : `${sender}: ${content}`;
+                        }
+                    }
+                } else if (!isGroup && model.qq && model.qq.private_chat) {
+                    const chatKey1 = `${UserName}和${chatName}的聊天`;
+                    const chatKey2 = `${chatName}和${UserName}的聊天`;
+                    const messages = model.qq.private_chat[chatKey1] || model.qq.private_chat[chatKey2] || [];
+                    if (messages.length > 0) {
+                        const lastMsg = messages[messages.length - 1];
+                        const parts = lastMsg.split("--");
+                        if (parts.length >= 2) {
+                            return parts[1];
+                        }
+                    }
+                }
+                return '';
+            }
+            
+            // 获取聊天的最后消息时间
+            function getLastTimeForChat(chatName, isGroup, model) {
+                if (isGroup && model.qq && model.qq.group_chat && model.qq.group_chat[chatName]) {
+                    const messages = model.qq.group_chat[chatName].msgs || [];
+                    if (messages.length > 0) {
+                        const lastMsg = messages[messages.length - 1];
+                        const parts = lastMsg.split("--");
+                        if (parts.length >= 3) {
+                            return formatDateToDisplayTime(new Date(parts[2]));
+                        }
+                    }
+                } else if (!isGroup && model.qq && model.qq.private_chat) {
+                    const chatKey1 = `${UserName}和${chatName}的聊天`;
+                    const chatKey2 = `${chatName}和${UserName}的聊天`;
+                    const messages = model.qq.private_chat[chatKey1] || model.qq.private_chat[chatKey2] || [];
+                    if (messages.length > 0) {
+                        const lastMsg = messages[messages.length - 1];
+                        const parts = lastMsg.split("--");
+                        if (parts.length >= 3) {
+                            return formatDateToDisplayTime(new Date(parts[2]));
+                        }
+                    }
+                }
+                return '';
+            }
+            
+            // 根据名称获取群聊数据
+            function getGroupDataByName(groupName) {
+                if (window.QQ_Group_Chats_Data && Array.isArray(window.QQ_Group_Chats_Data)) {
+                    return window.QQ_Group_Chats_Data.find(group => group.name === groupName);
+                }
+                return null;
             }
             
             /**
@@ -8138,7 +8309,10 @@
                                 
                                 <!-- 标题区域 -->
                                 <div style="display:flex;align-items:center;position:relative">
-                                    <span style="margin-left:8px;color:#000;font-size:16px" id="QQ_chat_username">${chatName}</span>
+                                    <span style="margin-left:8px;color:#000;font-size:16px;cursor:pointer" id="QQ_chat_username" onclick="handleChatTitleClick(this)">${chatName}</span>
+                                    <div class="group-member-dropdown" id="group_member_dropdown" style="display:none;position:absolute;top:25px;left:8px;background:#fff;border:1px solid #ddd;border-radius:5px;box-shadow:0 2px 10px rgba(0,0,0,0.1);z-index:1000;min-width:200px;max-height:300px;overflow-y:auto;">
+                                        <div class="group-member-list" id="group_member_list"></div>
+                                    </div>
                                 </div>
                                 
                                 <!-- 设置按钮 -->
@@ -8237,12 +8411,17 @@
                 
                 const isUserMessage = sender === UserName;
                 
+                // 检测消息类型和内容
+                const messageInfo = parseMessageContent(content);
+                
                 let messageHtml;
                 if (isUserMessage) {
                     // 用户消息 - 使用原版CSS类结构
                     messageHtml = `
                         <div class="QQ_chat_mymsg">
-                            <div style="width:auto;height:auto;margin-top:4px;grid-column:1;grid-row:1;">${content}</div>
+                            <div style="width:auto;height:auto;margin-top:4px;grid-column:1;grid-row:1;">
+                                ${renderMessageContent(messageInfo, sender, true)}
+                            </div>
                             <div class="user_avatar Chat_MyHead" style="grid-column:2;grid-row:1;background-image:url('${userAvatarPath}');"></div>
                             <div class="message-status" style="font-size:12px;color:#1976d2;font-weight:500;margin-top:6px;opacity:1;display:flex;align-items:center;justify-content:flex-end;gap:4px;grid-column:1;grid-row:2;margin-right:0;padding-right:8px;">
                                 <span class="status-text">已发送</span>
@@ -8257,13 +8436,337 @@
                             <div data-name="${sender}" class="QQ_chat_head head" style="grid-column:1;grid-row:1;"></div>
                             <div style="grid-column:2;grid-row:1;width:auto;height:auto;margin-top:4px">
                                 ${isGroup ? `<span class="name">${sender}</span><br/>` : ''}
-                                <div class="QQ_chat_msgdiv" data-name="${sender}">${content}</div>
+                                <div class="QQ_chat_msgdiv" data-name="${sender}">
+                                    ${renderMessageContent(messageInfo, sender, false)}
+                                </div>
                             </div>
                         </div>
                     `;
                 }
                 
                 $msgContent.append(messageHtml);
+            }
+            
+            /**
+             * 解析消息内容，检测消息类型
+             * @param {string} content - 消息内容
+             * @returns {Object} 消息信息对象
+             */
+            function parseMessageContent(content) {
+                // 检测图片消息
+                if (content.includes('<image>') || content.includes('[图片]') || /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(content)) {
+                    return {
+                        type: 'image',
+                        url: extractImageUrl(content),
+                        originalContent: content
+                    };
+                }
+                
+                // 检测语音消息
+                if (content.includes('<voice>') || content.includes('[语音]') || content.includes('[voice]')) {
+                    return {
+                        type: 'voice',
+                        duration: extractVoiceDuration(content),
+                        originalContent: content
+                    };
+                }
+                
+                // 检测音乐分享
+                if (content.includes('<music>') || content.includes('[音乐]') || content.includes('music:')) {
+                    return {
+                        type: 'music',
+                        data: extractMusicData(content),
+                        originalContent: content
+                    };
+                }
+                
+                // 检测转账消息
+                if (content.includes('<transfer>') || content.includes('[转账]') || content.includes('transfer:')) {
+                    return {
+                        type: 'transfer',
+                        amount: extractTransferAmount(content),
+                        originalContent: content
+                    };
+                }
+                
+                // 检测系统消息
+                if (content.includes('<system>') || content.startsWith('[系统]')) {
+                    return {
+                        type: 'system',
+                        text: content.replace(/<\/?system>/g, '').replace(/^\[系统\]/, ''),
+                        originalContent: content
+                    };
+                }
+                
+                // 普通文本消息
+                return {
+                    type: 'text',
+                    text: content,
+                    originalContent: content
+                };
+            }
+            
+            /**
+             * 渲染不同类型的消息内容
+             * @param {Object} messageInfo - 消息信息
+             * @param {string} sender - 发送者
+             * @param {boolean} isUser - 是否为用户消息
+             * @returns {string} 渲染后的HTML
+             */
+            function renderMessageContent(messageInfo, sender, isUser) {
+                switch (messageInfo.type) {
+                    case 'image':
+                        return renderImageMessage(messageInfo);
+                    case 'voice':
+                        return renderVoiceMessage(messageInfo);
+                    case 'music':
+                        return renderMusicMessage(messageInfo);
+                    case 'transfer':
+                        return renderTransferMessage(messageInfo);
+                    case 'system':
+                        return renderSystemMessage(messageInfo);
+                    default:
+                        return messageInfo.text || messageInfo.originalContent;
+                }
+            }
+            
+            /**
+             * 渲染图片消息
+             */
+            function renderImageMessage(messageInfo) {
+                const imageUrl = messageInfo.url || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2VlZSIvPgo8dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1zaXplPSIxOCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPuWbvueJhzwvdGV4dD4KPC9zdmc+';
+                
+                return `
+                    <div class="QQ_chat_image" style="max-width: 200px; margin: 5px 0;">
+                        <img src="${imageUrl}" 
+                             alt="图片消息" 
+                             style="max-width: 100%; border-radius: 8px; cursor: pointer;"
+                             onclick="showImagePreview('${imageUrl}')"
+                             onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2VlZSIvPgo8dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1zaXplPSIxOCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPuWbvueJhzwvdGV4dD4KPC9zdmc+'" />
+                    </div>
+                `;
+            }
+            
+            /**
+             * 渲染语音消息
+             */
+            function renderVoiceMessage(messageInfo) {
+                const duration = messageInfo.duration || '0:15';
+                
+                return `
+                    <div class="QQ_chat_voice" style="
+                        display: flex;
+                        align-items: center;
+                        background: #f0f0f0;
+                        border-radius: 20px;
+                        padding: 12px 16px;
+                        cursor: pointer;
+                        min-width: 120px;
+                        max-width: 200px;
+                    " onclick="playVoiceMessage(this)">
+                        <div class="voice-icon" style="margin-right: 8px;">
+                            <svg width="20" height="20" viewBox="0 0 1024 1024">
+                                <path d="M512 62a184.09090869 184.09090869 0 0 1 184.09090869 184.09090869v204.54545478a184.09090869 184.09090869 0 1 1-368.18181738 1e-8v-204.54545479A184.09090869 184.09090869 0 0 1 512 62z" fill="#666666"></path>
+                            </svg>
+                        </div>
+                        <div class="voice-duration" style="font-size: 14px; color: #666;">${duration}"</div>
+                        <div class="voice-waves" style="margin-left: 8px; display: flex; align-items: center; gap: 2px;">
+                            <div style="width: 2px; height: 8px; background: #666; border-radius: 1px;"></div>
+                            <div style="width: 2px; height: 12px; background: #666; border-radius: 1px;"></div>
+                            <div style="width: 2px; height: 6px; background: #666; border-radius: 1px;"></div>
+                            <div style="width: 2px; height: 10px; background: #666; border-radius: 1px;"></div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            /**
+             * 渲染音乐分享
+             */
+            function renderMusicMessage(messageInfo) {
+                const musicData = messageInfo.data || { name: '未知音乐', artist: '未知歌手', cover: '' };
+                
+                return `
+                    <div class="QQ_chat_music" style="
+                        background: #fff;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 12px;
+                        overflow: hidden;
+                        max-width: 280px;
+                        cursor: pointer;
+                    " onclick="playMusic('${musicData.url || ''}')">
+                        <div class="music-container" style="display: grid; grid-template-columns: 1fr 64px; width: 100%;">
+                            <div style="display: flex; flex-direction: column; margin: 12px; overflow: hidden; max-width: 100%;">
+                                <div class="music-name" style="font-size: 16px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    ${musicData.name}
+                                </div>
+                                <div class="music-artist" style="color: #666; margin-top: 4px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    ${musicData.artist}
+                                </div>
+                            </div>
+                            <div style="position: relative; height: 64px; width: 64px; margin: 8px;">
+                                ${musicData.cover ? 
+                                    `<img src="${musicData.cover}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;" />` :
+                                    `<div style="width: 100%; height: 100%; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                                        <svg width="24" height="24" viewBox="0 0 1024 1024" fill="white">
+                                            <path d="M902.420317 544.833016l-585.142857-357.587302v715.174603l585.142857-357.587301z"></path>
+                                        </svg>
+                                    </div>`
+                                }
+                                <div class="music-play-overlay" style="
+                                    position: absolute;
+                                    top: 50%;
+                                    left: 50%;
+                                    transform: translate(-50%, -50%);
+                                    background: rgba(0,0,0,0.6);
+                                    border-radius: 50%;
+                                    width: 30px;
+                                    height: 30px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                ">
+                                    <svg width="16" height="16" viewBox="0 0 1024 1024" fill="white">
+                                        <path d="M902.420317 544.833016l-585.142857-357.587302v715.174603l585.142857-357.587301z"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="padding: 8px 12px; background: #f8f8f8; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666;">
+                            🎵 音乐分享
+                        </div>
+                    </div>
+                `;
+            }
+            
+            /**
+             * 渲染转账消息
+             */
+            function renderTransferMessage(messageInfo) {
+                const amount = messageInfo.amount || '0.00';
+                
+                return `
+                    <div class="QQ_chat_transfer" style="
+                        background: linear-gradient(135deg, #4396f7, #3d8bdb);
+                        border-radius: 12px;
+                        overflow: hidden;
+                        max-width: 250px;
+                        color: white;
+                    ">
+                        <div style="padding: 16px; position: relative;">
+                            <div style="font-size: 18px; font-weight: bold; margin-bottom: 4px;">¥${amount}</div>
+                            <div style="font-size: 14px; opacity: 0.9;">QQ转账</div>
+                            <div style="
+                                position: absolute;
+                                right: 12px;
+                                top: 50%;
+                                transform: translateY(-50%);
+                                width: 40px;
+                                height: 40px;
+                                background: rgba(255,255,255,0.2);
+                                border-radius: 50%;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">
+                                <svg width="24" height="24" viewBox="0 0 1024 1024" fill="white">
+                                    <path d="M512 0C229.376 0 0 229.376 0 512s229.376 512 512 512 512-229.376 512-512S794.624 0 512 0z m0 928C282.24 928 96 741.76 96 512S282.24 96 512 96s416 186.24 416 416-186.24 416-416 416z"></path>
+                                    <path d="M512 256c-141.184 0-256 114.816-256 256s114.816 256 256 256 256-114.816 256-256-114.816-256-256-256z m0 448c-105.984 0-192-86.016-192-192s86.016-192 192-192 192 86.016 192 192-86.016 192-192 192z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.1); padding: 8px 16px; font-size: 12px;">
+                            点击查看详情
+                        </div>
+                    </div>
+                `;
+            }
+            
+            /**
+             * 渲染系统消息
+             */
+            function renderSystemMessage(messageInfo) {
+                return `
+                    <div class="QQ_chat_system" style="
+                        text-align: center;
+                        color: #999;
+                        font-size: 12px;
+                        margin: 10px 0;
+                        padding: 8px;
+                        background: rgba(0,0,0,0.05);
+                        border-radius: 12px;
+                    ">
+                        ${messageInfo.text}
+                    </div>
+                `;
+            }
+            
+            // ========== 富媒体消息内容提取函数 ==========
+            
+            function extractImageUrl(content) {
+                // 提取图片URL的各种格式
+                const urlMatch = content.match(/https?:\/\/[^\s<>"]+\.(jpg|jpeg|png|gif|webp)/i);
+                if (urlMatch) return urlMatch[0];
+                
+                const imageTagMatch = content.match(/<image[^>]*src=["']([^"']+)["'][^>]*>/i);
+                if (imageTagMatch) return imageTagMatch[1];
+                
+                return null;
+            }
+            
+            function extractVoiceDuration(content) {
+                const durationMatch = content.match(/duration[:\s]*([0-9:]+)/i);
+                return durationMatch ? durationMatch[1] : '0:15';
+            }
+            
+            function extractMusicData(content) {
+                try {
+                    // 尝试解析JSON格式的音乐数据
+                    const jsonMatch = content.match(/\{[^}]+\}/);
+                    if (jsonMatch) {
+                        return JSON.parse(jsonMatch[0]);
+                    }
+                    
+                    // 解析简单格式 music:name|artist|cover
+                    const simpleMatch = content.match(/music:\s*([^|]+)\|([^|]+)\|?([^|]*)/);
+                    if (simpleMatch) {
+                        return {
+                            name: simpleMatch[1].trim(),
+                            artist: simpleMatch[2].trim(),
+                            cover: simpleMatch[3] ? simpleMatch[3].trim() : ''
+                        };
+                    }
+                } catch (e) {
+                    console.warn('解析音乐数据失败:', e);
+                }
+                
+                return { name: '未知音乐', artist: '未知歌手', cover: '' };
+            }
+            
+            function extractTransferAmount(content) {
+                const amountMatch = content.match(/([0-9]+\.?[0-9]*)/);
+                return amountMatch ? amountMatch[1] : '0.00';
+            }
+            
+            // ========== 富媒体消息交互函数 ==========
+            
+            function showImagePreview(imageUrl) {
+                console.log('显示图片预览:', imageUrl);
+                // TODO: 实现图片预览功能
+            }
+            
+            function playVoiceMessage(element) {
+                console.log('播放语音消息');
+                // TODO: 实现语音播放功能
+                element.style.background = '#ddd';
+                setTimeout(() => {
+                    element.style.background = '#f0f0f0';
+                }, 1000);
+            }
+            
+            function playMusic(musicUrl) {
+                console.log('播放音乐:', musicUrl);
+                // TODO: 实现音乐播放功能
             }
             
             // 渲染QQ应用UI状态 (MVU style)
@@ -8494,6 +8997,12 @@
                     case 'chat_settings':
                         renderChatSettingsModal(model.ui.modal, modalContainer);
                         break;
+                    case 'chat_menu':
+                        renderChatMenuModal(model.ui.modal, modalContainer);
+                        break;
+                    case 'comment_input':
+                        renderCommentInputModal(model.ui.modal, modalContainer);
+                        break;
                     default:
                         console.warn('未知弹窗类型:', model.ui.modal.activeModal);
                 }
@@ -8575,6 +9084,357 @@
                 `;
             }
             
+            // 渲染聊天菜单弹窗
+            function renderChatMenuModal(modalState, container) {
+                const { modalData } = modalState;
+                const { chatName, isGroup } = modalData;
+                
+                container.innerHTML = `
+                    <div style="
+                        position: fixed;
+                        top: 0;
+                        right: 0;
+                        width: 280px;
+                        height: 100%;
+                        background: white;
+                        box-shadow: -2px 0 10px rgba(0,0,0,0.2);
+                        z-index: 10001;
+                        pointer-events: auto;
+                        transform: translateX(0);
+                        transition: transform 0.3s ease;
+                    ">
+                        <!-- 头部 -->
+                        <div style="
+                            padding: 20px;
+                            border-bottom: 1px solid #eee;
+                            background: linear-gradient(135deg, #667eea, #764ba2);
+                            color: white;
+                        ">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <h3 style="margin: 0; font-size: 18px;">${chatName}</h3>
+                                <button onclick="hideChatMenu()" style="
+                                    background: none;
+                                    border: none;
+                                    color: white;
+                                    font-size: 24px;
+                                    cursor: pointer;
+                                ">×</button>
+                            </div>
+                            <p style="margin: 5px 0 0; font-size: 14px; opacity: 0.9;">
+                                ${isGroup ? '群聊设置' : '私聊设置'}
+                            </p>
+                        </div>
+                        
+                        <!-- 菜单选项 -->
+                        <div style="padding: 20px;">
+                            <!-- 聊天设置 -->
+                            <div class="chat-menu-section">
+                                <h4 style="margin: 0 0 15px; color: #333; font-size: 16px;">聊天设置</h4>
+                                <div class="chat-menu-item" onclick="showChatSettings('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">🎨</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">聊天主题</div>
+                                        <div style="font-size: 12px; color: #666;">自定义气泡、背景等</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                                
+                                <div class="chat-menu-item" onclick="showChatHistory('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">📜</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">聊天记录</div>
+                                        <div style="font-size: 12px; color: #666;">查看完整聊天历史</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                                
+                                <div class="chat-menu-item" onclick="clearChatHistory('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">🗑️</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">清空聊天</div>
+                                        <div style="font-size: 12px; color: #666;">删除所有聊天记录</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                            </div>
+                            
+                            ${isGroup ? `
+                            <!-- 群聊专有选项 -->
+                            <div class="chat-menu-section" style="margin-top: 30px;">
+                                <h4 style="margin: 0 0 15px; color: #333; font-size: 16px;">群聊管理</h4>
+                                <div class="chat-menu-item" onclick="showGroupMembers('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">👥</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">群成员</div>
+                                        <div style="font-size: 12px; color: #666;">查看和管理群成员</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                                
+                                <div class="chat-menu-item" onclick="showGroupSettings('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">⚙️</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">群聊设置</div>
+                                        <div style="font-size: 12px; color: #666;">群名称、权限等</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                            </div>
+                            ` : `
+                            <!-- 私聊专有选项 -->
+                            <div class="chat-menu-section" style="margin-top: 30px;">
+                                <h4 style="margin: 0 0 15px; color: #333; font-size: 16px;">角色设置</h4>
+                                <div class="chat-menu-item" onclick="showCharacterInfo('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">👤</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">角色信息</div>
+                                        <div style="font-size: 12px; color: #666;">查看角色详细信息</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                                
+                                <div class="chat-menu-item" onclick="QQ_ShowCharacterSpirit('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">✨</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">角色精灵</div>
+                                        <div style="font-size: 12px; color: #666;">显示角色精灵面板</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                            </div>
+                            `}
+                            
+                            <!-- 其他选项 -->
+                            <div class="chat-menu-section" style="margin-top: 30px;">
+                                <h4 style="margin: 0 0 15px; color: #333; font-size: 16px;">其他</h4>
+                                <div class="chat-menu-item" onclick="exportChatData('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    border-bottom: 1px solid #f0f0f0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">📤</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">导出聊天</div>
+                                        <div style="font-size: 12px; color: #666;">保存聊天记录到文件</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                                
+                                <div class="chat-menu-item" onclick="reportChat('${chatName}')" style="
+                                    display: flex;
+                                    align-items: center;
+                                    padding: 12px 0;
+                                    cursor: pointer;
+                                ">
+                                    <div style="margin-right: 12px;">⚠️</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 16px;">举报</div>
+                                        <div style="font-size: 12px; color: #666;">举报不当内容</div>
+                                    </div>
+                                    <div style="color: #ccc;">›</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 背景遮罩 -->
+                    <div onclick="hideChatMenu()" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0,0,0,0.3);
+                        z-index: 10000;
+                    "></div>
+                `;
+            }
+            
+            // 渲染评论输入弹窗
+            function renderCommentInputModal(modalState, container) {
+                const { modalData } = modalState;
+                const { momentIndex, moment } = modalData;
+                
+                container.innerHTML = `
+                    <div style="
+                        position: fixed;
+                        bottom: 0;
+                        left: 0;
+                        width: 100%;
+                        background: white;
+                        box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
+                        z-index: 10001;
+                        pointer-events: auto;
+                        transform: translateY(0);
+                        transition: transform 0.3s ease;
+                    ">
+                        <!-- 评论输入头部 -->
+                        <div style="
+                            padding: 16px;
+                            border-bottom: 1px solid #eee;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        ">
+                            <h3 style="margin: 0; font-size: 16px;">评论动态</h3>
+                            <button onclick="hideCommentInput()" style="
+                                background: none;
+                                border: none;
+                                font-size: 18px;
+                                cursor: pointer;
+                                color: #666;
+                            ">×</button>
+                        </div>
+                        
+                        <!-- 原动态预览 -->
+                        <div style="
+                            padding: 16px;
+                            background: #f8f9fa;
+                            border-bottom: 1px solid #eee;
+                            max-height: 100px;
+                            overflow: hidden;
+                        ">
+                            <div style="font-size: 14px; color: #333; margin-bottom: 4px;">
+                                <strong>${moment.author}</strong>
+                            </div>
+                            <div style="font-size: 12px; color: #666;">
+                                ${moment.content.length > 50 ? moment.content.substring(0, 50) + '...' : moment.content}
+                            </div>
+                        </div>
+                        
+                        <!-- 评论输入区 -->
+                        <div style="padding: 16px;">
+                            <textarea 
+                                id="comment-input-text" 
+                                placeholder="写下你的评论..." 
+                                style="
+                                    width: 100%;
+                                    height: 80px;
+                                    border: 1px solid #ddd;
+                                    border-radius: 8px;
+                                    padding: 12px;
+                                    font-size: 14px;
+                                    resize: none;
+                                    outline: none;
+                                    box-sizing: border-box;
+                                "
+                            ></textarea>
+                            <div style="
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-top: 12px;
+                            ">
+                                <div style="font-size: 12px; color: #999;">
+                                    <span id="comment-char-count">0</span>/200字
+                                </div>
+                                <div>
+                                    <button onclick="hideCommentInput()" style="
+                                        background: #f0f0f0;
+                                        border: none;
+                                        padding: 8px 16px;
+                                        border-radius: 20px;
+                                        margin-right: 8px;
+                                        cursor: pointer;
+                                    ">取消</button>
+                                    <button onclick="submitComment(${momentIndex})" style="
+                                        background: #007AFF;
+                                        color: white;
+                                        border: none;
+                                        padding: 8px 16px;
+                                        border-radius: 20px;
+                                        cursor: pointer;
+                                    ">发送</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 背景遮罩 -->
+                    <div onclick="hideCommentInput()" style="
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0,0,0,0.3);
+                        z-index: 10000;
+                    "></div>
+                `;
+                
+                // 自动聚焦到输入框并设置字符计数
+                setTimeout(() => {
+                    const input = document.getElementById('comment-input-text');
+                    const charCount = document.getElementById('comment-char-count');
+                    
+                    if (input) {
+                        input.focus();
+                        
+                        // 字符计数更新
+                        input.addEventListener('input', function() {
+                            const count = this.value.length;
+                            charCount.textContent = count;
+                            if (count > 200) {
+                                charCount.style.color = 'red';
+                            } else {
+                                charCount.style.color = '#999';
+                            }
+                        });
+                        
+                        // 回车发送评论
+                        input.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                submitComment(${momentIndex});
+                            }
+                        });
+                    }
+                }, 100);
+            }
+
             // 渲染群聊设置弹窗
             function renderGroupSettingsModal(modalState, container) {
                 const { modalData } = modalState;
@@ -8998,17 +9858,166 @@
                 const timestamp = moment.timestamp || Date.now();
                 const displayTime = formatDateToDisplayTime(new Date(timestamp));
                 
+                // 点赞和评论数据
+                const likes = moment.likes || { count: 0, userLiked: false };
+                const comments = moment.comments || [];
+                const likeClass = likes.userLiked ? 'moment-liked' : '';
+                const likeIcon = likes.userLiked ? '❤️' : '👍';
+                
                 const $element = $(`
-                    <div class="moment-item" data-index="${index}">
-                        <div class="moment-header">
-                            <div class="moment-author">${author}</div>
-                            <div class="moment-time">${displayTime}</div>
+                    <div class="moment-item" data-index="${index}" style="
+                        background: white;
+                        margin: 10px;
+                        border-radius: 12px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                        overflow: hidden;
+                    ">
+                        <!-- 动态头部 -->
+                        <div class="moment-header" style="
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            padding: 16px;
+                            border-bottom: 1px solid #f0f0f0;
+                        ">
+                            <div style="display: flex; align-items: center;">
+                                <div class="moment-avatar" style="
+                                    width: 40px;
+                                    height: 40px;
+                                    border-radius: 50%;
+                                    background: linear-gradient(135deg, #667eea, #764ba2);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    color: white;
+                                    font-weight: bold;
+                                    margin-right: 12px;
+                                ">${author.charAt(0)}</div>
+                                <div>
+                                    <div class="moment-author" style="font-weight: bold; font-size: 16px;">${author}</div>
+                                    <div class="moment-time" style="color: #666; font-size: 12px;">${displayTime}</div>
+                                </div>
+                            </div>
+                            <div class="moment-menu" onclick="showMomentMenu(${index}, event)" style="
+                                padding: 8px;
+                                cursor: pointer;
+                                color: #666;
+                            ">⋯</div>
                         </div>
-                        <div class="moment-content">${content}</div>
-                        <div class="moment-actions">
-                            <button onclick="handleViewAction({type: 'LIKE_MOMENT', payload: {index: ${index}}}, event)" class="moment-like-btn">👍</button>
-                            <button onclick="handleViewAction({type: 'COMMENT_MOMENT', payload: {index: ${index}}}, event)" class="moment-comment-btn">💬</button>
+                        
+                        <!-- 动态内容 -->
+                        <div class="moment-content" style="
+                            padding: 16px;
+                            font-size: 16px;
+                            line-height: 1.5;
+                        ">${content}</div>
+                        
+                        <!-- 动态操作 -->
+                        <div class="moment-actions" style="
+                            display: flex;
+                            justify-content: space-around;
+                            padding: 12px 16px;
+                            border-top: 1px solid #f0f0f0;
+                        ">
+                            <button onclick="handleViewAction({type: 'LIKE_MOMENT', payload: {index: ${index}}}, event)" 
+                                    class="moment-like-btn ${likeClass}" style="
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                background: none;
+                                border: none;
+                                padding: 8px 16px;
+                                border-radius: 20px;
+                                cursor: pointer;
+                                transition: background 0.2s;
+                                ${likes.userLiked ? 'background: rgba(255, 0, 0, 0.1); color: red;' : 'color: #666;'}
+                            ">
+                                <span>${likeIcon}</span>
+                                <span>${likes.count > 0 ? likes.count : '点赞'}</span>
+                            </button>
+                            <button onclick="handleViewAction({type: 'COMMENT_MOMENT', payload: {index: ${index}}}, event)" 
+                                    class="moment-comment-btn" style="
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                background: none;
+                                border: none;
+                                padding: 8px 16px;
+                                border-radius: 20px;
+                                cursor: pointer;
+                                transition: background 0.2s;
+                                color: #666;
+                            ">
+                                <span>💬</span>
+                                <span>${comments.length > 0 ? comments.length : '评论'}</span>
+                            </button>
+                            <button onclick="shareMoment(${index})" class="moment-share-btn" style="
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                background: none;
+                                border: none;
+                                padding: 8px 16px;
+                                border-radius: 20px;
+                                cursor: pointer;
+                                transition: background 0.2s;
+                                color: #666;
+                            ">
+                                <span>📤</span>
+                                <span>分享</span>
+                            </button>
                         </div>
+                        
+                        <!-- 评论列表 -->
+                        ${comments.length > 0 ? `
+                        <div class="moment-comments" style="
+                            padding: 0 16px 16px;
+                            border-top: 1px solid #f0f0f0;
+                            background: #f8f9fa;
+                        ">
+                            <div style="padding: 12px 0 8px; font-size: 14px; font-weight: bold; color: #333;">
+                                评论 (${comments.length})
+                            </div>
+                            ${comments.slice(0, 3).map(comment => `
+                                <div class="comment-item" style="
+                                    padding: 8px 0;
+                                    border-bottom: 1px solid #eee;
+                                ">
+                                    <div style="display: flex; align-items: flex-start; gap: 8px;">
+                                        <div style="
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 50%;
+                                            background: linear-gradient(135deg, #667eea, #764ba2);
+                                            display: flex;
+                                            align-items: center;
+                                            justify-content: center;
+                                            color: white;
+                                            font-size: 10px;
+                                            font-weight: bold;
+                                        ">${comment.author.charAt(0)}</div>
+                                        <div style="flex: 1;">
+                                            <div style="font-size: 12px; color: #333;">
+                                                <strong>${comment.author}</strong>: ${comment.content}
+                                            </div>
+                                            <div style="font-size: 10px; color: #999; margin-top: 2px;">
+                                                ${formatDateToDisplayTime(new Date(comment.timestamp))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                            ${comments.length > 3 ? `
+                                <div onclick="showAllComments(${index})" style="
+                                    text-align: center;
+                                    color: #007AFF;
+                                    cursor: pointer;
+                                    padding: 8px;
+                                    font-size: 12px;
+                                ">查看全部${comments.length}条评论</div>
+                            ` : ''}
+                        </div>
+                        ` : ''}
                     </div>
                 `);
                 
@@ -44138,12 +45147,592 @@ MiPhone_JSON_END`;
                 document.addEventListener('mouseleave', cleanup);
             }
             
+            // ===== 聊天交互功能 =====
+            
+            /**
+             * 处理聊天标题点击事件
+             * @param {HTMLElement} element - 被点击的标题元素
+             */
+            function handleChatTitleClick(element) {
+                console.log('=== handleChatTitleClick 被调用 ===');
+                
+                const chatName = element.textContent.trim();
+                console.log('点击的聊天标题:', chatName);
+                
+                // 检查是否是群聊
+                const isGroupChat = QQ_Groups && QQ_Groups.includes(chatName.replace(/\s*\(\d+人\)\s*$/, '').trim());
+                
+                if (isGroupChat) {
+                    // 群聊逻辑 - 显示群成员列表
+                    const cleanGroupName = chatName.replace(/\s*\(\d+人\)\s*$/, '').trim();
+                    console.log('这是群聊，显示群管理菜单:', cleanGroupName);
+                    showGroupManagementMenu(cleanGroupName, element);
+                } else {
+                    // 私聊逻辑 - 显示角色精灵
+                    console.log('这是私聊，显示角色精灵');
+                    QQ_ShowCharacterSpirit(chatName);
+                }
+            }
+            
+            /**
+             * 显示群聊管理菜单
+             * @param {string} groupName - 群名
+             * @param {HTMLElement} element - 触发元素
+             */
+            function showGroupManagementMenu(groupName, element) {
+                console.log(`显示群聊 ${groupName} 的管理菜单`);
+                
+                // 获取群成员数据
+                let groupData = null;
+                if (AppModel.qq && AppModel.qq.group_chat && AppModel.qq.group_chat[groupName]) {
+                    const msgGroupData = AppModel.qq.group_chat[groupName];
+                    groupData = {
+                        name: groupName,
+                        members: msgGroupData.members || [],
+                        avatar: 'https://files.catbox.moe/skngqq.jpg'
+                    };
+                } else {
+                    // 默认群聊数据
+                    groupData = {
+                        name: groupName,
+                        members: ['成员1', '成员2', '成员3'],
+                        avatar: 'https://files.catbox.moe/skngqq.jpg'
+                    };
+                }
+                
+                // 找到下拉菜单容器
+                const dropdown = element.parentElement.querySelector('#group_member_dropdown');
+                const memberList = element.parentElement.querySelector('#group_member_list');
+                
+                if (dropdown && memberList) {
+                    // 清空现有内容
+                    memberList.innerHTML = '';
+                    
+                    // 添加群成员
+                    groupData.members.forEach(member => {
+                        const memberElement = document.createElement('div');
+                        memberElement.style.cssText = 'padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer;';
+                        memberElement.textContent = member;
+                        memberElement.onclick = () => {
+                            console.log(`点击群成员: ${member}`);
+                            // 这里可以添加点击成员的逻辑
+                            dropdown.style.display = 'none';
+                        };
+                        memberList.appendChild(memberElement);
+                    });
+                    
+                    // 切换显示状态
+                    if (dropdown.style.display === 'none' || !dropdown.style.display) {
+                        dropdown.style.display = 'block';
+                    } else {
+                        dropdown.style.display = 'none';
+                    }
+                }
+            }
+            
+            /**
+             * 显示角色专属精灵按钮
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_ShowCharacterSpirit(characterName) {
+                console.log(`显示角色 ${characterName} 的专属精灵按钮`);
+                
+                // 如果已经显示，则不重复创建
+                if ($(`.QQ_character_spirit[data-character="${characterName}"]`).length > 0) return;
+                
+                // 隐藏其他角色的精灵按钮
+                $('.QQ_character_spirit').remove();
+                
+                // 获取角色头像
+                const characterAvatar = getCharacterAvatarFromModel(characterName, AppModel) || 'https://files.catbox.moe/skngqq.jpg';
+                
+                // 创建精灵按钮
+                const spiritButton = $(`
+                    <div class="QQ_character_spirit" data-character="${characterName}" style="
+                        position: fixed;
+                        right: 20px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        width: 60px;
+                        height: 60px;
+                        border-radius: 50%;
+                        background-image: url('${characterAvatar}');
+                        background-size: cover;
+                        background-position: center;
+                        border: 3px solid #fff;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                        cursor: pointer;
+                        z-index: 1000;
+                        transition: all 0.3s ease;
+                    " title="点击查看${characterName}的精灵面板">
+                    </div>
+                `);
+                
+                // 添加点击事件
+                spiritButton.on('click', function() {
+                    QQ_ShowCharacterSpiritPanel(characterName);
+                });
+                
+                // 添加到页面
+                $('body').append(spiritButton);
+                
+                console.log(`✅ 角色 ${characterName} 的精灵按钮已显示`);
+            }
+            
+            /**
+             * 显示角色精灵面板
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_ShowCharacterSpiritPanel(characterName) {
+                console.log(`显示角色 ${characterName} 的精灵面板`);
+                
+                // 移除现有面板
+                $('.QQ_character_spirit_panel').remove();
+                
+                const characterAvatar = getCharacterAvatarFromModel(characterName, AppModel) || 'https://files.catbox.moe/skngqq.jpg';
+                
+                // 创建精灵面板HTML
+                const panelHtml = `
+                    <div class="QQ_character_spirit_panel" style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 300px;
+                        background: #fff;
+                        border-radius: 15px;
+                        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                        z-index: 2000;
+                        overflow: hidden;
+                    ">
+                        <div class="spirit-panel-header" style="
+                            background: linear-gradient(135deg, #667eea, #764ba2);
+                            color: white;
+                            padding: 20px;
+                            text-align: center;
+                        ">
+                            <div style="
+                                width: 60px;
+                                height: 60px;
+                                border-radius: 50%;
+                                background-image: url('${characterAvatar}');
+                                background-size: cover;
+                                background-position: center;
+                                margin: 0 auto 10px;
+                                border: 3px solid rgba(255,255,255,0.8);
+                            "></div>
+                            <h3 style="margin: 0; font-size: 18px;">${characterName}</h3>
+                            <p style="margin: 5px 0 0; font-size: 14px; opacity: 0.9;">角色精灵面板</p>
+                            <button class="QQ_close_spirit_panel" style="
+                                position: absolute;
+                                top: 10px;
+                                right: 10px;
+                                background: none;
+                                border: none;
+                                color: white;
+                                font-size: 20px;
+                                cursor: pointer;
+                                width: 30px;
+                                height: 30px;
+                                border-radius: 50%;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">×</button>
+                        </div>
+                        <div class="spirit-panel-body" style="padding: 20px;">
+                            <div class="spirit-options" style="display: flex; flex-direction: column; gap: 10px;">
+                                <button class="QQ_spirit_option" data-action="interactive_space" style="
+                                    padding: 12px;
+                                    border: none;
+                                    border-radius: 8px;
+                                    background: #f0f0f0;
+                                    cursor: pointer;
+                                    transition: background 0.2s;
+                                ">🌟 互动空间</button>
+                                <button class="QQ_spirit_option" data-action="create_space" style="
+                                    padding: 12px;
+                                    border: none;
+                                    border-radius: 8px;
+                                    background: #f0f0f0;
+                                    cursor: pointer;
+                                    transition: background 0.2s;
+                                ">✨ 创建空间</button>
+                                <button class="QQ_spirit_option" data-action="public_spaces" style="
+                                    padding: 12px;
+                                    border: none;
+                                    border-radius: 8px;
+                                    background: #f0f0f0;
+                                    cursor: pointer;
+                                    transition: background 0.2s;
+                                ">🌍 公共空间</button>
+                                <button class="QQ_spirit_option" data-action="hide_spirit" style="
+                                    padding: 12px;
+                                    border: none;
+                                    border-radius: 8px;
+                                    background: #f0f0f0;
+                                    cursor: pointer;
+                                    transition: background 0.2s;
+                                ">👻 隐藏精灵</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加到页面
+                $('body').append(panelHtml);
+                
+                // 绑定事件
+                $('.QQ_close_spirit_panel').on('click', function() {
+                    $('.QQ_character_spirit_panel').fadeOut(300, function() {
+                        $(this).remove();
+                    });
+                });
+                
+                $('.QQ_spirit_option[data-action="interactive_space"]').on('click', function() {
+                    console.log('点击互动空间');
+                    $('.QQ_character_spirit_panel').remove();
+                });
+                
+                $('.QQ_spirit_option[data-action="create_space"]').on('click', function() {
+                    console.log('点击创建空间');
+                    $('.QQ_character_spirit_panel').remove();
+                });
+                
+                $('.QQ_spirit_option[data-action="public_spaces"]').on('click', function() {
+                    console.log('点击公共空间');
+                    $('.QQ_character_spirit_panel').remove();
+                });
+                
+                $('.QQ_spirit_option[data-action="hide_spirit"]').on('click', function() {
+                    console.log('点击隐藏精灵');
+                    $('.QQ_character_spirit_panel').remove();
+                    $('.QQ_character_spirit').remove();
+                });
+                
+                console.log(`✅ 角色 ${characterName} 的精灵面板已显示`);
+            }
+            
+            /**
+             * 显示聊天设置弹窗
+             * @param {string} chatName - 聊天名称
+             */
+            function showChatSettingsPopup(chatName) {
+                console.log(`显示聊天设置弹窗: ${chatName}`);
+                
+                // 移除现有弹窗
+                $('.chat-setting-popup').remove();
+                
+                // 创建设置弹窗HTML
+                const settingsHtml = `
+                    <div class="chat-setting-popup" style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 80%;
+                        max-width: 350px;
+                        background-color: #fff;
+                        border-radius: 10px;
+                        box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+                        z-index: 1000;
+                        display: block;
+                    ">
+                        <div class="chat-setting-header" style="
+                            padding: 15px;
+                            border-bottom: 1px solid #eee;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        ">
+                            <span style="font-weight: bold; font-size: 16px;">聊天设置</span>
+                            <svg class="close-setting-btn" viewBox="0 0 1024 1024" width="20" height="20" style="cursor: pointer;">
+                                <path d="M512 421.490332 331.092592 240.582924C307.952518 217.442849 270.568889 217.442849 247.428814 240.582924 224.288739 263.722999 224.288739 301.106628 247.428814 324.246702L428.336222 505.154112 247.428814 686.061521C224.288739 709.201596 224.288739 746.585225 247.428814 769.7253 270.568889 792.865374 307.952518 792.865374 331.092592 769.7253L512 588.817891 692.907408 769.7253C716.047482 792.865374 753.431111 792.865374 776.571186 769.7253 799.711261 746.585225 799.711261 709.201596 776.571186 686.061521L595.663778 505.154112 776.571186 324.246702C799.711261 301.106628 799.711261 263.722999 776.571186 240.582924 753.431111 217.442849 716.047482 217.442849 692.907408 240.582924L512 421.490332Z" fill="#666666"></path>
+                            </svg>
+                        </div>
+                        <div class="chat-setting-content" style="padding: 20px;">
+                            <div class="setting-item" style="display: flex; align-items: center; margin-bottom: 15px;">
+                                <span style="margin-right: 10px;">气泡颜色</span>
+                                <div style="flex: 1; margin-right: 10px;">
+                                    <input style="width: 100%;" type="text" id="bubble-color-input" placeholder="颜色值"/>
+                                </div>
+                                <input type="color" id="bubble-color" class="color-picker"/>
+                            </div>
+                            <div class="setting-item" style="display: flex; align-items: center; margin-bottom: 15px;">
+                                <span style="margin-right: 10px;">字体颜色</span>
+                                <div style="flex: 1; margin-right: 10px;">
+                                    <input style="width: 100%;" type="text" id="text-color-input" placeholder="颜色值"/>
+                                </div>
+                                <input type="color" id="text-color" class="color-picker"/>
+                            </div>
+                            <div class="setting-item" style="display: flex; align-items: center; margin-bottom: 15px;">
+                                <span style="margin-right: 10px;">聊天壁纸</span>
+                                <input style="flex: 1;" type="text" id="chat-bg" placeholder="输入图片URL"/>
+                            </div>
+                            <div class="preview" style="margin: 15px auto; text-align: center;">
+                                <div class="QQ_chat_msgdiv" id="chat-setting-preview" data-name="${chatName}" style="
+                                    margin: 0 auto;
+                                    padding: 10px;
+                                    background: #f0f0f0;
+                                    border-radius: 10px;
+                                    max-width: 200px;
+                                ">
+                                    <span>这是预览文本</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-setting-footer" style="
+                            padding: 15px;
+                            border-top: 1px solid #eee;
+                            display: flex;
+                            justify-content: space-between;
+                        ">
+                            <button id="randomcolor-setting-btn" style="
+                                background-color: #919bec;
+                                color: #fff;
+                                border: none;
+                                padding: 8px 16px;
+                                border-radius: 5px;
+                                cursor: pointer;
+                            ">随机</button>
+                            <div>
+                                <button id="save-setting-btn" style="
+                                    background-color: #007AFF;
+                                    color: #fff;
+                                    border: none;
+                                    padding: 8px 16px;
+                                    border-radius: 5px;
+                                    cursor: pointer;
+                                    margin-right: 10px;
+                                ">保存</button>
+                                <button id="cancel-setting-btn" style="
+                                    background-color: #ccc;
+                                    color: #333;
+                                    border: none;
+                                    padding: 8px 16px;
+                                    border-radius: 5px;
+                                    cursor: pointer;
+                                ">取消</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加到页面
+                $('body').append(settingsHtml);
+                
+                // 绑定关闭事件
+                $('.close-setting-btn, #cancel-setting-btn').on('click', function() {
+                    $('.chat-setting-popup').remove();
+                });
+                
+                // 绑定保存事件
+                $('#save-setting-btn').on('click', function() {
+                    console.log('保存聊天设置');
+                    // 这里可以添加保存设置的逻辑
+                    $('.chat-setting-popup').remove();
+                });
+                
+                // 绑定随机颜色事件
+                $('#randomcolor-setting-btn').on('click', function() {
+                    console.log('生成随机颜色');
+                    const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16);
+                    $('#bubble-color').val(randomColor);
+                    $('#bubble-color-input').val(randomColor);
+                });
+                
+                console.log(`✅ 聊天设置弹窗已显示`);
+            }
+            
+            // ========== 动态交互功能 ==========
+            
+            /**
+             * 隐藏评论输入框
+             */
+            function hideCommentInput() {
+                dispatch({
+                    type: 'HIDE_MODAL',
+                    payload: {}
+                });
+            }
+            
+            /**
+             * 提交评论
+             */
+            function submitComment(momentIndex) {
+                const input = document.getElementById('comment-input-text');
+                if (!input) return;
+                
+                const commentText = input.value.trim();
+                if (!commentText) {
+                    alert('请输入评论内容');
+                    return;
+                }
+                
+                if (commentText.length > 200) {
+                    alert('评论内容不能超过200字');
+                    return;
+                }
+                
+                // 发送评论
+                dispatch({
+                    type: 'COMMENT_MOMENT',
+                    payload: {
+                        index: momentIndex,
+                        text: commentText
+                    }
+                });
+                
+                // 关闭评论输入框
+                hideCommentInput();
+            }
+            
+            /**
+             * 显示动态菜单
+             */
+            function showMomentMenu(momentIndex, event) {
+                event.stopPropagation();
+                console.log('显示动态菜单:', momentIndex);
+                
+                dispatch({
+                    type: 'SHOW_MODAL',
+                    payload: {
+                        modalName: 'moment_menu',
+                        data: { momentId: momentIndex },
+                        position: { x: event.clientX, y: event.clientY }
+                    }
+                });
+            }
+            
+            /**
+             * 分享动态
+             */
+            function shareMoment(momentIndex) {
+                console.log('分享动态:', momentIndex);
+                // TODO: 实现分享功能
+            }
+            
+            /**
+             * 查看所有评论
+             */
+            function showAllComments(momentIndex) {
+                console.log('查看所有评论:', momentIndex);
+                // TODO: 实现查看所有评论功能
+            }
+            
+            // ========== 聊天菜单处理函数 ==========
+            
+            /**
+             * 隐藏聊天菜单
+             */
+            function hideChatMenu() {
+                dispatch({
+                    type: 'HIDE_MODAL',
+                    payload: {}
+                });
+            }
+            
+            /**
+             * 显示聊天设置
+             */
+            function showChatSettings(chatName) {
+                hideChatMenu();
+                showChatSettingsPopup(chatName);
+            }
+            
+            /**
+             * 显示聊天历史
+             */
+            function showChatHistory(chatName) {
+                hideChatMenu();
+                console.log('显示聊天历史:', chatName);
+                // TODO: 实现聊天历史查看功能
+            }
+            
+            /**
+             * 清空聊天历史
+             */
+            function clearChatHistory(chatName) {
+                hideChatMenu();
+                if (confirm(`确定要清空与 ${chatName} 的聊天记录吗？此操作不可撤销。`)) {
+                    console.log('清空聊天历史:', chatName);
+                    // TODO: 实现清空聊天历史功能
+                }
+            }
+            
+            /**
+             * 显示群成员
+             */
+            function showGroupMembers(groupName) {
+                hideChatMenu();
+                console.log('显示群成员:', groupName);
+                // TODO: 实现群成员查看功能
+            }
+            
+            /**
+             * 显示群设置
+             */
+            function showGroupSettings(groupName) {
+                hideChatMenu();
+                console.log('显示群设置:', groupName);
+                // TODO: 实现群设置功能
+            }
+            
+            /**
+             * 显示角色信息
+             */
+            function showCharacterInfo(characterName) {
+                hideChatMenu();
+                console.log('显示角色信息:', characterName);
+                // TODO: 实现角色信息查看功能
+            }
+            
+            /**
+             * 导出聊天数据
+             */
+            function exportChatData(chatName) {
+                hideChatMenu();
+                console.log('导出聊天数据:', chatName);
+                // TODO: 实现聊天数据导出功能
+            }
+            
+            /**
+             * 举报聊天
+             */
+            function reportChat(chatName) {
+                hideChatMenu();
+                if (confirm(`确定要举报与 ${chatName} 的聊天内容吗？`)) {
+                    console.log('举报聊天:', chatName);
+                    // TODO: 实现举报功能
+                }
+            }
+
             // 将事件处理函数添加到全局作用域
             window.handleViewAction = handleViewAction;
             window.handleSimpleAction = handleSimpleAction;
             window.handleInputEvent = handleInputEvent;
             window.handleKeyboardEvent = handleKeyboardEvent;
             window.handleLongPress = handleLongPress;
+            window.handleChatTitleClick = handleChatTitleClick;
+            window.QQ_ShowCharacterSpirit = QQ_ShowCharacterSpirit;
+            window.showChatSettingsPopup = showChatSettingsPopup;
+            window.showImagePreview = showImagePreview;
+            window.playVoiceMessage = playVoiceMessage;
+            window.playMusic = playMusic;
+            window.hideChatMenu = hideChatMenu;
+            window.showChatSettings = showChatSettings;
+            window.showChatHistory = showChatHistory;
+            window.clearChatHistory = clearChatHistory;
+            window.showGroupMembers = showGroupMembers;
+            window.showGroupSettings = showGroupSettings;
+            window.showCharacterInfo = showCharacterInfo;
+            window.exportChatData = exportChatData;
+            window.reportChat = reportChat;
+            window.hideCommentInput = hideCommentInput;
+            window.submitComment = submitComment;
+            window.showMomentMenu = showMomentMenu;
+            window.shareMoment = shareMoment;
+            window.showAllComments = showAllComments;
             
             // ===== 事件迁移辅助函数 =====
             
