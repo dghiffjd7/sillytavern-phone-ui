@@ -2511,6 +2511,16 @@
                 flex-shrink: 0;
             }
             
+            /* 用于URL头像的样式 */
+            .contact-avatar-img {
+                width: 100%;
+                height: 100%;
+                border-radius: 50%;
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+            }
+            
             .contact-name {
                 font-size: 14px;
                 color: #333;
@@ -5247,6 +5257,163 @@
 顺序=5564`;
             }
             
+            // ========== MVU角色数据解析器 ==========
+            
+            /**
+             * 解析[手机-角色]世界书条目，将INI格式的角色数据转换为结构化对象
+             * @param {string} entryContent - 世界书条目的原始文本内容
+             * @returns {Object} 结构化的角色数据对象
+             */
+            function parseCharacterWorldbook(entryContent) {
+                console.log('🎭 开始解析角色世界书数据...');
+                
+                if (!entryContent || typeof entryContent !== 'string') {
+                    console.warn('角色世界书内容为空或格式错误');
+                    return {};
+                }
+                
+                const characterData = {};
+                const iniParser = new MyINI();
+                
+                try {
+                    // 使用现有的MyINI类解析INI格式
+                    iniParser.loadText(entryContent);
+                    const allSections = iniParser.getAllSections();
+                    
+                    console.log(`📋 找到 ${allSections.length} 个角色条目`);
+                    
+                    for (const characterName of allSections) {
+                        const characterInfo = {};
+                        
+                        // 读取角色基本属性
+                        characterInfo.avatar = iniParser.readValue(characterName, "头像") || "";
+                        characterInfo.type = iniParser.readValue(characterName, "类型") || "";
+                        characterInfo.gender = iniParser.readValue(characterName, "性别") || "";
+                        characterInfo.personality = iniParser.readValue(characterName, "性格") || "";
+                        characterInfo.bubbleColor = iniParser.readValue(characterName, "气泡颜色") || "";
+                        characterInfo.fontColor = iniParser.readValue(characterName, "字体颜色") || "";
+                        characterInfo.chatWallpaper = iniParser.readValue(characterName, "聊天壁纸") || "";
+                        
+                        // 头像处理逻辑（复制原版逻辑）
+                        if (characterInfo.avatar) {
+                            // 处理占位符格式 <角色名> 或 {角色名}
+                            const match = characterInfo.avatar.match(/[<{]+(.+?)[>}]/);
+                            if (match) {
+                                // 如果有占位符，尝试获取真实头像路径
+                                const placeholderName = match[1];
+                                // 这里可以调用原版的 getCharAvatarPath 函数，但现在先保持原始值
+                                console.log(`🎨 角色 ${characterName} 使用占位符头像: ${placeholderName}`);
+                            }
+                        }
+                        
+                        // 过滤掉NPC、路人、群聊类型的角色（复制原版逻辑）
+                        const isValidCharacter = characterInfo.type && 
+                                               !characterInfo.type.match(/npc/i) && 
+                                               characterInfo.type !== "路人" && 
+                                               characterInfo.type !== "群聊";
+                        
+                        if (isValidCharacter) {
+                            characterData[characterName] = characterInfo;
+                            console.log(`✅ 解析角色: ${characterName}`, characterInfo);
+                        } else {
+                            console.log(`⏭️  跳过角色: ${characterName} (类型: ${characterInfo.type})`);
+                        }
+                    }
+                    
+                    console.log(`🎭 角色解析完成，共解析 ${Object.keys(characterData).length} 个有效角色`);
+                    return characterData;
+                    
+                } catch (error) {
+                    console.error('角色数据解析错误:', error);
+                    return {};
+                }
+            }
+            
+            /**
+             * 从角色数据生成联系人列表
+             * @param {Object} characters - 角色数据对象
+             * @returns {Array} 联系人列表数组
+             */
+            function generateContactsFromCharacters(characters) {
+                console.log('👥 开始生成联系人列表...');
+                
+                const contacts = [];
+                
+                for (const [characterName, characterInfo] of Object.entries(characters)) {
+                    contacts.push({
+                        id: `contact_${characterName}`,
+                        name: characterName,
+                        avatar: characterInfo.avatar || "",
+                        type: characterInfo.type || "",
+                        gender: characterInfo.gender || "",
+                        personality: characterInfo.personality || "",
+                        isOnline: true, // 默认在线
+                        lastSeen: new Date().toISOString()
+                    });
+                }
+                
+                console.log(`👥 联系人列表生成完成，共 ${contacts.length} 个联系人`);
+                return contacts;
+            }
+            
+            /**
+             * 初始化角色相关的聊天数据结构
+             * @param {Object} characters - 角色数据对象
+             * @param {string} userName - 当前用户名
+             * @returns {Object} 初始化的聊天数据结构
+             */
+            function initializeChatDataForCharacters(characters, userName) {
+                console.log('💬 初始化角色聊天数据结构...');
+                
+                const chatData = {
+                    private_chat: {},
+                    group_chat: {},
+                    initialized_contacts: []
+                };
+                
+                for (const characterName of Object.keys(characters)) {
+                    // 为每个角色创建私聊数据结构（复制原版逻辑）
+                    const chatKey = `${userName}和${characterName}的聊天`;
+                    chatData.private_chat[chatKey] = [];
+                    chatData.initialized_contacts.push(characterName);
+                    
+                    console.log(`💬 初始化角色聊天: ${chatKey}`);
+                }
+                
+                console.log(`💬 聊天数据初始化完成，共 ${chatData.initialized_contacts.length} 个聊天`);
+                return chatData;
+            }
+            
+            /**
+             * 从MVU模型中获取角色头像数据
+             * @param {string} characterName - 角色名称
+             * @param {Object} model - MVU模型
+             * @returns {string} 头像URL或CSS类名
+             */
+            function getCharacterAvatarFromModel(characterName, model) {
+                // 优先从model.characters获取头像
+                if (model.characters && model.characters[characterName] && model.characters[characterName].avatar) {
+                    const avatarData = model.characters[characterName].avatar;
+                    
+                    // 如果是完整的URL，直接返回
+                    if (avatarData.startsWith('http://') || avatarData.startsWith('https://') || avatarData.startsWith('data:')) {
+                        return avatarData;
+                    }
+                    
+                    // 如果是占位符格式 <角色名> 或 {角色名}，转换为CSS类名
+                    const match = avatarData.match(/[<{]+(.+?)[>}]/);
+                    if (match) {
+                        return `head${match[1]}`;
+                    }
+                    
+                    // 其他情况，直接返回
+                    return avatarData;
+                }
+                
+                // 备用方案：使用传统的CSS类名方式
+                return getCharacterAvatar(characterName);
+            }
+            
             // ========== MVU数据聚合逻辑 ==========
             
             /**
@@ -5307,7 +5474,7 @@
                                         id: `char_${characterName}`,
                                         type: 'character',
                                         name: characterName,
-                                        avatar: getCharacterAvatar(characterName),
+                                        avatar: getCharacterAvatarFromModel(characterName, model),
                                         lastMessage: lastMessage.content,
                                         lastSender: lastMessage.sender,
                                         lastTime: lastMessage.time,
@@ -5544,6 +5711,10 @@
                     group_chat: {},   // 群聊历史记录
                     chatList: []      // 聚合后的聊天列表，专为渲染优化
                 },
+                
+                // 角色和联系人数据（从角色解析器填充）
+                characters: {},       // 从[手机-角色]世界书解析的角色数据
+                contacts: [],         // 联系人列表，由characters数据生成
                 
                 // 用户数据
                 user: {
@@ -6157,6 +6328,60 @@
                             }
                         }, 100);
                         
+                        break;
+                        
+                    // ===== MVU数据初始化处理 =====
+                    
+                    case 'INITIALIZE_CHARACTER_DATA':
+                        console.log('🎭 处理角色数据初始化...');
+                        const { characters, userName } = message.payload;
+                        
+                        // 初始化角色数据到模型
+                        newModel.characters = characters;
+                        
+                        // 生成联系人列表
+                        newModel.contacts = generateContactsFromCharacters(characters);
+                        
+                        // 初始化聊天数据结构
+                        const chatInitData = initializeChatDataForCharacters(characters, userName);
+                        
+                        // 确保QQ数据结构存在
+                        if (!newModel.qq) {
+                            newModel.qq = {};
+                        }
+                        
+                        // 初始化私聊数据结构（但不覆盖现有数据）
+                        if (!newModel.qq.private_chat) {
+                            newModel.qq.private_chat = {};
+                        }
+                        
+                        // 为新角色添加聊天数据结构
+                        for (const [chatKey, messages] of Object.entries(chatInitData.private_chat)) {
+                            if (!newModel.qq.private_chat[chatKey]) {
+                                newModel.qq.private_chat[chatKey] = messages;
+                            }
+                        }
+                        
+                        // 生成渲染用的聊天列表
+                        newModel.qq.chatList = generateChatListFromHistory(newModel);
+                        
+                        console.log(`✅ 角色数据初始化完成: ${Object.keys(characters).length} 个角色, ${newModel.contacts.length} 个联系人`);
+                        break;
+                        
+                    case 'REFRESH_CHAT_DATA':
+                        console.log('📊 刷新聊天数据...', message.payload);
+                        
+                        // 重新生成聊天列表（使用最新的QQ_msgjson数据）
+                        if (newModel.qq) {
+                            newModel.qq.chatList = generateChatListFromHistory(newModel);
+                            console.log(`✅ 聊天列表已刷新: ${newModel.qq.chatList ? newModel.qq.chatList.length : 0} 个会话`);
+                        }
+                        
+                        // 如果有角色数据，也刷新联系人列表
+                        if (newModel.characters) {
+                            newModel.contacts = generateContactsFromCharacters(newModel.characters);
+                            console.log(`✅ 联系人列表已刷新: ${newModel.contacts.length} 个联系人`);
+                        }
                         break;
                         
                     // ===== 新增：通用View事件处理 =====
@@ -7459,13 +7684,23 @@
              * @returns {jQuery} 聊天元素
              */
             function createChatElementFromAggregatedData(chatItem) {
+                // 智能处理头像数据
+                const isAvatarUrl = chatItem.avatar && 
+                                  (chatItem.avatar.startsWith('http://') || 
+                                   chatItem.avatar.startsWith('https://') || 
+                                   chatItem.avatar.startsWith('data:'));
+                
+                const avatarContent = isAvatarUrl 
+                    ? `<div class="contact-avatar-img" data-name="${chatItem.name}" style="background-image: url('${chatItem.avatar}');"></div>`
+                    : `<div class="${chatItem.avatar || 'default-avatar'}" data-name="${chatItem.name}"></div>`;
+                
                 const $element = $(`
                     <div class="QQ_home_usermsg" 
                          data-name="${chatItem.name}" 
                          data-group-type="${chatItem.isGroup}"
                          onclick="handleViewAction({type: 'CHAT_ITEM_CLICK', payload: {chatName: '${chatItem.name}', isGroup: ${chatItem.isGroup}}}, event)">
                         <div class="contact-avatar">
-                            <div class="${chatItem.avatar}" data-name="${chatItem.name}"></div>
+                            ${avatarContent}
                         </div>
                         <div class="contact-info">
                             <div class="QQ_home_name">${chatItem.name}</div>
@@ -20686,6 +20921,36 @@ ${index + 1}. ${space.name}
                 await LoadChars();
                 await MiPhone_Merge();
 
+                // *** MVU数据初始化：重建角色和聊天数据结构 ***
+                console.log('🎭 开始MVU数据初始化...');
+                
+                // 读取[手机-角色]世界书条目并解析
+                const characterEntry = GetWorldEntry(["手机-角色", "手机界面-角色"], true);
+                if (characterEntry && characterEntry.content) {
+                    // 使用新的角色解析器
+                    const parsedCharacters = parseCharacterWorldbook(characterEntry.content);
+                    
+                    // 通过调度系统初始化角色数据到模型中
+                    dispatch({
+                        type: 'INITIALIZE_CHARACTER_DATA',
+                        payload: {
+                            characters: parsedCharacters,
+                            userName: UserName
+                        }
+                    });
+                    
+                    console.log('✅ MVU角色数据初始化完成');
+                } else {
+                    console.warn('⚠️  未找到[手机-角色]世界书条目，使用空角色数据');
+                    dispatch({
+                        type: 'INITIALIZE_CHARACTER_DATA',
+                        payload: {
+                            characters: {},
+                            userName: UserName
+                        }
+                    });
+                }
+
                 // 群聊数据已在LoadChars中加载，无需额外恢复
                 
                 console.log('开始执行两阶段数据加载...');
@@ -20694,6 +20959,16 @@ ${index + 1}. ${space.name}
                 // 阶段二：从独立条目增强群聊元数据
                 await QQ_Enhance_Group_Metadata();
                 console.log('两阶段数据加载完成。');
+                
+                // *** MVU数据刷新：两阶段加载后重新生成聊天列表 ***
+                console.log('📊 数据加载完成，重新生成聊天列表...');
+                dispatch({
+                    type: 'REFRESH_CHAT_DATA',
+                    payload: { 
+                        source: 'two_phase_load_complete',
+                        userName: UserName 
+                    }
+                });
                 
                 // *** 新增：初始化时加载已读状态 ***
                 console.log('开始加载已读状态...');
