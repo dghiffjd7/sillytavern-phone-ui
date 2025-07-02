@@ -975,6 +975,92 @@
                 padding: 2px;
             }
             
+            /* 联系人列表信息容器 */
+            .QQ_home_info {
+                width: 100%;
+                display: grid;
+                grid-template-columns: 1fr auto;
+                grid-template-rows: 1fr 1fr;
+                row-gap: 4px;
+                flex: 1;
+            }
+            
+            .QQ_home_name {
+                font-weight: bold;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+            
+            .QQ_home_lastmsg {
+                color: #626367;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                font-size: 13px;
+            }
+            
+            .QQ_home_lasttime {
+                color: #626367;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                max-width: 4rem;
+                margin-right: 5px;
+                font-size: 12px;
+                justify-self: end;
+            }
+            
+            /* 动态页面样式 */
+            .moment-item {
+                background: white;
+                border-radius: 8px;
+                padding: 15px;
+                margin-bottom: 10px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            .moment-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+            
+            .moment-author {
+                font-weight: bold;
+                color: #333;
+            }
+            
+            .moment-time {
+                color: #999;
+                font-size: 12px;
+            }
+            
+            .moment-content {
+                color: #333;
+                line-height: 1.5;
+                margin-bottom: 10px;
+                word-wrap: break-word;
+            }
+            
+            .moment-actions {
+                display: flex;
+                gap: 10px;
+            }
+            
+            .moment-like-btn, .moment-comment-btn {
+                background: none;
+                border: none;
+                cursor: pointer;
+                padding: 5px 10px;
+                border-radius: 4px;
+                transition: background-color 0.2s;
+            }
+            
+            .moment-like-btn:hover, .moment-comment-btn:hover {
+                background-color: #f0f0f0;
+            }
 
             .QQ_bottom_nav {
                 position: absolute;
@@ -2500,26 +2586,6 @@
                 font-size: 14px;
             }
             
-            .contact-avatar {
-                width: 32px;
-                height: 32px;
-                border-radius: 50%;
-                margin-right: 10px;
-                background-color: #f0f0f0;
-                background-size: cover;
-                background-position: center;
-                flex-shrink: 0;
-            }
-            
-            /* 用于URL头像的样式 */
-            .contact-avatar-img {
-                width: 100%;
-                height: 100%;
-                border-radius: 50%;
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-            }
             
             .contact-name {
                 font-size: 14px;
@@ -7711,32 +7777,42 @@
                 const isGroup = Boolean(chatItem.isGroup);
                 const avatar = chatItem.avatar || '';
                 
-                // 智能处理头像数据
-                const isAvatarUrl = avatar && typeof avatar === 'string' && 
-                                  (avatar.startsWith('http://') || 
-                                   avatar.startsWith('https://') || 
-                                   avatar.startsWith('data:'));
+                // 处理头像 - 使用原版的头像逻辑
+                let avatarStyle = '';
+                let avatarText = '';
                 
-                const avatarContent = isAvatarUrl 
-                    ? `<div class="contact-avatar-img" data-name="${name}" style="background-image: url('${avatar}');"></div>`
-                    : `<div class="${avatar || 'default-avatar'}" data-name="${name}"></div>`;
+                if (avatar && typeof avatar === 'string') {
+                    if (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('data:')) {
+                        // URL头像
+                        avatarStyle = `background-image: url('${avatar}'); background-size: cover; background-position: center;`;
+                    } else if (avatar.startsWith('head')) {
+                        // CSS类名头像，保持原样
+                        avatarStyle = '';
+                    } else {
+                        // 其他情况，使用渐变背景
+                        avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
+                        avatarText = name.charAt(0);
+                    }
+                } else {
+                    // 默认头像：首字母 + 渐变背景
+                    avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
+                    avatarText = name.charAt(0);
+                }
                 
                 const $element = $(`
                     <div class="QQ_home_usermsg" 
                          data-name="${name}" 
                          data-group-type="${isGroup}"
                          onclick="handleViewAction({type: 'CHAT_ITEM_CLICK', payload: {chatName: '${name}', isGroup: ${isGroup}}}, event)">
-                        <div class="contact-avatar">
-                            ${avatarContent}
-                        </div>
-                        <div class="contact-info">
+                        <div class="QQ_home_head ${avatar && avatar.startsWith('head') ? avatar : ''}" 
+                             data-name="${name}" 
+                             style="${avatarStyle}">${avatarText}</div>
+                        <div class="QQ_home_info">
                             <div class="QQ_home_name">${name}</div>
                             <div class="QQ_home_lastmsg">${lastMessage || '暂无消息'}</div>
-                        </div>
-                        <div class="contact-meta">
                             <div class="QQ_home_lasttime">${lastTime}</div>
-                            ${(chatItem.unread && chatItem.unread > 0) ? `<div class="unread-badge">${chatItem.unread}</div>` : ''}
                         </div>
+                        ${(chatItem.unread && chatItem.unread > 0) ? `<div class="QQ_home_usermsg_new">${chatItem.unread}</div>` : ''}
                     </div>
                 `);
                 
@@ -8696,8 +8772,92 @@
             
             // 渲染动态页面
             function renderMomentsPage(model) {
+                console.log('🎨 渲染动态页面...');
+                
+                // 更新用户名显示
+                const userName = model.user.name || UserName || "";
+                $("#QQ_space_username").text(userName);
+                
+                // 获取动态数据
                 const moments = model.memory.shortTerm.momentRecent || [];
-                renderMoments(moments, '.moments-container');
+                
+                if (moments.length > 0) {
+                    renderMoments(moments);
+                } else {
+                    // 显示空状态或调用传统的动态加载
+                    console.log('📝 没有动态数据，尝试使用传统方式加载...');
+                    if (typeof QQ_Load_Moments === 'function') {
+                        QQ_Load_Moments();
+                    } else {
+                        // 显示空状态
+                        $("#QQ_space_page .space_contents").html('<div style="text-align: center; color: #999; padding: 20px;">暂无动态</div>');
+                    }
+                }
+            }
+            
+            /**
+             * 渲染动态列表
+             * @param {Array} moments - 动态数据数组
+             */
+            function renderMoments(moments) {
+                console.log('📝 渲染动态列表，共', moments.length, '条动态');
+                
+                const $container = $("#QQ_space_page .space_contents");
+                if (!$container.length) {
+                    console.warn('❌ 动态容器不存在');
+                    return;
+                }
+                
+                if (!moments || moments.length === 0) {
+                    $container.html('<div style="text-align: center; color: #999; padding: 20px;">暂无动态</div>');
+                    return;
+                }
+                
+                $container.empty();
+                
+                moments.forEach((moment, index) => {
+                    const $momentElement = createMomentElement(moment, index);
+                    if ($momentElement) {
+                        $container.append($momentElement);
+                    }
+                });
+                
+                console.log('✅ 动态列表渲染完成');
+            }
+            
+            /**
+             * 创建单个动态元素
+             * @param {Object} moment - 动态数据
+             * @param {number} index - 索引
+             * @returns {jQuery} 动态元素
+             */
+            function createMomentElement(moment, index) {
+                // 确保数据完整性
+                if (!moment || typeof moment !== 'object') {
+                    console.warn('动态数据格式错误:', moment);
+                    return null;
+                }
+                
+                const content = moment.content || '';
+                const author = moment.author || '';
+                const timestamp = moment.timestamp || Date.now();
+                const displayTime = formatDateToDisplayTime(new Date(timestamp));
+                
+                const $element = $(`
+                    <div class="moment-item" data-index="${index}">
+                        <div class="moment-header">
+                            <div class="moment-author">${author}</div>
+                            <div class="moment-time">${displayTime}</div>
+                        </div>
+                        <div class="moment-content">${content}</div>
+                        <div class="moment-actions">
+                            <button onclick="handleViewAction({type: 'LIKE_MOMENT', payload: {index: ${index}}}, event)" class="moment-like-btn">👍</button>
+                            <button onclick="handleViewAction({type: 'COMMENT_MOMENT', payload: {index: ${index}}}, event)" class="moment-comment-btn">💬</button>
+                        </div>
+                    </div>
+                `);
+                
+                return $element;
             }
             
             // 渲染群聊页面
