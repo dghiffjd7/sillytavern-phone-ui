@@ -5102,6 +5102,13 @@
                     messageSelection: {
                         batchDeleteMode: false,
                         selectedMessages: []
+                    },
+                    // 弹窗和菜单状态管理
+                    modal: {
+                        activeModal: null, // 'long_press_menu', 'moment_menu', 'group_settings', 'character_spirit', etc.
+                        modalData: {},     // 弹窗所需的数据
+                        position: { x: 0, y: 0 }, // 弹窗位置
+                        isVisible: false
                     }
                 },
                 
@@ -5186,6 +5193,11 @@
                 UPDATE_UI_STATE: 'UPDATE_UI_STATE',
                 SHOW_CHAT_SETTINGS: 'SHOW_CHAT_SETTINGS',
                 HIDE_CHAT_SETTINGS: 'HIDE_CHAT_SETTINGS',
+                
+                // 弹窗和菜单管理
+                SHOW_MODAL: 'SHOW_MODAL',
+                HIDE_MODAL: 'HIDE_MODAL',
+                UPDATE_MODAL_DATA: 'UPDATE_MODAL_DATA',
                 
                 // 记忆管理 (完善版)
                 UPDATE_SHORT_TERM_MEMORY: 'UPDATE_SHORT_TERM_MEMORY',
@@ -5452,6 +5464,27 @@
                     case MessageTypes.BUILD_MEMORY_PROMPT:
                         return buildMemoryDrivenPrompt(message.payload, newModel);
                         
+                    // ========== 弹窗和菜单管理 ==========
+                        
+                    case MessageTypes.SHOW_MODAL:
+                        newModel.ui.modal.activeModal = message.payload.modalName;
+                        newModel.ui.modal.modalData = message.payload.data || {};
+                        newModel.ui.modal.position = message.payload.position || { x: 0, y: 0 };
+                        newModel.ui.modal.isVisible = true;
+                        break;
+                        
+                    case MessageTypes.HIDE_MODAL:
+                        newModel.ui.modal.activeModal = null;
+                        newModel.ui.modal.modalData = {};
+                        newModel.ui.modal.isVisible = false;
+                        break;
+                        
+                    case MessageTypes.UPDATE_MODAL_DATA:
+                        if (newModel.ui.modal.isVisible) {
+                            newModel.ui.modal.modalData = { ...newModel.ui.modal.modalData, ...message.payload };
+                        }
+                        break;
+                        
                     // ========== 原有消息处理 ==========
                         
                     case MessageTypes.UPDATE_UI_STATE:
@@ -5464,6 +5497,118 @@
                         
                     case MessageTypes.UPDATE_RELATIONSHIP_MEMORY:
                         updateRelationshipMemory(message.payload, newModel);
+                        break;
+                        
+                    // ========== 新增功能处理 ==========
+                    
+                    case 'SHOW_ERROR':
+                        newModel.system.lastError = message.payload.message;
+                        newModel.system.generateState = 'error';
+                        break;
+                        
+                    case 'UPDATE_NETWORK_STATUS':
+                        newModel.system.isOnline = message.payload.isOnline;
+                        break;
+                        
+                    case 'NAVIGATE_TO_PAGE':
+                        const pageIndex = message.payload.pageIndex;
+                        let targetPage;
+                        switch (pageIndex) {
+                            case 0:
+                                targetPage = 'chat';
+                                break;
+                            case 1:
+                                targetPage = 'people';
+                                break;
+                            case -1:
+                                targetPage = 'message';
+                                break;
+                            default:
+                                targetPage = 'people';
+                        }
+                        newModel.ui.currentPage = getQQPageState(targetPage);
+                        newModel.ui.navigationIcons = updateNavigationIcons(targetPage);
+                        newModel.ui.backgroundColor = getBackgroundColor(targetPage);
+                        break;
+                        
+                    case 'HIDE_MODAL':
+                        newModel.ui.modal.activeModal = null;
+                        newModel.ui.modal.modalData = {};
+                        newModel.ui.modal.isVisible = false;
+                        break;
+                        
+                    case 'SAVE_FRIEND_INFO':
+                        const friendInfo = message.payload;
+                        // 保存好友信息到模型
+                        if (!newModel.contacts.friends) {
+                            newModel.contacts.friends = {};
+                        }
+                        newModel.contacts.friends[friendInfo.name] = friendInfo;
+                        break;
+                        
+                    case 'CANCEL_FRIEND_INFO_EDIT':
+                        // 取消编辑，恢复原始状态
+                        newModel.ui.modal.isVisible = false;
+                        break;
+                        
+                    case 'SAVE_INTERACTIVE_SETTINGS':
+                        newModel.settings.interactive = {
+                            ...newModel.settings.interactive,
+                            ...message.payload
+                        };
+                        break;
+                        
+                    case 'START_PRIVATE_CHAT':
+                        newModel.ui.activeChat = message.payload.characterName;
+                        newModel.ui.currentPage = getQQPageState('chat');
+                        break;
+                        
+                    case 'VIEW_CHARACTER_PROFILE':
+                        newModel.ui.modal.activeModal = 'characterProfile';
+                        newModel.ui.modal.modalData = { characterName: message.payload.characterName };
+                        newModel.ui.modal.isVisible = true;
+                        break;
+                        
+                    case 'REMOVE_GROUP_MEMBER':
+                        const { groupId, memberName } = message.payload;
+                        if (newModel.groups[groupId] && newModel.groups[groupId].members) {
+                            newModel.groups[groupId].members = newModel.groups[groupId].members.filter(
+                                member => member !== memberName
+                            );
+                        }
+                        break;
+                        
+                    case 'LIKE_MOMENT':
+                        const { momentId } = message.payload;
+                        if (!newModel.moments.likes) {
+                            newModel.moments.likes = {};
+                        }
+                        if (!newModel.moments.likes[momentId]) {
+                            newModel.moments.likes[momentId] = [];
+                        }
+                        // 添加当前用户的点赞
+                        const currentUser = getCurrentCharacterId() || 'user';
+                        if (!newModel.moments.likes[momentId].includes(currentUser)) {
+                            newModel.moments.likes[momentId].push(currentUser);
+                        }
+                        break;
+                        
+                    case 'SHOW_COMMENT_INPUT':
+                        newModel.ui.modal.activeModal = 'commentInput';
+                        newModel.ui.modal.modalData = { momentId: message.payload.momentId };
+                        newModel.ui.modal.isVisible = true;
+                        break;
+                        
+                    case 'SHARE_MOMENT':
+                        // 分享朋友圈动态
+                        const shareId = message.payload.momentId;
+                        if (!newModel.moments.shares) {
+                            newModel.moments.shares = {};
+                        }
+                        if (!newModel.moments.shares[shareId]) {
+                            newModel.moments.shares[shareId] = 0;
+                        }
+                        newModel.moments.shares[shareId]++;
                         break;
                         
                     case MessageTypes.HANDLE_ERROR:
@@ -5790,6 +5935,9 @@
                         default:
                             console.warn('未知页面类型:', model.ui.currentPage);
                     }
+                    
+                    // 渲染弹窗和菜单
+                    renderModalSystem(model);
                     
                     // 更新UI状态指示器
                     updateUIIndicators(model);
@@ -6171,6 +6319,248 @@
                     }
                 }, 100);
             }
+            
+            // 渲染弹窗系统 (MVU style)
+            function renderModalSystem(model) {
+                const modalContainer = getOrCreateModalContainer();
+                
+                if (!model.ui.modal.isVisible || !model.ui.modal.activeModal) {
+                    modalContainer.style.display = 'none';
+                    return;
+                }
+                
+                modalContainer.style.display = 'block';
+                
+                // 根据弹窗类型渲染不同内容
+                switch (model.ui.modal.activeModal) {
+                    case 'long_press_menu':
+                        renderLongPressMenu(model.ui.modal, modalContainer);
+                        break;
+                    case 'moment_menu':
+                        renderMomentMenu(model.ui.modal, modalContainer);
+                        break;
+                    case 'group_settings':
+                        renderGroupSettingsModal(model.ui.modal, modalContainer);
+                        break;
+                    case 'character_spirit':
+                        renderCharacterSpiritPanel(model.ui.modal, modalContainer);
+                        break;
+                    case 'interactive_settings':
+                        renderInteractiveSettingsModal(model.ui.modal, modalContainer);
+                        break;
+                    default:
+                        console.warn('未知弹窗类型:', model.ui.modal.activeModal);
+                }
+            }
+            
+            // 获取或创建弹窗容器
+            function getOrCreateModalContainer() {
+                let container = document.getElementById('mvu-modal-container');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = 'mvu-modal-container';
+                    container.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        z-index: 10000;
+                        pointer-events: none;
+                    `;
+                    document.body.appendChild(container);
+                }
+                return container;
+            }
+            
+            // 渲染长按菜单
+            function renderLongPressMenu(modalState, container) {
+                const { modalData, position } = modalState;
+                container.innerHTML = `
+                    <div style="
+                        position: absolute;
+                        left: ${position.x}px;
+                        top: ${position.y}px;
+                        background: white;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                        padding: 8px 0;
+                        min-width: 120px;
+                        pointer-events: auto;
+                    ">
+                        ${modalData.options?.map(option => `
+                            <div onclick="${option.action}" style="
+                                padding: 12px 16px;
+                                cursor: pointer;
+                                border-bottom: 1px solid #eee;
+                            ">
+                                ${option.text}
+                            </div>
+                        `).join('') || ''}
+                    </div>
+                `;
+            }
+            
+            // 渲染动态菜单
+            function renderMomentMenu(modalState, container) {
+                const { modalData, position } = modalState;
+                container.innerHTML = `
+                    <div style="
+                        position: absolute;
+                        left: ${position.x}px;
+                        top: ${position.y}px;
+                        background: white;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                        padding: 8px 0;
+                        min-width: 150px;
+                        pointer-events: auto;
+                    ">
+                        <div onclick="hideMomentMenu(); QQ_MomentLike('${modalData.momentId}')" style="padding: 12px 16px; cursor: pointer;">
+                            👍 点赞
+                        </div>
+                        <div onclick="hideMomentMenu(); QQ_CommentMoment('${modalData.momentId}')" style="padding: 12px 16px; cursor: pointer;">
+                            💬 评论
+                        </div>
+                        <div onclick="hideMomentMenu(); QQ_ShareMoment('${modalData.momentId}')" style="padding: 12px 16px; cursor: pointer;">
+                            📤 分享
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 渲染群聊设置弹窗
+            function renderGroupSettingsModal(modalState, container) {
+                const { modalData } = modalState;
+                container.innerHTML = `
+                    <div style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                        width: 90%;
+                        max-width: 400px;
+                        pointer-events: auto;
+                    ">
+                        <div style="padding: 20px; border-bottom: 1px solid #eee;">
+                            <h3 style="margin: 0; font-size: 18px;">${modalData.groupName || '群聊设置'}</h3>
+                        </div>
+                        <div style="padding: 20px;">
+                            <div style="margin-bottom: 16px;">
+                                <label>群聊名称:</label>
+                                <input type="text" value="${modalData.groupName || ''}" style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                            <div style="margin-bottom: 16px;">
+                                <label>成员管理:</label>
+                                <div style="margin-top: 8px;">
+                                    ${modalData.members?.map(member => `
+                                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
+                                            <span>${member}</span>
+                                            <button onclick="removeGroupMember('${modalData.groupId}', '${member}')" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 4px;">移除</button>
+                                        </div>
+                                    `).join('') || ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div style="padding: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="hideModal()" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px;">取消</button>
+                            <button onclick="saveGroupSettings('${modalData.groupId}')" style="padding: 8px 16px; border: none; background: #007bff; color: white; border-radius: 4px;">保存</button>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 渲染角色精灵面板
+            function renderCharacterSpiritPanel(modalState, container) {
+                const { modalData } = modalState;
+                container.innerHTML = `
+                    <div style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                        width: 90%;
+                        max-width: 350px;
+                        pointer-events: auto;
+                    ">
+                        <div style="padding: 20px; text-align: center;">
+                            <img src="${modalData.avatar || ''}" style="width: 80px; height: 80px; border-radius: 50%; margin-bottom: 16px;">
+                            <h3 style="margin: 0 0 8px 0;">${modalData.characterName || ''}</h3>
+                            <p style="margin: 0; color: #666;">${modalData.status || '在线'}</p>
+                        </div>
+                        <div style="padding: 0 20px 20px;">
+                            <button onclick="hideModal(); startPrivateChat('${modalData.characterName}')" style="width: 100%; padding: 12px; border: none; background: #007bff; color: white; border-radius: 8px; margin-bottom: 8px;">私聊</button>
+                            <button onclick="hideModal(); viewCharacterProfile('${modalData.characterName}')" style="width: 100%; padding: 12px; border: 1px solid #ddd; background: white; border-radius: 8px;">查看资料</button>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 渲染交互设置弹窗
+            function renderInteractiveSettingsModal(modalState, container) {
+                const { modalData } = modalState;
+                const settings = modalData.currentSettings || {};
+                const fullscreenEnabled = modalData.fullscreenEnabled || false;
+                
+                container.innerHTML = `
+                    <div style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                        width: 90%;
+                        max-width: 500px;
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        pointer-events: auto;
+                    ">
+                        <div style="padding: 20px; border-bottom: 1px solid #eee;">
+                            <h3 style="margin: 0; font-size: 18px;">互动设置</h3>
+                        </div>
+                        <div style="padding: 20px;">
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" ${settings.enabled ? 'checked' : ''}>
+                                    <span>启用关键词触发</span>
+                                </label>
+                            </div>
+                            <div style="margin-bottom: 20px;">
+                                <label>触发关键词（用逗号分隔）:</label>
+                                <textarea style="width: 100%; height: 60px; padding: 8px; margin-top: 4px; border: 1px solid #ddd; border-radius: 4px; resize: vertical;">${(settings.customKeywords || []).join(',')}
+                                </textarea>
+                            </div>
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" ${fullscreenEnabled ? 'checked' : ''}>
+                                    <span>启用全屏模式</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div style="padding: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="hideModal()" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px;">取消</button>
+                            <button onclick="saveInteractiveSettings(); hideModal()" style="padding: 8px 16px; border: none; background: #007bff; color: white; border-radius: 4px;">保存</button>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 全局弹窗控制函数
+            window.hideModal = function() {
+                dispatch({ type: MessageTypes.HIDE_MODAL });
+            };
+            
+            window.hideMomentMenu = function() {
+                dispatch({ type: MessageTypes.HIDE_MODAL });
+            };
             
             // 渲染联系人列表 (MVU style)
             function renderContactList(privateChats, groupChats, containerSelector) {
@@ -8400,6 +8790,29 @@
              * @param {Event} event - 点击事件
              */
             function showMomentMenu(event) {
+                event.stopPropagation();
+                
+                const momentId = $(event.currentTarget).data('moment-id');
+                const rect = event.currentTarget.getBoundingClientRect();
+                
+                // MVU模式：使用dispatch显示弹窗
+                dispatch({
+                    type: MessageTypes.SHOW_MODAL,
+                    payload: {
+                        modalName: 'moment_menu',
+                        position: { 
+                            x: rect.left,
+                            y: rect.bottom + 5
+                        },
+                        data: {
+                            momentId: momentId
+                        }
+                    }
+                });
+            }
+            
+            // 旧版showMomentMenu函数备份（兼容性）
+            function showMomentMenu_Legacy(event) {
                 event.stopPropagation();
                 
                 // 隐藏之前的菜单
@@ -12852,6 +13265,24 @@ ${character.significantEvents && character.significantEvents.length > 0
              * *** 修改：显示用户设置界面（包含全屏设置） ***
              */
             function QQ_ShowInteractiveSettings() {
+                // MVU模式：使用dispatch显示弹窗
+                const currentInteractiveSettings = QQ_GetInteractiveSettings();
+                const currentFullscreenEnabled = QQ_IsFullscreenEnabled();
+                
+                dispatch({
+                    type: MessageTypes.SHOW_MODAL,
+                    payload: {
+                        modalName: 'interactive_settings',
+                        data: {
+                            currentSettings: currentInteractiveSettings,
+                            fullscreenEnabled: currentFullscreenEnabled
+                        }
+                    }
+                });
+            }
+            
+            // 旧版QQ_ShowInteractiveSettings函数备份（兼容性）
+            function QQ_ShowInteractiveSettings_Legacy() {
                 // 移除现有设置界面
                 $('.QQ_interactive_settings_panel').remove();
                 
@@ -25969,6 +26400,38 @@ ${index + 1}. ${space.name}
              * @param {string} chatName - 聊天名称
              */
             function showLongPressMenu(e, messageElement, messageContent, chatName) {
+                // MVU模式：使用dispatch显示弹窗
+                const rect = e.target.getBoundingClientRect ? e.target.getBoundingClientRect() : { left: e.clientX, top: e.clientY };
+                
+                dispatch({
+                    type: MessageTypes.SHOW_MODAL,
+                    payload: {
+                        modalName: 'long_press_menu',
+                        position: { 
+                            x: rect.left || e.clientX,
+                            y: rect.top || e.clientY
+                        },
+                        data: {
+                            messageElement,
+                            messageContent,
+                            chatName,
+                            options: [
+                                {
+                                    text: '📝 编辑',
+                                    action: `hideModal(); QQ_EditUserMessage_MVU('${messageContent.replace(/'/g, "\\'")}', '${chatName}')`
+                                },
+                                {
+                                    text: '🗑️ 删除',
+                                    action: `hideModal(); QQ_DeleteUserMessage_MVU('${messageContent.replace(/'/g, "\\'")}', '${chatName}')`
+                                }
+                            ]
+                        }
+                    }
+                });
+            }
+            
+            // 旧版showLongPressMenu函数备份（兼容性）
+            function showLongPressMenu_Legacy(e, messageElement, messageContent, chatName) {
                 // 移除已存在的菜单
                 const existingMenu = document.querySelector('.long-press-menu');
                 if (existingMenu) {
@@ -26091,6 +26554,29 @@ ${index + 1}. ${space.name}
              * @param {string} messageContent - 消息内容
              * @param {string} chatName - 聊天名称
              */
+            // MVU兼容的消息操作函数
+            function QQ_EditUserMessage_MVU(messageContent, chatName) {
+                dispatch({
+                    type: MessageTypes.SHOW_MODAL,
+                    payload: {
+                        modalName: 'edit_message',
+                        data: {
+                            messageContent,
+                            chatName,
+                            mode: 'edit'
+                        }
+                    }
+                });
+            }
+            
+            function QQ_DeleteUserMessage_MVU(messageContent, chatName) {
+                if (confirm('确定要删除这条消息吗？')) {
+                    // 这里可以dispatch一个删除消息的action
+                    console.log('删除消息:', messageContent, '聊天:', chatName);
+                    // TODO: 实现删除逻辑
+                }
+            }
+            
             function QQ_EditUserMessage(messageElement, messageContent, chatName) {
                 // 创建编辑输入框
                 const input = document.createElement('textarea');
@@ -40765,6 +41251,236 @@ MiPhone_JSON_END`;
             };
             
 
+            
+            // ===== 添加缺失的函数定义 =====
+            
+            /**
+             * 显示错误消息
+             */
+            function showErrorMessage(message) {
+                if (!message) return;
+                
+                // 在MVU架构中，通过dispatch更新错误状态
+                dispatch({
+                    type: 'SHOW_ERROR',
+                    payload: { message: message }
+                });
+                
+                // 同时显示toastr通知
+                if (typeof toastr !== 'undefined') {
+                    toastr.error(message, '错误');
+                } else {
+                    alert(message);
+                }
+                
+                console.error('系统错误:', message);
+            }
+            
+            /**
+             * 更新网络状态
+             */
+            function updateNetworkStatus(isOnline) {
+                // 通过dispatch更新网络状态
+                dispatch({
+                    type: 'UPDATE_NETWORK_STATUS',
+                    payload: { isOnline: isOnline }
+                });
+                
+                // 更新UI显示
+                const statusElement = document.querySelector('.network-status');
+                if (statusElement) {
+                    statusElement.textContent = isOnline ? '在线' : '离线';
+                    statusElement.className = `network-status ${isOnline ? 'online' : 'offline'}`;
+                }
+                
+                console.log('网络状态更新:', isOnline ? '在线' : '离线');
+            }
+            
+            /**
+             * 页面导航函数
+             */
+            function gotopage(pageIndex) {
+                console.log('导航到页面:', pageIndex);
+                
+                dispatch({
+                    type: 'NAVIGATE_TO_PAGE',
+                    payload: { pageIndex: pageIndex }
+                });
+            }
+            
+            /**
+             * 隐藏模态对话框
+             */
+            function hideModal() {
+                dispatch({
+                    type: 'HIDE_MODAL'
+                });
+                
+                // 移除所有可能的模态框
+                $('.modal, .modal-overlay, .popup-overlay').remove();
+            }
+            
+            /**
+             * 设置好友信息
+             */
+            function Setfriendinfo(isConfirm) {
+                if (isConfirm) {
+                    dispatch({
+                        type: 'SAVE_FRIEND_INFO',
+                        payload: {
+                            // 这里应该收集表单数据
+                            name: $('#friend_name').val(),
+                            avatar: $('#friend_avatar').val(),
+                            // 其他字段...
+                        }
+                    });
+                } else {
+                    dispatch({
+                        type: 'CANCEL_FRIEND_INFO_EDIT'
+                    });
+                }
+                
+                hideModal();
+            }
+            
+            /**
+             * 保存交互设置
+             */
+            function saveInteractiveSettings() {
+                const settings = {
+                    keywordDetection: $('#keyword_detection').is(':checked'),
+                    keywords: $('#interaction_keywords').val().split(',').map(k => k.trim()),
+                    autoReply: $('#auto_reply').is(':checked')
+                };
+                
+                dispatch({
+                    type: 'SAVE_INTERACTIVE_SETTINGS',
+                    payload: settings
+                });
+                
+                if (typeof toastr !== 'undefined') {
+                    toastr.success('交互设置已保存', '设置');
+                }
+            }
+            
+            /**
+             * 开始私聊
+             */
+            function startPrivateChat(characterName) {
+                dispatch({
+                    type: 'START_PRIVATE_CHAT',
+                    payload: { characterName: characterName }
+                });
+                
+                // 切换到私聊页面
+                gotopage(0); // 假设0是私聊页面
+            }
+            
+            /**
+             * 查看角色资料
+             */
+            function viewCharacterProfile(characterName) {
+                dispatch({
+                    type: 'VIEW_CHARACTER_PROFILE',
+                    payload: { characterName: characterName }
+                });
+            }
+            
+            /**
+             * 移除群组成员
+             */
+            function removeGroupMember(groupId, memberName) {
+                if (confirm(`确定要移除 ${memberName} 吗？`)) {
+                    dispatch({
+                        type: 'REMOVE_GROUP_MEMBER',
+                        payload: { groupId: groupId, memberName: memberName }
+                    });
+                    
+                    if (typeof toastr !== 'undefined') {
+                        toastr.success(`已移除 ${memberName}`, '群组管理');
+                    }
+                }
+            }
+            
+            /**
+             * 朋友圈点赞
+             */
+            function QQ_MomentLike(momentId) {
+                dispatch({
+                    type: 'LIKE_MOMENT',
+                    payload: { momentId: momentId }
+                });
+                
+                // 更新UI显示
+                const likeButton = $(`.moment[data-id="${momentId}"] .like-button`);
+                if (likeButton.length) {
+                    likeButton.addClass('liked');
+                    const likeCount = parseInt(likeButton.find('.like-count').text() || '0');
+                    likeButton.find('.like-count').text(likeCount + 1);
+                }
+            }
+            
+            /**
+             * 朋友圈评论
+             */
+            function QQ_CommentMoment(momentId) {
+                dispatch({
+                    type: 'SHOW_COMMENT_INPUT',
+                    payload: { momentId: momentId }
+                });
+            }
+            
+            /**
+             * 朋友圈分享
+             */
+            function QQ_ShareMoment(momentId) {
+                dispatch({
+                    type: 'SHARE_MOMENT',
+                    payload: { momentId: momentId }
+                });
+                
+                if (typeof toastr !== 'undefined') {
+                    toastr.success('动态已分享', '朋友圈');
+                }
+            }
+            
+            /**
+             * 调试函数：测试群组名称点击
+             */
+            function testGroupNameClick() {
+                console.log('🔧 调试：群组名称点击测试');
+                if (typeof toastr !== 'undefined') {
+                    toastr.info('群组名称点击功能正常', '调试');
+                }
+            }
+            
+            /**
+             * 调试函数：输出群组数据
+             */
+            function debugGroupData() {
+                console.log('🔧 调试：当前群组数据', model.groups);
+                console.log('🔧 调试：当前联系人数据', model.contacts);
+                
+                if (typeof toastr !== 'undefined') {
+                    toastr.info('群组数据已输出到控制台', '调试');
+                }
+            }
+            
+            // 将新添加的函数添加到全局作用域
+            window.showErrorMessage = showErrorMessage;
+            window.updateNetworkStatus = updateNetworkStatus;
+            window.gotopage = gotopage;
+            window.hideModal = hideModal;
+            window.Setfriendinfo = Setfriendinfo;
+            window.saveInteractiveSettings = saveInteractiveSettings;
+            window.startPrivateChat = startPrivateChat;
+            window.viewCharacterProfile = viewCharacterProfile;
+            window.removeGroupMember = removeGroupMember;
+            window.QQ_MomentLike = QQ_MomentLike;
+            window.QQ_CommentMoment = QQ_CommentMoment;
+            window.QQ_ShareMoment = QQ_ShareMoment;
+            window.testGroupNameClick = testGroupNameClick;
+            window.debugGroupData = debugGroupData;
             
         </script>
     </body>
