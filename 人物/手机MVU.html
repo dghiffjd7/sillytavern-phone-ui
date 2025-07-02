@@ -3887,7 +3887,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月1日</span>
+                            <span>台北</span> <span id="day">7月2日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5461,19 +5461,32 @@
                 if (model.characters && model.characters[characterName] && model.characters[characterName].avatar) {
                     const avatarData = model.characters[characterName].avatar;
                     
-                    // 如果是完整的URL，直接返回
-                    if (typeof avatarData === 'string' && (avatarData.startsWith('http://') || avatarData.startsWith('https://') || avatarData.startsWith('data:'))) {
+                    // 类型检查：确保是字符串
+                    if (typeof avatarData === 'string') {
+                        // 如果是完整的URL，直接返回
+                        if (avatarData.startsWith('http://') || avatarData.startsWith('https://') || avatarData.startsWith('data:')) {
+                            return avatarData;
+                        }
+                        
+                        // 如果是占位符格式 <角色名> 或 {角色名}，转换为CSS类名
+                        const match = avatarData.match(/[<{]+(.+?)[>}]/);
+                        if (match) {
+                            return `head${match[1]}`;
+                        }
+                        
+                        // 其他字符串情况，直接返回
                         return avatarData;
+                    } else {
+                        // 如果是对象，尝试提取URL
+                        console.warn(`角色 ${characterName} 的头像数据是对象类型:`, avatarData);
+                        if (avatarData && typeof avatarData === 'object') {
+                            // 尝试从对象中提取URL
+                            const url = avatarData.url || avatarData.avatar || avatarData.src || avatarData.imageData;
+                            if (url && typeof url === 'string') {
+                                return url;
+                            }
+                        }
                     }
-                    
-                    // 如果是占位符格式 <角色名> 或 {角色名}，转换为CSS类名
-                    const match = avatarData.match(/[<{]+(.+?)[>}]/);
-                    if (match) {
-                        return `head${match[1]}`;
-                    }
-                    
-                    // 其他情况，直接返回
-                    return avatarData;
                 }
                 
                 // 备用方案：使用传统的CSS类名方式
@@ -7783,12 +7796,23 @@
                     return null;
                 }
                 
-                // 确保必要字段存在
-                const name = chatItem.name || '';
-                const lastMessage = chatItem.lastMessage || '';
-                const lastTime = chatItem.lastTime || '';
+                // 确保必要字段存在并进行类型检查
+                const name = (typeof chatItem.name === 'string') ? chatItem.name : (chatItem.name ? String(chatItem.name) : '');
+                const lastMessage = (typeof chatItem.lastMessage === 'string') ? chatItem.lastMessage : (chatItem.lastMessage ? String(chatItem.lastMessage) : '暂无消息');
+                const lastTime = (typeof chatItem.lastTime === 'string') ? chatItem.lastTime : (chatItem.lastTime ? String(chatItem.lastTime) : '');
                 const isGroup = Boolean(chatItem.isGroup);
-                const avatar = chatItem.avatar || '';
+                const avatar = (typeof chatItem.avatar === 'string') ? chatItem.avatar : '';
+                
+                // 调试输出，帮助定位 [object Object] 问题
+                if (typeof chatItem.name !== 'string' && chatItem.name) {
+                    console.warn(`⚠️ 角色名称不是字符串:`, chatItem.name, typeof chatItem.name);
+                }
+                if (typeof chatItem.lastMessage !== 'string' && chatItem.lastMessage) {
+                    console.warn(`⚠️ 最后消息不是字符串:`, chatItem.lastMessage, typeof chatItem.lastMessage);
+                }
+                if (typeof chatItem.avatar !== 'string' && chatItem.avatar) {
+                    console.warn(`⚠️ 头像数据不是字符串:`, chatItem.avatar, typeof chatItem.avatar);
+                }
                 
                 // 处理头像 - 使用原版的头像逻辑
                 let avatarStyle = '';
@@ -30172,19 +30196,15 @@ ${index + 1}. ${space.name}
             /**
              * 生成群聊头像（使用群成员头像组合或默认样式）
              */
-            function generateGroupAvatar(members) {
-                // 简单的群聊头像生成：使用渐变背景
-                const colors = [
-                    'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                    'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-                    'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-                    'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-                    'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
-                    'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
-                    'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)'
-                ];
-                return colors[Math.floor(Math.random() * colors.length)];
+            function generateGroupAvatar(groupName) {
+                // 首先尝试从世界书获取群聊头像
+                const groupAvatar = getGroupAvatarFromWorldbook(groupName);
+                if (groupAvatar) {
+                    return groupAvatar;
+                }
+                
+                // 如果没有找到，返回默认群聊头像URL
+                return 'https://files.catbox.moe/skngqq.jpg';
             }
             
             /**
