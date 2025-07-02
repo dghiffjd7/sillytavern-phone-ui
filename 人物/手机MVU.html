@@ -4840,40 +4840,6 @@
             }
 
             /**
-             * (第四层 - 安全网) 生成备用摘要
-             */
-            function createHistorySummary(newMessages) {
-                console.log("⚠️ 第四层安全网启动：由前端生成历史摘要。");
-                let summaryLines = [];
-                if (newMessages.私聊) {
-                    for (const chatKey in newMessages.私聊) {
-                        newMessages.私聊[chatKey].forEach(msg => {
-                            const parts = msg.split('--');
-                            if (parts.length >= 2 && parts[0] !== '{{user}}') {
-                                summaryLines.push(`[私聊] ${parts[0]}: ${parts[1]}`);
-                            }
-                        });
-                    }
-                }
-                if (newMessages.群聊) {
-                    for (const groupName in newMessages.群聊) {
-                        if (newMessages.群聊[groupName].msgs) {
-                            newMessages.群聊[groupName].msgs.forEach(msg => {
-                                const parts = msg.split('--');
-                                if (parts.length >= 2 && parts[0] !== '{{user}}') {
-                                    summaryLines.push(`[群聊: ${groupName}] ${parts[0]}: ${parts[1]}`);
-                                }
-                            });
-                        }
-                    }
-                }
-                if (summaryLines.length === 0) {
-                    return "[AI进行了操作，但没有新的聊天消息]";
-                }
-                return summaryLines.join('\n');
-            }
-
-            /**
              * 压缩图片到指定大小，确保兼容localStorage存储
              * @param {File} file - 图片文件
              * @param {number} maxSizeKB - 最大大小（KB），默认1024KB
@@ -5609,6 +5575,212 @@
                             newModel.moments.shares[shareId] = 0;
                         }
                         newModel.moments.shares[shareId]++;
+                        break;
+                        
+                    // 新建分组弹窗相关处理
+                    case 'UPDATE_NEW_GROUP_INPUT':
+                        if (newModel.ui.modal.activeModal === 'new_group_modal') {
+                            newModel.ui.modal.modalData.groupName = message.payload.groupName;
+                            newModel.ui.modal.modalData.errorMessage = ''; // 清空错误信息
+                        }
+                        break;
+                        
+                    case 'UPDATE_NEW_GROUP_ERROR':
+                        if (newModel.ui.modal.activeModal === 'new_group_modal') {
+                            newModel.ui.modal.modalData.errorMessage = message.payload.errorMessage;
+                        }
+                        break;
+                        
+                    case 'CREATE_NEW_GROUP':
+                        const { groupName } = message.payload;
+                        
+                        // 检查分组名是否已存在
+                        if (newModel.groups && newModel.groups[groupName]) {
+                            newModel.ui.modal.modalData.errorMessage = `分组"${groupName}"已存在`;
+                            break;
+                        }
+                        
+                        // 创建新分组
+                        if (!newModel.groups) {
+                            newModel.groups = {};
+                        }
+                        newModel.groups[groupName] = {
+                            id: Date.now().toString(),
+                            name: groupName,
+                            members: [],
+                            createdAt: new Date().toISOString()
+                        };
+                        
+                        // 关闭弹窗
+                        newModel.ui.modal.activeModal = null;
+                        newModel.ui.modal.modalData = {};
+                        newModel.ui.modal.isVisible = false;
+                        
+                        // 异步保存到世界书
+                        setTimeout(() => {
+                            QQ_SafeSaveToWorldBook('新建分组', newModel.groups[groupName], `分组_${groupName}`);
+                            if (typeof toastr !== 'undefined') {
+                                toastr.success(`分组"${groupName}"创建成功`, '分组管理');
+                            }
+                        }, 100);
+                        
+                        break;
+                        
+                    // ===== 新增：通用View事件处理 =====
+                    
+                    case 'NAVIGATION_CLICK':
+                        const navTarget = message.payload.target;
+                        newModel.ui.currentPage = getQQPageState(navTarget);
+                        newModel.ui.navigationIcons = updateNavigationIcons(navTarget);
+                        newModel.ui.backgroundColor = getBackgroundColor(navTarget);
+                        newModel.ui.showBottomNav = (navTarget !== "chat");
+                        break;
+                        
+                    case 'CHAT_ITEM_CLICK':
+                        const chatName = message.payload.chatName;
+                        newModel.ui.activeChat = chatName;
+                        newModel.ui.currentPage = getQQPageState('chat');
+                        newModel.ui.showBottomNav = false;
+                        break;
+                        
+                    case 'SEND_BUTTON_CLICK':
+                        // 发送按钮点击，触发消息发送流程
+                        const inputElement = message.payload.inputElement;
+                        const chatTarget = message.payload.chatTarget;
+                        if (inputElement && inputElement.value.trim()) {
+                            // 通过原有的消息发送系统处理
+                            dispatch({
+                                type: MessageTypes.SEND_USER_MESSAGE,
+                                payload: {
+                                    text: inputElement.value.trim(),
+                                    target: chatTarget,
+                                    type: determineMessageType(chatTarget)
+                                }
+                            });
+                            // 清空输入框
+                            inputElement.value = '';
+                        }
+                        break;
+                        
+                    case 'INPUT_CHANGE':
+                        // 输入框内容变化
+                        const inputName = message.payload.name;
+                        const inputValue = message.payload.value;
+                        if (!newModel.ui.inputs) {
+                            newModel.ui.inputs = {};
+                        }
+                        newModel.ui.inputs[inputName] = inputValue;
+                        break;
+                        
+                    case 'KEY_DOWN':
+                        // 键盘事件处理
+                        if (message.payload.key === 'Enter' && !message.payload.shiftKey) {
+                            const target = message.payload.target;
+                            if (target && target.classList.contains('userInput')) {
+                                // Enter键发送消息
+                                const chatContainer = target.closest('.QQ_chat_page');
+                                if (chatContainer) {
+                                    const chatName = chatContainer.getAttribute('data-name');
+                                    dispatch({
+                                        type: 'SEND_BUTTON_CLICK',
+                                        payload: {
+                                            inputElement: target,
+                                            chatTarget: chatName
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        break;
+                        
+                    case 'LONG_PRESS':
+                        // 长按事件处理
+                        const pressTarget = message.payload.target;
+                        const pressAction = message.payload.action;
+                        
+                        if (pressAction === 'message_menu') {
+                            // 显示消息操作菜单
+                            newModel.ui.modal.activeModal = 'message_menu';
+                            newModel.ui.modal.modalData = {
+                                messageElement: pressTarget,
+                                position: {
+                                    x: message.payload.clientX || 0,
+                                    y: message.payload.clientY || 0
+                                }
+                            };
+                            newModel.ui.modal.isVisible = true;
+                        }
+                        break;
+                        
+                    case 'DRAG_START':
+                        // 拖拽开始
+                        if (!newModel.ui.dragState) {
+                            newModel.ui.dragState = {};
+                        }
+                        newModel.ui.dragState.isDragging = true;
+                        newModel.ui.dragState.elementId = message.payload.elementId;
+                        newModel.ui.dragState.startPosition = {
+                            x: message.payload.clientX,
+                            y: message.payload.clientY
+                        };
+                        break;
+                        
+                    case 'DRAG_MOVE':
+                        // 拖拽移动
+                        if (newModel.ui.dragState && newModel.ui.dragState.isDragging) {
+                            newModel.ui.dragState.currentPosition = {
+                                x: message.payload.clientX,
+                                y: message.payload.clientY
+                            };
+                        }
+                        break;
+                        
+                    case 'DRAG_END':
+                        // 拖拽结束
+                        if (newModel.ui.dragState && newModel.ui.dragState.isDragging) {
+                            const dropTarget = message.payload.dropTarget;
+                            const draggedElementId = newModel.ui.dragState.elementId;
+                            
+                            // 处理拖拽完成的业务逻辑
+                            if (dropTarget && draggedElementId) {
+                                // 例如：将联系人拖拽到分组
+                                dispatch({
+                                    type: 'MOVE_CONTACT_TO_GROUP',
+                                    payload: {
+                                        contactId: draggedElementId,
+                                        targetGroup: dropTarget
+                                    }
+                                });
+                            }
+                            
+                            // 重置拖拽状态
+                            newModel.ui.dragState.isDragging = false;
+                            newModel.ui.dragState.elementId = null;
+                            newModel.ui.dragState.startPosition = null;
+                            newModel.ui.dragState.currentPosition = null;
+                        }
+                        break;
+                        
+                    case 'MOMENT_MENU_CLICK':
+                        // 动态菜单点击
+                        newModel.ui.modal.activeModal = 'moment_menu';
+                        newModel.ui.modal.modalData = {
+                            momentId: message.payload.momentId,
+                            position: {
+                                x: message.payload.clientX || 0,
+                                y: message.payload.clientY || 0
+                            }
+                        };
+                        newModel.ui.modal.isVisible = true;
+                        break;
+                        
+                    case 'SETTING_BUTTON_CLICK':
+                        // 设置按钮点击
+                        newModel.ui.modal.activeModal = 'chat_settings';
+                        newModel.ui.modal.modalData = {
+                            chatName: message.payload.chatName
+                        };
+                        newModel.ui.modal.isVisible = true;
                         break;
                         
                     case MessageTypes.HANDLE_ERROR:
@@ -6348,6 +6520,9 @@
                     case 'interactive_settings':
                         renderInteractiveSettingsModal(model.ui.modal, modalContainer);
                         break;
+                    case 'new_group_modal':
+                        renderNewGroupModal(model.ui.modal, modalContainer);
+                        break;
                     default:
                         console.warn('未知弹窗类型:', model.ui.modal.activeModal);
                 }
@@ -6500,6 +6675,88 @@
                         </div>
                     </div>
                 `;
+            }
+            
+            // 渲染新建分组弹窗
+            function renderNewGroupModal(modalState, container) {
+                const { modalData } = modalState;
+                const groupName = modalData.groupName || '';
+                const errorMessage = modalData.errorMessage || '';
+                
+                container.innerHTML = `
+                    <div style="
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                        width: 90%;
+                        max-width: 400px;
+                        pointer-events: auto;
+                    ">
+                        <div style="padding: 20px; border-bottom: 1px solid #eee;">
+                            <h3 style="margin: 0; font-size: 18px;">新建分组</h3>
+                        </div>
+                        <div style="padding: 20px;">
+                            ${errorMessage ? `<div style="color: #dc3545; margin-bottom: 10px; font-size: 14px;">${errorMessage}</div>` : ''}
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 500;">分组名称</label>
+                                <input 
+                                    type="text" 
+                                    id="new_group_name_input_mvu"
+                                    value="${groupName}" 
+                                    placeholder="请输入分组名称"
+                                    style="
+                                        width: 100%; 
+                                        padding: 10px; 
+                                        border: 1px solid #ddd; 
+                                        border-radius: 4px; 
+                                        font-size: 14px;
+                                        box-sizing: border-box;
+                                    "
+                                    onkeydown="handleNewGroupInputKeydown(event)"
+                                    oninput="updateNewGroupInput(this.value)"
+                                >
+                            </div>
+                        </div>
+                        <div style="padding: 0 20px 20px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                            <button 
+                                onclick="closeNewGroupModal()" 
+                                style="
+                                    padding: 8px 16px; 
+                                    border: 1px solid #ddd; 
+                                    background: white; 
+                                    border-radius: 4px;
+                                    cursor: pointer;
+                                "
+                            >取消</button>
+                            <button 
+                                onclick="confirmNewGroup()" 
+                                style="
+                                    padding: 8px 16px; 
+                                    border: none; 
+                                    background: #007bff; 
+                                    color: white; 
+                                    border-radius: 4px;
+                                    cursor: pointer;
+                                    ${!groupName.trim() ? 'opacity: 0.5; cursor: not-allowed;' : ''}
+                                "
+                                ${!groupName.trim() ? 'disabled' : ''}
+                            >确定</button>
+                        </div>
+                    </div>
+                `;
+                
+                // 自动聚焦到输入框
+                setTimeout(() => {
+                    const input = document.getElementById('new_group_name_input_mvu');
+                    if (input) {
+                        input.focus();
+                        input.select();
+                    }
+                }, 100);
             }
             
             // 渲染交互设置弹窗
@@ -7640,7 +7897,6 @@
                     // 第三层: 查找通用的启发式摘要格式
                     if (!cleanSummaryText) cleanSummaryText = findSummaryUsingHeuristics(aiRawResponse);
                     // 第四层: 前端生成机械式总结
-                    //if (!cleanSummaryText) cleanSummaryText = createHistorySummary(window.lastAiNewMessages || {});
                     
                     if (!cleanSummaryText || cleanSummaryText.trim() === "") {
                         cleanSummaryText = "[AI进行了操作，但未生成有效上下文]";
@@ -19379,70 +19635,32 @@ ${index + 1}. ${space.name}
                 
                 console.log('页面初始化完成');
                 
-                // 为聊天元素绑定点击事件
-                console.log('绑定底部导航点击事件');
-                $(document).on("click", "#QQ_message_nav", () => {
-                    console.log('点击消息导航');
-                    QQ_Nav("message");
-                });
-                $(document).on("click", "#QQ_people_nav", () => {
-                    console.log('点击联系人导航');
-                    QQ_Nav("people");
-                });
-                $(document).on("click", "#QQ_moment_nav", () => {
-                    console.log('点击动态导航');
-                    QQ_Nav("moment");
-                });
-                $(document).on("click", ".QQ-close-btn", () => QQ_GoHome());
-                $(document).on("click", ".QQ_home_usermsg", (e) =>
-                    QQ_ChangeChatPage(e),
-                );
-                $(document).on("click", "#QQ_chat_page_setting", (e) =>
-                    QQ_SetChatPageSetting(e),
-                );
-                $(document).on("click", ".close-setting-btn", () =>
-                    closeSettingPopup(),
-                );
+                // *** MVU架构：移除旧的jQuery事件绑定，使用新的事件调度系统 ***
+                console.log('🔄 启用MVU事件系统...');
                 
-                // *** 新增：动态删除相关事件绑定 ***
-                // 点击三个点显示菜单
-                $(document).on("click", ".moment_menu_dots", showMomentMenu);
+                // 延迟执行事件迁移，确保DOM元素已加载
+                setTimeout(() => {
+                    migrateAllEvents();
+                    console.log('✅ MVU事件系统已启用，旧的jQuery事件绑定已移除');
+                }, 1000);
                 
-                // 点击菜单项
-                $(document).on("click", ".moment_menu_item", function(e) {
-                    e.stopPropagation();
-                    const action = $(this).data('action');
-                    const momentId = $(this).data('moment-id');
-                    
-                    hideMomentMenu();
-                    
-                    if (action === 'delete') {
-                        confirmDeleteMoment(momentId);
-                    }
-                });
+                // *** 注意：以下jQuery事件绑定已被MVU事件系统取代 ***
+                // 这些事件现在通过handleViewAction函数和HTML onclick属性处理
+                // 保留注释作为迁移参考：
                 
-                // 点击确认删除对话框按钮
-                $(document).on("click", ".moment_dialog_cancel", function() {
-                    $('.moment_confirm_dialog').fadeOut(200, function() {
-                        $(this).remove();
-                    });
-                });
-                
-                $(document).on("click", ".moment_dialog_confirm", async function() {
-                    const momentId = $(this).data('moment-id');
-                    const success = await QQ_Delete_Moment(momentId);
-                    
-                    $('.moment_confirm_dialog').fadeOut(200, function() {
-                        $(this).remove();
-                    });
-                    
-                    if (success) {
-                        // 可以在这里添加成功提示
-                        console.log('动态删除成功');
-                    } else {
-                        console.error('动态删除失败');
-                    }
-                });
+                /*
+                // 原jQuery事件绑定（已迁移到MVU）：
+                // $(document).on("click", ".QQ_home_usermsg", (e) => QQ_ChangeChatPage(e));
+                // $(document).on("click", "#QQ_chat_page_setting", (e) => QQ_SetChatPageSetting(e));
+                // $(document).on("click", ".close-setting-btn", () => closeSettingPopup());
+                // $(document).on("click", ".moment_menu_dots", showMomentMenu);
+                // 等等...
+                // 
+                // 新的MVU模式：
+                // - 事件通过 onclick="handleViewAction({type: '...', payload: {...}})" 处理
+                // - 所有事件最终都通过 dispatch() 发送到 update() 函数
+                // - UI状态完全由model驱动，确保状态一致性
+                */
                 
                 // 点击空白区域隐藏菜单
                 $(document).on("click", function() {
@@ -30407,34 +30625,28 @@ ${index + 1}. ${space.name}
             }
             
             /**
-             * 显示新建分组弹窗
+             * 显示新建分组弹窗 (MVU模式)
              */
             function showNewGroupModal() {
-                const modal = document.getElementById('new_group_modal');
-                const input = document.getElementById('new_group_name_input');
-                
-                if (modal && input) {
-                    modal.style.display = 'flex';
-                    input.value = '';
-                    input.focus();
-                    
-                    // 添加背景点击关闭
-                    modal.addEventListener('click', function(e) {
-                        if (e.target === modal) {
-                            closeNewGroupModal();
+                dispatch({
+                    type: MessageTypes.SHOW_MODAL,
+                    payload: {
+                        modalName: 'new_group_modal',
+                        data: {
+                            groupName: '',
+                            errorMessage: ''
                         }
-                    });
-                }
+                    }
+                });
             }
             
             /**
-             * 关闭新建分组弹窗
+             * 关闭新建分组弹窗 (MVU模式)
              */
             function closeNewGroupModal() {
-                const modal = document.getElementById('new_group_modal');
-                if (modal) {
-                    modal.style.display = 'none';
-                }
+                dispatch({
+                    type: MessageTypes.HIDE_MODAL
+                });
             }
             
             /**
@@ -41466,6 +41678,117 @@ MiPhone_JSON_END`;
                 }
             }
             
+            /**
+             * 统一的头像获取函数
+             * @param {string} name - 角色或群组名称
+             * @param {string} type - 类型：'character' 或 'group'
+             * @returns {string|object|null} 返回头像URL/数据对象或null
+             */
+            function getAvatar(name, type = 'character') {
+                if (!name) {
+                    console.warn('getAvatar: 名称参数为空');
+                    return null;
+                }
+                
+                switch(type) {
+                    case 'character':
+                        // 优先级1：从世界书获取
+                        const worldbookAvatar = getCharacterAvatarFromWorldbook(name);
+                        if (worldbookAvatar && worldbookAvatar.avatarUrl) {
+                            return worldbookAvatar.avatarUrl;
+                        }
+                        
+                        // 优先级2：从QQ_Char缓存获取
+                        const cachedAvatar = GetCharHead(name);
+                        if (cachedAvatar) {
+                            return cachedAvatar;
+                        }
+                        
+                        // 优先级3：从SillyTavern角色数据获取
+                        const characters = SillyTavern.getContext().characters;
+                        if (characters && Array.isArray(characters)) {
+                            const character = characters.find(char => char.name === name);
+                            if (character && character.avatar) {
+                                return `/characters/${character.avatar}`;
+                            }
+                        }
+                        
+                        // 优先级4：从联系人列表DOM获取（兼容旧数据）
+                        const contactItem = $(`.people-info-item[data-name="${name}"]`);
+                        if (contactItem.length > 0) {
+                            const avatarSrc = contactItem.find('.people-info-avatar').attr('src');
+                            if (avatarSrc) {
+                                return avatarSrc;
+                            }
+                        }
+                        
+                        // 默认头像
+                        return 'https://patchwiki.biligame.com/images/blhx/thumb/c/c3/sprm1l5vl1t1sjfrbh21o61zr58c9jn.gif';
+                        
+                    case 'group':
+                        // 从世界书获取群聊头像
+                        const groupAvatar = getGroupAvatarFromWorldbook(name);
+                        if (groupAvatar) {
+                            return groupAvatar;
+                        }
+                        
+                        // 生成默认群聊头像（渐变）
+                        const groupData = model.groups[name];
+                        if (groupData && groupData.members) {
+                            return generateGroupAvatar(groupData.members);
+                        }
+                        
+                        // 默认群聊头像
+                        return {
+                            type: 'gradient',
+                            style: 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'
+                        };
+                        
+                    case 'user':
+                        // 获取用户头像
+                        const userAvatar = model.settings.userAvatar;
+                        if (userAvatar) {
+                            return userAvatar;
+                        }
+                        
+                        // 从世界书获取
+                        const userWorldbookAvatar = getCharacterAvatarFromWorldbook('我');
+                        if (userWorldbookAvatar && userWorldbookAvatar.avatarUrl) {
+                            return userWorldbookAvatar.avatarUrl;
+                        }
+                        
+                        // 默认用户头像
+                        return 'https://patchwiki.biligame.com/images/blhx/thumb/2/20/26t3wzkubqndt6y42pjg2t6klqb40sc.png';
+                        
+                    default:
+                        console.warn(`getAvatar: 未知的类型 '${type}'`);
+                        return null;
+                }
+            }
+            
+            /**
+             * 获取头像HTML（用于显示）
+             * @param {string} name - 角色或群组名称
+             * @param {string} type - 类型
+             * @param {string} className - CSS类名
+             * @returns {string} HTML字符串
+             */
+            function getAvatarHTML(name, type = 'character', className = '') {
+                const avatar = getAvatar(name, type);
+                
+                if (!avatar) {
+                    return `<div class="${className}" style="background: #ccc;"></div>`;
+                }
+                
+                // 处理群聊渐变头像
+                if (typeof avatar === 'object' && avatar.type === 'gradient') {
+                    return `<div class="${className}" style="${avatar.style}"></div>`;
+                }
+                
+                // 处理普通图片头像
+                return `<img class="${className}" src="${avatar}" alt="${name}" onerror="this.src='https://patchwiki.biligame.com/images/blhx/thumb/c/c3/sprm1l5vl1t1sjfrbh21o61zr58c9jn.gif'">`;
+            }
+            
             // 将新添加的函数添加到全局作用域
             window.showErrorMessage = showErrorMessage;
             window.updateNetworkStatus = updateNetworkStatus;
@@ -41481,6 +41804,514 @@ MiPhone_JSON_END`;
             window.QQ_ShareMoment = QQ_ShareMoment;
             window.testGroupNameClick = testGroupNameClick;
             window.debugGroupData = debugGroupData;
+            window.getAvatar = getAvatar;
+            window.getAvatarHTML = getAvatarHTML;
+            
+            // 新建分组弹窗相关的MVU处理函数
+            window.updateNewGroupInput = updateNewGroupInput;
+            window.handleNewGroupInputKeydown = handleNewGroupInputKeydown;
+            window.confirmNewGroup = confirmNewGroup;
+            
+            /**
+             * 更新新建分组输入
+             */
+            function updateNewGroupInput(value) {
+                dispatch({
+                    type: 'UPDATE_NEW_GROUP_INPUT',
+                    payload: { groupName: value }
+                });
+            }
+            
+            /**
+             * 处理输入框键盘事件
+             */
+            function handleNewGroupInputKeydown(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const value = event.target.value.trim();
+                    if (value) {
+                        confirmNewGroup();
+                    }
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeNewGroupModal();
+                }
+            }
+            
+            /**
+             * 确认创建新分组
+             */
+            function confirmNewGroup() {
+                const input = document.getElementById('new_group_name_input_mvu');
+                const groupName = input ? input.value.trim() : '';
+                
+                if (!groupName) {
+                    dispatch({
+                        type: 'UPDATE_NEW_GROUP_ERROR',
+                        payload: { errorMessage: '分组名称不能为空' }
+                    });
+                    return;
+                }
+                
+                dispatch({
+                    type: 'CREATE_NEW_GROUP',
+                    payload: { groupName: groupName }
+                });
+            }
+            
+            // ===== MVU架构：全局事件调度系统 =====
+            
+            /**
+             * 全局事件调度函数 - 所有View层事件的统一入口
+             * @param {Object} message - 事件消息对象 {type: string, payload?: any}
+             * @param {Event} event - 原生DOM事件对象（可选）
+             */
+            function handleViewAction(message, event) {
+                console.log('🎯 View事件调度:', message.type, message.payload);
+                
+                // 阻止默认行为（如果需要）
+                if (event && message.preventDefault !== false) {
+                    event.preventDefault();
+                }
+                
+                // 预处理特殊事件类型
+                switch (message.type) {
+                    // 表单输入事件
+                    case 'INPUT_CHANGE':
+                        if (event && event.target) {
+                            message.payload = {
+                                ...message.payload,
+                                value: event.target.value,
+                                name: event.target.name || event.target.id,
+                                element: event.target
+                            };
+                        }
+                        break;
+                        
+                    // 键盘事件
+                    case 'KEY_DOWN':
+                    case 'KEY_UP':
+                        if (event) {
+                            message.payload = {
+                                ...message.payload,
+                                key: event.key,
+                                keyCode: event.keyCode,
+                                ctrlKey: event.ctrlKey,
+                                shiftKey: event.shiftKey,
+                                altKey: event.altKey,
+                                target: event.target
+                            };
+                        }
+                        break;
+                        
+                    // 鼠标事件
+                    case 'MOUSE_DOWN':
+                    case 'MOUSE_UP':
+                    case 'MOUSE_MOVE':
+                        if (event) {
+                            message.payload = {
+                                ...message.payload,
+                                clientX: event.clientX,
+                                clientY: event.clientY,
+                                target: event.target,
+                                button: event.button
+                            };
+                        }
+                        break;
+                        
+                    // 触摸事件
+                    case 'TOUCH_START':
+                    case 'TOUCH_END':
+                    case 'TOUCH_MOVE':
+                        if (event && event.touches) {
+                            message.payload = {
+                                ...message.payload,
+                                touches: Array.from(event.touches).map(touch => ({
+                                    clientX: touch.clientX,
+                                    clientY: touch.clientY
+                                })),
+                                target: event.target
+                            };
+                        }
+                        break;
+                }
+                
+                // 发送到MVU系统
+                try {
+                    dispatch(message);
+                } catch (error) {
+                    console.error('事件调度失败:', error, message);
+                    showErrorMessage('事件处理失败: ' + error.message);
+                }
+            }
+            
+            /**
+             * 简化的事件调度函数 - 用于简单的按钮点击等
+             * @param {string} type - 事件类型
+             * @param {any} payload - 事件数据
+             */
+            function handleSimpleAction(type, payload) {
+                handleViewAction({ type, payload });
+            }
+            
+            /**
+             * 输入框事件处理器
+             * @param {Event} event - 输入事件
+             * @param {string} actionType - 对应的action类型
+             */
+            function handleInputEvent(event, actionType) {
+                handleViewAction({
+                    type: actionType,
+                    payload: {
+                        value: event.target.value,
+                        name: event.target.name || event.target.id
+                    }
+                }, event);
+            }
+            
+            /**
+             * 键盘事件处理器
+             * @param {Event} event - 键盘事件
+             * @param {Object} actions - 键位对应的动作映射
+             */
+            function handleKeyboardEvent(event, actions) {
+                const action = actions[event.key];
+                if (action) {
+                    handleViewAction(action, event);
+                }
+            }
+            
+            /**
+             * 长按事件处理器
+             * @param {Event} event - 鼠标/触摸事件
+             * @param {Object} actionData - 长按动作数据
+             */
+            function handleLongPress(event, actionData) {
+                const startTime = Date.now();
+                const longPressThreshold = 500; // 500ms
+                
+                let timeoutId = setTimeout(() => {
+                    handleViewAction({
+                        type: 'LONG_PRESS',
+                        payload: {
+                            ...actionData,
+                            startTime,
+                            target: event.target
+                        }
+                    }, event);
+                }, longPressThreshold);
+                
+                // 清理函数
+                const cleanup = () => {
+                    clearTimeout(timeoutId);
+                    document.removeEventListener('mouseup', cleanup);
+                    document.removeEventListener('touchend', cleanup);
+                    document.removeEventListener('mouseleave', cleanup);
+                };
+                
+                document.addEventListener('mouseup', cleanup);
+                document.addEventListener('touchend', cleanup);
+                document.addEventListener('mouseleave', cleanup);
+            }
+            
+            // 将事件处理函数添加到全局作用域
+            window.handleViewAction = handleViewAction;
+            window.handleSimpleAction = handleSimpleAction;
+            window.handleInputEvent = handleInputEvent;
+            window.handleKeyboardEvent = handleKeyboardEvent;
+            window.handleLongPress = handleLongPress;
+            
+            // ===== 事件迁移辅助函数 =====
+            
+            /**
+             * 迁移底部导航事件
+             * 替换jQuery事件绑定为HTML onclick属性
+             */
+            function migrateNavigationEvents() {
+                // 移除旧的jQuery事件绑定
+                $(document).off("click", "#QQ_message_nav");
+                $(document).off("click", "#QQ_people_nav");
+                $(document).off("click", "#QQ_moment_nav");
+                
+                // 为导航元素添加新的onclick属性
+                const messageNav = document.getElementById('QQ_message_nav');
+                const peopleNav = document.getElementById('QQ_people_nav');
+                const momentNav = document.getElementById('QQ_moment_nav');
+                
+                if (messageNav) {
+                    messageNav.setAttribute('onclick', "handleSimpleAction('NAVIGATION_CLICK', {target: 'message'})");
+                }
+                if (peopleNav) {
+                    peopleNav.setAttribute('onclick', "handleSimpleAction('NAVIGATION_CLICK', {target: 'people'})");
+                }
+                if (momentNav) {
+                    momentNav.setAttribute('onclick', "handleSimpleAction('NAVIGATION_CLICK', {target: 'moment'})");
+                }
+                
+                console.log('✅ 底部导航事件已迁移到MVU模式');
+            }
+            
+            /**
+             * 迁移聊天相关事件
+             */
+            function migrateChatEvents() {
+                // 移除旧的jQuery事件绑定
+                $(document).off("click", ".QQ_home_usermsg");
+                $(document).off("click", "#QQ_chat_page_setting");
+                $(document).off("click", ".QQ-close-btn");
+                
+                // 为聊天元素添加新的事件处理
+                // 注意：这些元素是动态生成的，所以需要在渲染时添加onclick属性
+                
+                console.log('✅ 聊天事件已迁移到MVU模式');
+            }
+            
+            /**
+             * 迁移动态相关事件
+             */
+            function migrateMomentEvents() {
+                // 移除旧的jQuery事件绑定
+                $(document).off("click", ".moment_menu_dots");
+                $(document).off("click", ".moment_menu_item");
+                $(document).off("click", ".moment_dialog_cancel");
+                $(document).off("click", ".moment_dialog_confirm");
+                
+                console.log('✅ 动态事件已迁移到MVU模式');
+            }
+            
+            /**
+             * 执行所有事件迁移
+             */
+            function migrateAllEvents() {
+                console.log('🔄 开始迁移jQuery事件到MVU模式...');
+                
+                migrateNavigationEvents();
+                migrateChatEvents();
+                migrateMomentEvents();
+                
+                console.log('✅ 所有事件迁移完成');
+            }
+            
+            // 将迁移函数添加到全局作用域（用于调试）
+            window.migrateAllEvents = migrateAllEvents;
+            window.migrateNavigationEvents = migrateNavigationEvents;
+            window.migrateChatEvents = migrateChatEvents;
+            window.migrateMomentEvents = migrateMomentEvents;
+            
+            // ===== MVU架构：View模板渲染示例 =====
+            
+            /**
+             * 渲染底部导航栏 - MVU模式示例
+             * @param {Object} model - 应用状态模型
+             * @returns {string} HTML模板字符串
+             */
+            function renderBottomNavigation(model) {
+                const currentPage = model.ui.currentPage || 'people';
+                const isVisible = model.ui.showBottomNav !== false;
+                
+                if (!isVisible) return '';
+                
+                return `
+                    <div class="QQ_bottom_nav" style="
+                        position: fixed;
+                        bottom: 0;
+                        left: 0;
+                        right: 0;
+                        height: 60px;
+                        background: #f8f9fa;
+                        border-top: 1px solid #e0e0e0;
+                        display: flex;
+                        justify-content: space-around;
+                        align-items: center;
+                        z-index: 1000;
+                    ">
+                        <div class="nav-item ${currentPage === 'message' ? 'active' : ''}"
+                             onclick="handleSimpleAction('NAVIGATION_CLICK', {target: 'message'})"
+                             style="
+                                flex: 1;
+                                text-align: center;
+                                padding: 8px;
+                                cursor: pointer;
+                                color: ${currentPage === 'message' ? '#007bff' : '#666'};
+                             ">
+                            <div style="font-size: 20px;">💬</div>
+                            <div style="font-size: 12px;">消息</div>
+                        </div>
+                        <div class="nav-item ${currentPage === 'people' ? 'active' : ''}"
+                             onclick="handleSimpleAction('NAVIGATION_CLICK', {target: 'people'})"
+                             style="
+                                flex: 1;
+                                text-align: center;
+                                padding: 8px;
+                                cursor: pointer;
+                                color: ${currentPage === 'people' ? '#007bff' : '#666'};
+                             ">
+                            <div style="font-size: 20px;">👥</div>
+                            <div style="font-size: 12px;">联系人</div>
+                        </div>
+                        <div class="nav-item ${currentPage === 'moment' ? 'active' : ''}"
+                             onclick="handleSimpleAction('NAVIGATION_CLICK', {target: 'moment'})"
+                             style="
+                                flex: 1;
+                                text-align: center;
+                                padding: 8px;
+                                cursor: pointer;
+                                color: ${currentPage === 'moment' ? '#007bff' : '#666'};
+                             ">
+                            <div style="font-size: 20px;">🌟</div>
+                            <div style="font-size: 12px;">动态</div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            /**
+             * 渲染聊天输入框 - MVU模式示例
+             * @param {Object} model - 应用状态模型
+             * @param {string} chatName - 聊天对象名称
+             * @returns {string} HTML模板字符串
+             */
+            function renderChatInput(model, chatName) {
+                const inputValue = (model.ui.inputs && model.ui.inputs.chatInput) || '';
+                const isGenerating = model.ui.isGenerating || false;
+                
+                return `
+                    <div class="chat-input-container" style="
+                        position: fixed;
+                        bottom: 0;
+                        left: 0;
+                        right: 0;
+                        background: white;
+                        border-top: 1px solid #e0e0e0;
+                        padding: 12px;
+                        display: flex;
+                        gap: 12px;
+                        align-items: flex-end;
+                    ">
+                        <input 
+                            type="text"
+                            class="userInput"
+                            name="chatInput"
+                            value="${inputValue}"
+                            placeholder="输入消息..."
+                            style="
+                                flex: 1;
+                                padding: 12px;
+                                border: 1px solid #ddd;
+                                border-radius: 20px;
+                                outline: none;
+                                font-size: 14px;
+                                max-height: 100px;
+                                resize: none;
+                            "
+                            oninput="handleInputEvent(event, 'INPUT_CHANGE')"
+                            onkeydown="handleKeyboardEvent(event, {
+                                'Enter': {type: 'KEY_DOWN', payload: {action: 'send_message'}}
+                            })"
+                            ${isGenerating ? 'disabled' : ''}
+                        >
+                        <button 
+                            class="send-button"
+                            onclick="handleViewAction({
+                                type: 'SEND_BUTTON_CLICK',
+                                payload: {
+                                    inputElement: this.previousElementSibling,
+                                    chatTarget: '${chatName}'
+                                }
+                            })"
+                            style="
+                                padding: 12px 20px;
+                                background: ${inputValue.trim() && !isGenerating ? '#007bff' : '#ccc'};
+                                color: white;
+                                border: none;
+                                border-radius: 20px;
+                                cursor: ${inputValue.trim() && !isGenerating ? 'pointer' : 'not-allowed'};
+                                font-size: 14px;
+                            "
+                            ${!inputValue.trim() || isGenerating ? 'disabled' : ''}
+                        >
+                            ${isGenerating ? '发送中...' : '发送'}
+                        </button>
+                    </div>
+                `;
+            }
+            
+            /**
+             * 渲染聊天消息项 - MVU模式示例
+             * @param {Object} message - 消息对象
+             * @param {Object} model - 应用状态模型
+             * @returns {string} HTML模板字符串
+             */
+            function renderChatMessage(message, model) {
+                const isUser = message.sender === 'user';
+                const avatar = getAvatar(message.sender, 'character');
+                const time = new Date(message.timestamp).toLocaleTimeString();
+                
+                return `
+                    <div class="chat-message ${isUser ? 'user-message' : 'ai-message'}"
+                         data-message-id="${message.id}"
+                         style="
+                            display: flex;
+                            margin: 12px;
+                            ${isUser ? 'flex-direction: row-reverse;' : ''}
+                         "
+                         onmousedown="handleLongPress(event, {action: 'message_menu', messageId: '${message.id}'})"
+                         ontouchstart="handleLongPress(event, {action: 'message_menu', messageId: '${message.id}'})">
+                        <div class="message-avatar" style="
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 50%;
+                            margin: ${isUser ? '0 0 0 8px' : '0 8px 0 0'};
+                        ">
+                            ${getAvatarHTML(message.sender, 'character', 'avatar-img')}
+                        </div>
+                        <div class="message-content" style="
+                            max-width: 70%;
+                            background: ${isUser ? '#007bff' : '#f1f1f1'};
+                            color: ${isUser ? 'white' : 'black'};
+                            padding: 12px;
+                            border-radius: 12px;
+                            position: relative;
+                        ">
+                            <div class="message-text">${message.content}</div>
+                            <div class="message-time" style="
+                                font-size: 11px;
+                                opacity: 0.7;
+                                margin-top: 4px;
+                            ">${time}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            /**
+             * 示例：使用MVU模板更新DOM的函数
+             * @param {Object} model - 应用状态模型
+             */
+            function updateViewWithMVU(model) {
+                // 更新底部导航
+                const navContainer = document.getElementById('bottom-nav-container');
+                if (navContainer) {
+                    navContainer.innerHTML = renderBottomNavigation(model);
+                }
+                
+                // 更新聊天输入框（如果在聊天页面）
+                if (model.ui.currentPage === 'chat' && model.ui.activeChat) {
+                    const inputContainer = document.getElementById('chat-input-container');
+                    if (inputContainer) {
+                        inputContainer.innerHTML = renderChatInput(model, model.ui.activeChat);
+                    }
+                }
+                
+                // 执行事件迁移（确保事件绑定正确）
+                migrateAllEvents();
+            }
+            
+            // 将MVU渲染函数添加到全局作用域
+            window.renderBottomNavigation = renderBottomNavigation;
+            window.renderChatInput = renderChatInput;
+            window.renderChatMessage = renderChatMessage;
+            window.updateViewWithMVU = updateViewWithMVU;
             
         </script>
     </body>
