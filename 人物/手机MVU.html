@@ -5077,12 +5077,32 @@
                 // 页面状态
                 ui: {
                     currentPage: 'QQ_HOME',
+                    currentApp: null,
+                    showHomePage: true,
+                    showAppPage: false,
                     isGenerating: false,
                     showChatSettings: false,
                     activeChat: null,
                     activeGroupChat: null,
                     scrollPosition: 0,
-                    theme: 'default'
+                    theme: 'default',
+                    navigationIcons: {
+                        message: "#000000",
+                        people: "#000000", 
+                        moment: "#000000"
+                    },
+                    backgroundColor: "#eff3ff",
+                    showBottomNav: true,
+                    currentManagingGroup: null,
+                    dragState: {
+                        draggedElement: null,
+                        draggedFromGroup: null,
+                        isDragging: false
+                    },
+                    messageSelection: {
+                        batchDeleteMode: false,
+                        selectedMessages: []
+                    }
                 },
                 
                 // 记忆分层架构
@@ -5156,6 +5176,11 @@
                 AI_CHAT_RECEIVED: 'AI_CHAT_RECEIVED',
                 AI_MOMENT_RECEIVED: 'AI_MOMENT_RECEIVED',
                 AI_INTERACTIVE_RECEIVED: 'AI_INTERACTIVE_RECEIVED',
+                
+                // 页面导航
+                NAVIGATE_TO_APP: 'NAVIGATE_TO_APP',
+                NAVIGATE_QQ_PAGE: 'NAVIGATE_QQ_PAGE', 
+                NAVIGATE_HOME: 'NAVIGATE_HOME',
                 
                 // UI状态更新
                 UPDATE_UI_STATE: 'UPDATE_UI_STATE',
@@ -5330,6 +5355,31 @@
                 return profileData;
             }
             
+            // QQ页面状态映射辅助函数
+            function getQQPageState(page) {
+                const pageStateMap = {
+                    "message": "QQ_MESSAGE",
+                    "people": "QQ_HOME", 
+                    "moment": "QQ_MOMENT",
+                    "chat": "QQ_CHAT"
+                };
+                return pageStateMap[page] || "QQ_HOME";
+            }
+            
+            // 导航图标状态更新
+            function updateNavigationIcons(activePage) {
+                return {
+                    message: activePage === "message" ? "#019aff" : "#000000",
+                    people: activePage === "people" ? "#019aff" : "#000000",
+                    moment: activePage === "moment" ? "#019aff" : "#000000"
+                };
+            }
+            
+            // 背景颜色获取
+            function getBackgroundColor(page) {
+                return page === "moment" ? "#ffffff" : "#eff3ff";
+            }
+            
             // MVU Update函数：处理所有状态变更逻辑 (增强记忆循环支持)
             function update(message, model) {
                 console.log('🔄 MVU Update:', message.type, message.payload);
@@ -5342,6 +5392,40 @@
                         newModel.ui.currentPage = message.payload.page;
                         newModel.ui.activeChat = message.payload.activeChat || null;
                         newModel.ui.activeGroupChat = message.payload.activeGroupChat || null;
+                        break;
+                        
+                    case MessageTypes.NAVIGATE_TO_APP:
+                        newModel.ui.currentApp = message.payload.appName;
+                        newModel.ui.showHomePage = false;
+                        newModel.ui.showAppPage = true;
+                        break;
+                        
+                    case MessageTypes.NAVIGATE_QQ_PAGE:
+                        newModel.ui.currentPage = getQQPageState(message.payload.page);
+                        newModel.ui.navigationIcons = updateNavigationIcons(message.payload.page);
+                        newModel.ui.backgroundColor = getBackgroundColor(message.payload.page);
+                        newModel.ui.showBottomNav = (message.payload.page !== "chat");
+                        break;
+                        
+                    case MessageTypes.NAVIGATE_HOME:
+                        // 清理聊天状态
+                        if (message.payload.fromGroupChat) {
+                            newModel.ui.activeGroupChat = null;
+                            // 根据来源页面决定返回位置
+                            const targetPage = message.payload.sourcePage === 'messages' ? 'message' : 'people';
+                            newModel.ui.currentPage = getQQPageState(targetPage);
+                            newModel.ui.navigationIcons = updateNavigationIcons(targetPage);
+                            newModel.ui.backgroundColor = getBackgroundColor(targetPage);
+                        } else {
+                            // 根据当前页面状态返回
+                            const currentPage = message.payload.currentPage;
+                            const targetPage = currentPage === "message" ? "message" : 
+                                               currentPage === "moment" ? "moment" : "people";
+                            newModel.ui.currentPage = getQQPageState(targetPage);
+                            newModel.ui.navigationIcons = updateNavigationIcons(targetPage);
+                            newModel.ui.backgroundColor = getBackgroundColor(targetPage);
+                        }
+                        newModel.ui.showBottomNav = true;
                         break;
                         
                     case MessageTypes.SEND_USER_MESSAGE:
@@ -5658,10 +5742,41 @@
                 console.log('🎨 Rendering view for page:', model.ui.currentPage);
                 
                 try {
+                    // MVU控制主页面容器可见性
+                    const homePageElement = document.getElementById('Home_page');
+                    const appPageElement = document.getElementById('App_Page');
+                    
+                    if (homePageElement) {
+                        homePageElement.style.display = model.ui.showHomePage ? 'block' : 'none';
+                    }
+                    
+                    if (appPageElement) {
+                        appPageElement.style.display = model.ui.showAppPage ? 'block' : 'none';
+                    }
+                    
+                    // 如果显示应用页面，隐藏所有应用然后显示当前应用
+                    if (model.ui.showAppPage && model.ui.currentApp) {
+                        const appNames = ["QQ", "twitter", "discord"];
+                        appNames.forEach(name => {
+                            const appElement = document.getElementById(`App_${name}`);
+                            if (appElement) {
+                                appElement.style.display = (name === model.ui.currentApp) ? 'block' : 'none';
+                            }
+                        });
+                    }
+                    
+                    // MVU渲染QQ应用UI状态
+                    if (model.ui.showAppPage && model.ui.currentApp === 'QQ') {
+                        renderQQUIState(model);
+                    }
+                    
                     // 根据当前页面渲染对应视图
                     switch (model.ui.currentPage) {
                         case 'QQ_HOME':
                             renderHomePage(model);
+                            break;
+                        case 'QQ_MESSAGE':
+                            renderMessageListPage(model);
                             break;
                         case 'QQ_CHAT':
                             renderChatPage(model);
@@ -6013,9 +6128,97 @@
             
             // 渲染主页
             function renderHomePage(model) {
-                updateContactList(model);
-                updateUnreadCounts(model);
-                updateOnlineStatus(model);
+                renderContactList(model.chats.private, model.chats.group, '#QQ_home_chars');
+                renderUnreadCounts(model.chats.private, model.chats.group);
+                renderOnlineStatus(model.system.isOnline);
+            }
+            
+            // 渲染QQ应用UI状态 (MVU style)
+            function renderQQUIState(model) {
+                // 更新导航图标颜色
+                if (model.ui.navigationIcons) {
+                    $("#QQ_message_svg").css("fill", model.ui.navigationIcons.message);
+                    $("#QQ_people_svg").css("fill", model.ui.navigationIcons.people);
+                    $("#QQ_moment_svg").css("fill", model.ui.navigationIcons.moment);
+                }
+                
+                // 更新背景颜色
+                if (model.ui.backgroundColor) {
+                    $("#App_QQ").css("background-color", model.ui.backgroundColor);
+                }
+                
+                // 控制底部导航栏显示
+                if (model.ui.showBottomNav !== undefined) {
+                    $(".QQ_bottom_nav").css('display', model.ui.showBottomNav ? 'block' : 'none');
+                }
+                
+                // 控制页面显示
+                $("#QQ_home_page").css('display', model.ui.currentPage === 'QQ_HOME' ? 'flex' : 'none');
+                $("#QQ_message_list_page").css('display', model.ui.currentPage === 'QQ_MESSAGE' ? 'flex' : 'none');
+                $("#QQ_space_page").css('display', model.ui.currentPage === 'QQ_MOMENT' ? 'block' : 'none');
+            }
+            
+            // 渲染消息列表页面 (MVU style)
+            function renderMessageListPage(model) {
+                // 更新用户名显示
+                const userName = $("#QQ_home_UserName").text();
+                $("#QQ_message_list_UserName").text(userName);
+                
+                // 异步更新消息列表
+                setTimeout(async () => {
+                    if (typeof QQ_UpdateMessageList === 'function') {
+                        await QQ_UpdateMessageList();
+                    }
+                }, 100);
+            }
+            
+            // 渲染联系人列表 (MVU style)
+            function renderContactList(privateChats, groupChats, containerSelector) {
+                const container = $(containerSelector);
+                if (!container.length) return;
+                
+                container.empty();
+                
+                Object.keys(privateChats || {}).forEach(contactName => {
+                    const contactElement = createContactElement(contactName, 'private');
+                    container.append(contactElement);
+                });
+                
+                Object.keys(groupChats || {}).forEach(groupName => {
+                    const groupElement = createContactElement(groupName, 'group');
+                    container.append(groupElement);
+                });
+            }
+            
+            // 渲染未读计数 (MVU style)
+            function renderUnreadCounts(privateChats, groupChats) {
+                // Update unread badges from model data
+            }
+            
+            // 渲染在线状态 (MVU style)  
+            function renderOnlineStatus(isOnline) {
+                const statusIndicator = $('.online-status');
+                if (statusIndicator.length) {
+                    statusIndicator.toggleClass('online', isOnline);
+                }
+            }
+            
+            // 创建联系人元素
+            function createContactElement(name, type) {
+                const isGroup = type === 'group';
+                const className = isGroup ? 'QQ_home_usermsg group-chat' : 'QQ_home_usermsg';
+                
+                return $(`
+                    <div class="${className}" data-name="${name}" data-group-type="${isGroup}">
+                        <div class="contact-avatar">
+                            <!-- Avatar implementation -->
+                        </div>
+                        <div class="contact-info">
+                            <div class="contact-name">${name}</div>
+                            <div class="contact-preview"><!-- Last message preview --></div>
+                        </div>
+                    </div>
+                `);
             }
             
             // 渲染聊天页面
@@ -6877,7 +7080,7 @@
             let charAvatarPath;
             let userAvatarPath;
             let charcardname;
-            let QQ_currentPage = "people"; // 添加页面状态跟踪
+            // QQ_currentPage 已迁移到 AppModel.ui.currentPage
             let User_LastMsgMap = {
                 群聊: {},
                 私聊: {},
@@ -18478,6 +18681,14 @@ ${index + 1}. ${space.name}
              * 导航到指定页面
              */
             function QQ_Nav(page) {
+                dispatch({
+                    type: MessageTypes.NAVIGATE_QQ_PAGE,
+                    payload: { page: page }
+                });
+            }
+            
+            // 原QQ_Nav函数逻辑保留用于兼容性
+            function QQ_Nav_Legacy(page) {
                 // 页面切换时不自动检查QQ_Groups（避免重复加载）
                 console.log(`导航到页面: ${page}`);
                 
@@ -18619,37 +18830,14 @@ ${index + 1}. ${space.name}
              * 返回首页
              */
             function QQ_GoHome() {
-                QQ_HideAllChat();
-                
-                // 如果当前在群聊中，返回到来源页面
-                if (window.currentGroupChat && window.groupChatSourcePage) {
-                    const sourcePage = window.groupChatSourcePage;
-                    console.log('从群聊返回到来源页面:', sourcePage);
-                    
-                    // 清除群聊状态
-                    window.currentGroupChat = null;
-                    window.groupChatSourcePage = null;
-                    
-                    // 返回到来源页面
-                    if (sourcePage === 'messages') {
-                        QQ_Nav("message");
-                    } else {
-                        QQ_Nav("people");
+                dispatch({
+                    type: MessageTypes.NAVIGATE_HOME,
+                    payload: {
+                        fromGroupChat: !!window.currentGroupChat,
+                        sourcePage: window.groupChatSourcePage,
+                        currentPage: QQ_currentPage
                     }
-                    return;
-                }
-                
-                // 根据当前页面状态返回到正确的页面
-                if (QQ_currentPage === "message") {
-                    // 如果之前在消息页面，返回到消息页面
-                    QQ_Nav("message");
-                } else if (QQ_currentPage === "moment") {
-                    // 如果之前在动态页面，返回到动态页面
-                    QQ_Nav("moment");
-                } else {
-                    // 默认返回到联络人页面
-                    QQ_Nav("people");
-                }
+                });
             }
             /**
              * 错误提示
@@ -26353,10 +26541,10 @@ ${index + 1}. ${space.name}
                 // dayElement.textContent = `${now.getMonth() + 1}月${now.getDate()}日`;
             }
             function App_Load(App_Name) {
-                $("#Home_page").hide();
-                $("#App_page").show();
-                App_HideAll();
-                $(`#App_${App_Name}`).show();
+                dispatch({
+                    type: MessageTypes.NAVIGATE_TO_APP,
+                    payload: { appName: App_Name }
+                });
             }
             function App_HideAll() {
                 const AppNames = ["QQ", "twitter", "discord"];
@@ -29459,8 +29647,7 @@ ${index + 1}. ${space.name}
             
             // 分组数据存储 - 使用var避免TDZ问题
             var contactGroups = [];
-            var draggedElement = null;
-            var draggedFromGroup = null;
+            // draggedElement, draggedFromGroup 已迁移到 AppModel.ui.dragState
             
             /**
              * 获取当前角色ID用于数据隔离
@@ -33243,7 +33430,7 @@ ${index + 1}. ${space.name}
             
             // ==================== 群聊管理功能 ====================
             
-            let currentManagingGroup = null;
+            // currentManagingGroup 已迁移到 AppModel.ui.currentManagingGroup
             
             /**
              * 显示群聊管理下拉菜单
@@ -37184,8 +37371,7 @@ ${Object.entries(stats.数据类型).map(([type, count]) => `• ${type}: ${coun
              */
             let longPressTimer = null;
             let isLongPressing = false;
-            let batchDeleteMode = false;
-            let selectedMessages = new Set();
+            // batchDeleteMode, selectedMessages 已迁移到 AppModel.ui.messageSelection
             
             /**
              * 主动消息未读状态管理
