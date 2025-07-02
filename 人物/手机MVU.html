@@ -7718,17 +7718,143 @@
             
             // 渲染主页
             function renderHomePage(model) {
-                // 使用新的聚合数据渲染
+                console.log('🎨 渲染主页...');
+                
+                // 优先使用聚合数据渲染
                 if (model.qq && model.qq.chatList && model.qq.chatList.length > 0) {
-                    console.log('🎨 使用聚合数据渲染主页，共' + model.qq.chatList.length + '个会话');
+                    console.log('✅ 使用聚合数据渲染主页，共' + model.qq.chatList.length + '个会话');
                     renderChatListFromAggregatedData(model.qq.chatList, '#QQ_home_chars');
                 } else {
-                    console.log('📝 使用传统方式渲染主页（聚合数据未准备好）');
-                    renderContactList(model.chats.private, model.chats.group, '#QQ_home_chars');
+                    console.log('⚠️  聚合数据未准备好，尝试从联系人数据渲染...');
+                    
+                    // 回退方案：从联系人数据渲染
+                    if (model.contacts && model.contacts.length > 0) {
+                        console.log('📋 使用联系人数据渲染主页，共' + model.contacts.length + '个联系人');
+                        renderContactsAsHomePage(model.contacts, '#QQ_home_chars');
+                    } else {
+                        console.log('⚠️  联系人数据也不存在，尝试使用传统数据源...');
+                        
+                        // 最后的回退方案：使用传统全局变量
+                        if (typeof QQ_msgjson !== 'undefined' && (QQ_msgjson.私聊 || QQ_msgjson.群聊)) {
+                            console.log('📝 使用传统全局变量渲染主页');
+                            renderFromLegacyData('#QQ_home_chars', model);
+                        } else {
+                            console.log('❌ 没有可用的数据源，显示空页面');
+                            $('#QQ_home_chars').html('<div class="no-contacts">暂无联系人</div>');
+                        }
+                    }
                 }
                 
-                renderUnreadCounts(model.chats.private, model.chats.group);
-                renderOnlineStatus(model.system.isOnline);
+                // 渲染其他UI元素
+                renderUnreadCounts(model);
+                renderOnlineStatus(model.system && model.system.isOnline);
+            }
+            
+            /**
+             * 从联系人数据渲染主页
+             * @param {Array} contacts - 联系人数组
+             * @param {string} containerSelector - 容器选择器
+             */
+            function renderContactsAsHomePage(contacts, containerSelector) {
+                const $container = $(containerSelector);
+                if (!$container.length) {
+                    console.warn('❌ 主页容器不存在:', containerSelector);
+                    return;
+                }
+                
+                $container.empty();
+                
+                contacts.forEach(contact => {
+                    const chatItem = {
+                        id: contact.id,
+                        name: contact.name,
+                        avatar: contact.avatar,
+                        lastMessage: '点击开始聊天',
+                        lastTime: '',
+                        unread: 0,
+                        isGroup: false,
+                        type: 'character'
+                    };
+                    
+                    const $element = createChatElementFromAggregatedData(chatItem);
+                    if ($element) {
+                        $container.append($element);
+                    }
+                });
+                
+                console.log(`✅ 从联系人数据渲染完成，共 ${contacts.length} 项`);
+            }
+            
+            /**
+             * 从传统数据源渲染主页
+             * @param {string} containerSelector - 容器选择器
+             * @param {Object} model - MVU模型
+             */
+            function renderFromLegacyData(containerSelector, model) {
+                const $container = $(containerSelector);
+                if (!$container.length) return;
+                
+                $container.empty();
+                
+                const chatItems = [];
+                
+                // 处理私聊数据
+                if (typeof QQ_msgjson !== 'undefined' && QQ_msgjson.私聊) {
+                    Object.keys(QQ_msgjson.私聊).forEach(chatKey => {
+                        const messages = QQ_msgjson.私聊[chatKey];
+                        if (messages && messages.length > 0) {
+                            const characterName = extractCharacterNameFromChatKey(chatKey);
+                            if (characterName) {
+                                const lastMessage = extractLastMessageInfo(messages, 'private');
+                                if (lastMessage) {
+                                    chatItems.push({
+                                        id: `char_${characterName}`,
+                                        name: characterName,
+                                        avatar: getCharacterAvatarFromModel(characterName, model),
+                                        lastMessage: lastMessage.content,
+                                        lastTime: lastMessage.time,
+                                        timestamp: lastMessage.timestamp,
+                                        unread: 0,
+                                        isGroup: false
+                                    });
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // 处理群聊数据
+                if (typeof QQ_Groups !== 'undefined' && typeof QQ_msgjson !== 'undefined' && QQ_msgjson.群聊) {
+                    QQ_Groups.forEach(groupName => {
+                        const groupData = QQ_msgjson.群聊[groupName];
+                        if (groupData && groupData.msgs && groupData.msgs.length > 0) {
+                            const lastMessage = extractLastMessageInfo(groupData.msgs, 'group');
+                            if (lastMessage) {
+                                chatItems.push({
+                                    id: `group_${groupName}`,
+                                    name: groupName,
+                                    avatar: generateGroupAvatar(groupName),
+                                    lastMessage: lastMessage.content,
+                                    lastTime: lastMessage.time,
+                                    timestamp: lastMessage.timestamp,
+                                    unread: 0,
+                                    isGroup: true
+                                });
+                            }
+                        }
+                    });
+                }
+                
+                // 排序并渲染
+                chatItems.sort((a, b) => b.timestamp - a.timestamp);
+                chatItems.forEach(chatItem => {
+                    const $element = createChatElementFromAggregatedData(chatItem);
+                    if ($element) {
+                        $container.append($element);
+                    }
+                });
+                
+                console.log(`✅ 从传统数据源渲染完成，共 ${chatItems.length} 项`);
             }
             
             /**
@@ -7930,7 +8056,7 @@
                 
                 // 控制底部导航栏显示
                 if (model.ui.showBottomNav !== undefined) {
-                    $(".QQ_bottom_nav").css('display', model.ui.showBottomNav ? 'block' : 'none');
+                    $(".QQ_bottom_nav").css('display', model.ui.showBottomNav ? 'flex' : 'none');
                 }
                 
                 // 控制页面显示
@@ -7941,16 +8067,128 @@
             
             // 渲染消息列表页面 (MVU style)
             function renderMessageListPage(model) {
+                console.log('🎨 渲染消息列表页面...');
+                
                 // 更新用户名显示
-                const userName = $("#QQ_home_UserName").text();
+                const userName = model.user.name || UserName || "";
                 $("#QQ_message_list_UserName").text(userName);
                 
-                // 异步更新消息列表
-                setTimeout(async () => {
-                    if (typeof QQ_UpdateMessageList === 'function') {
-                        await QQ_UpdateMessageList();
+                // 立即更新消息列表（不依赖异步函数）
+                updateMessageListFromModel(model);
+            }
+            
+            /**
+             * 从MVU模型更新消息列表
+             * @param {Object} model - MVU模型
+             */
+            function updateMessageListFromModel(model) {
+                console.log('📋 从MVU模型更新消息列表...');
+                
+                const $messageChars = $("#QQ_message_list_chars");
+                if (!$messageChars.length) {
+                    console.warn('❌ 消息列表容器不存在');
+                    return;
+                }
+                
+                // 清空现有内容
+                $messageChars.empty();
+                
+                const contactedUsers = [];
+                
+                // 检查私聊消息记录
+                if (model.qq && model.qq.private_chat) {
+                    console.log('🔍 检查私聊消息记录...');
+                    
+                    const processedContacts = new Set();
+                    
+                    Object.keys(model.qq.private_chat).forEach(chatKey => {
+                        const messages = model.qq.private_chat[chatKey];
+                        if (messages && messages.length > 0) {
+                            // 从聊天键中提取角色名
+                            const characterName = extractCharacterNameFromChatKey(chatKey);
+                            
+                            if (characterName && !processedContacts.has(characterName)) {
+                                processedContacts.add(characterName);
+                                
+                                // 创建消息列表项
+                                const chatItem = createMessageListItemFromModel(characterName, messages, false, model);
+                                if (chatItem) {
+                                    contactedUsers.push(chatItem);
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // 检查群聊消息记录
+                if (model.qq && model.qq.group_chat && typeof QQ_Groups !== 'undefined') {
+                    console.log('🔍 检查群聊消息记录...');
+                    
+                    QQ_Groups.forEach(groupName => {
+                        const groupData = model.qq.group_chat[groupName];
+                        if (groupData && groupData.msgs && groupData.msgs.length > 0) {
+                            const chatItem = createMessageListItemFromModel(groupName, groupData.msgs, true, model);
+                            if (chatItem) {
+                                contactedUsers.push(chatItem);
+                            }
+                        }
+                    });
+                }
+                
+                // 按最后消息时间排序
+                contactedUsers.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // 渲染到界面
+                contactedUsers.forEach(chatItem => {
+                    const $element = createChatElementFromAggregatedData(chatItem);
+                    if ($element) {
+                        $messageChars.append($element);
                     }
-                }, 100);
+                });
+                
+                console.log(`✅ 消息列表更新完成，共 ${contactedUsers.length} 个会话`);
+            }
+            
+            /**
+             * 从模型数据创建消息列表项
+             * @param {string} name - 联系人或群聊名称
+             * @param {Array} messages - 消息数组
+             * @param {boolean} isGroup - 是否为群聊
+             * @param {Object} model - MVU模型
+             * @returns {Object|null} 消息列表项数据
+             */
+            function createMessageListItemFromModel(name, messages, isGroup, model) {
+                if (!messages || messages.length === 0) return null;
+                
+                // 获取最后一条消息
+                const lastMessage = extractLastMessageInfo(messages, isGroup ? 'group' : 'private');
+                if (!lastMessage) return null;
+                
+                // 格式化显示消息
+                let displayMessage = lastMessage.content;
+                if (lastMessage.sender === (model.user.name || UserName)) {
+                    displayMessage = `我: ${displayMessage}`;
+                } else if (!isGroup) {
+                    displayMessage = `${lastMessage.sender}: ${displayMessage}`;
+                }
+                
+                // 截断长消息
+                if (displayMessage.length > 20) {
+                    displayMessage = displayMessage.substring(0, 20) + '...';
+                }
+                
+                return {
+                    id: isGroup ? `group_${name}` : `char_${name}`,
+                    type: isGroup ? 'group' : 'character',
+                    name: name,
+                    avatar: isGroup ? generateGroupAvatar(name) : getCharacterAvatarFromModel(name, model),
+                    lastMessage: displayMessage,
+                    lastSender: lastMessage.sender,
+                    lastTime: lastMessage.time,
+                    timestamp: lastMessage.timestamp,
+                    unread: 0, // TODO: 实现未读计数
+                    isGroup: isGroup
+                };
             }
             
             // 渲染弹窗系统 (MVU style)
@@ -8316,8 +8554,67 @@
             }
             
             // 渲染未读计数 (MVU style)
-            function renderUnreadCounts(privateChats, groupChats) {
-                // Update unread badges from model data
+            function renderUnreadCounts(model) {
+                if (!model) {
+                    console.log('⚠️ MVU renderUnreadCounts: 没有模型数据');
+                    return;
+                }
+                
+                try {
+                    // 处理私聊未读计数
+                    if (model.privateChats && Array.isArray(model.privateChats)) {
+                        model.privateChats.forEach(chat => {
+                            if (chat.chatName && chat.unreadCount > 0) {
+                                // 使用现有的未读计数系统
+                                const currentCount = proactiveMessageUnreadCounts.get(chat.chatName) || 0;
+                                proactiveMessageUnreadCounts.set(chat.chatName, chat.unreadCount);
+                                QQ_UpdateUnreadBadge(chat.chatName);
+                                console.log(`📱 MVU私聊未读: ${chat.chatName} -> ${chat.unreadCount}`);
+                            }
+                        });
+                    }
+                    
+                    // 处理群聊未读计数
+                    if (model.groupChats && Array.isArray(model.groupChats)) {
+                        model.groupChats.forEach(chat => {
+                            if (chat.chatName && chat.unreadCount > 0) {
+                                // 使用现有的未读计数系统
+                                const currentCount = proactiveMessageUnreadCounts.get(chat.chatName) || 0;
+                                proactiveMessageUnreadCounts.set(chat.chatName, chat.unreadCount);
+                                QQ_UpdateUnreadBadge(chat.chatName);
+                                console.log(`📱 MVU群聊未读: ${chat.chatName} -> ${chat.unreadCount}`);
+                            }
+                        });
+                    }
+                    
+                    // 兼容性处理：如果模型直接包含privateChats和groupChats属性
+                    if (model.privateChats && !Array.isArray(model.privateChats)) {
+                        Object.keys(model.privateChats).forEach(chatName => {
+                            const chatData = model.privateChats[chatName];
+                            if (chatData && chatData.unreadCount > 0) {
+                                proactiveMessageUnreadCounts.set(chatName, chatData.unreadCount);
+                                QQ_UpdateUnreadBadge(chatName);
+                                console.log(`📱 MVU私聊未读(兼容): ${chatName} -> ${chatData.unreadCount}`);
+                            }
+                        });
+                    }
+                    
+                    if (model.groupChats && !Array.isArray(model.groupChats)) {
+                        Object.keys(model.groupChats).forEach(chatName => {
+                            const chatData = model.groupChats[chatName];
+                            if (chatData && chatData.unreadCount > 0) {
+                                proactiveMessageUnreadCounts.set(chatName, chatData.unreadCount);
+                                QQ_UpdateUnreadBadge(chatName);
+                                console.log(`📱 MVU群聊未读(兼容): ${chatName} -> ${chatData.unreadCount}`);
+                            }
+                        });
+                    }
+                    
+                    console.log('✅ MVU未读计数渲染完成');
+                    
+                } catch (error) {
+                    console.error('❌ MVU renderUnreadCounts 错误:', error);
+                }
             }
             
             // 渲染在线状态 (MVU style)  
@@ -8526,23 +8823,134 @@
             
             // 从旧的全局变量同步到AppModel
             function syncLegacyVariablesToModel() {
+                console.log('🔄 同步传统变量到MVU模型...');
+                
                 // 初始化时从现有数据同步
                 if (typeof UserName !== 'undefined' && UserName) {
                     AppModel.user.name = UserName;
+                    console.log('✅ 同步用户名:', UserName);
                 }
                 
                 if (typeof gening !== 'undefined') {
                     AppModel.ui.isGenerating = gening;
+                    console.log('✅ 同步生成状态:', gening);
                 }
                 
-                // 同步现有的聊天数据
-                if (QQ_msgjson.私聊) {
-                    AppModel.chats.private = QQ_msgjson.私聊;
+                // 同步现有的聊天数据到多个位置，确保兼容性
+                if (typeof QQ_msgjson !== 'undefined') {
+                    if (QQ_msgjson.私聊) {
+                        AppModel.chats.private = QQ_msgjson.私聊;
+                        AppModel.qq.private_chat = QQ_msgjson.私聊;
+                        console.log('✅ 同步私聊数据:', Object.keys(QQ_msgjson.私聊).length, '个会话');
+                    }
+                    if (QQ_msgjson.群聊) {
+                        AppModel.chats.group = QQ_msgjson.群聊;
+                        AppModel.qq.group_chat = QQ_msgjson.群聊;
+                        console.log('✅ 同步群聊数据:', Object.keys(QQ_msgjson.群聊).length, '个群组');
+                    }
+                } else {
+                    console.warn('⚠️  QQ_msgjson 未定义，跳过聊天数据同步');
                 }
-                if (QQ_msgjson.群聊) {
-                    AppModel.chats.group = QQ_msgjson.群聊;
+                
+                // 同步其他重要的全局变量
+                if (typeof QQ_Groups !== 'undefined' && QQ_Groups) {
+                    console.log('✅ 检测到群组列表:', QQ_Groups.length, '个群组');
                 }
+                
+                console.log('🔄 传统变量同步完成');
             }
+            
+            // ========== 调试和诊断工具 ==========
+            
+            /**
+             * 诊断MVU数据状态 - 可在浏览器控制台调用
+             */
+            function debugMVUState() {
+                console.group('🔍 MVU状态诊断');
+                
+                console.log('📊 AppModel完整状态:', AppModel);
+                
+                console.group('👤 用户数据');
+                console.log('用户名:', AppModel.user.name);
+                console.log('用户设置:', AppModel.user.settings);
+                console.groupEnd();
+                
+                console.group('🎭 角色数据');
+                console.log('角色数量:', Object.keys(AppModel.characters || {}).length);
+                console.log('角色列表:', Object.keys(AppModel.characters || {}));
+                console.log('联系人数量:', (AppModel.contacts || []).length);
+                console.groupEnd();
+                
+                console.group('💬 聊天数据');
+                console.log('私聊数据 (AppModel.qq.private_chat):', AppModel.qq?.private_chat);
+                console.log('私聊会话数:', Object.keys(AppModel.qq?.private_chat || {}).length);
+                console.log('群聊数据 (AppModel.qq.group_chat):', AppModel.qq?.group_chat);
+                console.log('群聊数量:', Object.keys(AppModel.qq?.group_chat || {}).length);
+                console.log('聚合聊天列表 (AppModel.qq.chatList):', AppModel.qq?.chatList);
+                console.log('聚合列表长度:', (AppModel.qq?.chatList || []).length);
+                console.groupEnd();
+                
+                console.group('🌐 全局变量');
+                console.log('QQ_msgjson:', typeof QQ_msgjson !== 'undefined' ? QQ_msgjson : '未定义');
+                console.log('QQ_Groups:', typeof QQ_Groups !== 'undefined' ? QQ_Groups : '未定义');
+                console.log('UserName:', typeof UserName !== 'undefined' ? UserName : '未定义');
+                console.groupEnd();
+                
+                console.group('🎨 UI状态');
+                console.log('当前页面:', AppModel.ui.currentPage);
+                console.log('显示底部导航:', AppModel.ui.showBottomNav);
+                console.log('当前应用:', AppModel.ui.currentApp);
+                console.log('显示应用页面:', AppModel.ui.showAppPage);
+                console.groupEnd();
+                
+                console.group('📱 DOM元素检查');
+                console.log('主页容器 (#QQ_home_page):', $('#QQ_home_page').length);
+                console.log('消息页容器 (#QQ_message_list_page):', $('#QQ_message_list_page').length);
+                console.log('联系人容器 (#QQ_home_chars):', $('#QQ_home_chars').length);
+                console.log('消息列表容器 (#QQ_message_list_chars):', $('#QQ_message_list_chars').length);
+                console.log('底部导航 (.QQ_bottom_nav):', $('.QQ_bottom_nav').length);
+                console.log('底部导航显示状态:', $('.QQ_bottom_nav').css('display'));
+                console.groupEnd();
+                
+                console.groupEnd();
+                
+                // 返回关键信息
+                return {
+                    model: AppModel,
+                    charactersCount: Object.keys(AppModel.characters || {}).length,
+                    contactsCount: (AppModel.contacts || []).length,
+                    privateChatCount: Object.keys(AppModel.qq?.private_chat || {}).length,
+                    groupChatCount: Object.keys(AppModel.qq?.group_chat || {}).length,
+                    chatListCount: (AppModel.qq?.chatList || []).length,
+                    currentPage: AppModel.ui.currentPage,
+                    showBottomNav: AppModel.ui.showBottomNav
+                };
+            }
+            
+            /**
+             * 强制重新渲染界面 - 可在浏览器控制台调用
+             */
+            function forceRerender() {
+                console.log('🔄 强制重新渲染界面...');
+                
+                // 重新同步数据
+                syncLegacyVariablesToModel();
+                
+                // 重新生成聚合数据
+                if (AppModel.qq) {
+                    AppModel.qq.chatList = generateChatListFromHistory(AppModel);
+                }
+                
+                // 重新渲染视图
+                renderView(AppModel);
+                
+                console.log('✅ 强制重新渲染完成');
+            }
+            
+            // 将调试函数暴露到全局，方便控制台调用
+            window.debugMVUState = debugMVUState;
+            window.forceRerender = forceRerender;
+            window.AppModel = AppModel;
             
             // 保持原有全局变量的兼容性
             let random_head_list = new Array();
