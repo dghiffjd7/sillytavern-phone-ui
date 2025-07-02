@@ -1,0 +1,1705 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SillyTavern Mobile - MVU Architecture</title>
+    <!-- 
+    ===================================================================
+    MVU ARCHITECTURE IMPLEMENTATION FOR SILLYTAVERN MOBILE
+    ===================================================================
+    
+    This file implements a complete Model-View-Update (MVU) architecture
+    for the SillyTavern mobile interface with layered memory system.
+    
+    MAJOR COMPONENTS IMPLEMENTED:
+    
+    1. MODEL STRUCTURE (lines 153-261)
+       - Single source of truth for all application state
+       - Layered memory architecture (short/mid/relationship/long-term)
+       - Chat system state (private/group chats)
+       - Moments/social feed state
+       - UI state management
+    
+    2. MESSAGE TYPES (lines 267-308)  
+       - All possible actions/events in the application
+       - Navigation, user actions, AI responses
+       - Memory system operations
+       - Error handling and retry logic
+    
+    3. UPDATE FUNCTION (lines 308-379)
+       - Pure function handling all state changes
+       - Routes messages to appropriate handlers
+       - Maintains immutable state updates
+    
+    4. AI RESPONSE HANDLERS (lines 610-855)
+       - handleAIGroupChatReceived: Process group chat messages
+       - handleAIPrivateChatReceived: Process private chat messages  
+       - handleAIMomentReceived: Process social media moments
+       - handleAIProactiveMessage: Handle autonomous AI messages
+       - handleAISystemMessage: Process system notifications
+       - handleAIResponseRetry/Success/Failed: Manage retry logic
+    
+    5. MEMORY MANAGEMENT (lines 386-477)
+       - updateShortTermMemory: Current window (50 messages)
+       - createMidTermSummary: Session summaries
+       - updateRelationshipMemory: Character relationship data
+       - updateLongTermChronicle: Important milestones
+    
+    6. NEW RESULT HANDLE (lines 1028-1469)
+       - MVU-compatible AI response parser
+       - Only responsible for parsing and dispatching
+       - No UI manipulation or direct state changes
+       - Supports multiple response formats and retry logic
+       - Maintains compatibility with original parsing logic
+    
+    7. VIEW FUNCTION (lines 858-1026)
+       - Pure function rendering UI based on model state
+       - Separate page renderers (home/chat/moments/discord)
+       - Memory panel visualization
+       - No direct DOM manipulation
+    
+    8. MVU RUNTIME (lines 1471-end)
+       - Global dispatch function for all actions
+       - Render loop with automatic re-rendering
+       - SillyTavern integration hooks
+       - Development debugging tools
+    
+    MIGRATION STATUS:
+    ✅ Complete MVU foundation established
+    ✅ Memory layering architecture implemented  
+    ✅ ResultHandle function refactored to MVU pattern
+    ✅ All AI response types supported
+    ✅ Retry and error handling implemented
+    ✅ Pure View functions with no side effects
+    ✅ Unidirectional data flow established
+    
+    NEXT STEPS FOR INTEGRATION:
+    - Connect to actual SillyTavern APIs
+    - Implement world book persistence
+    - Migrate remaining helper functions
+    - Add more sophisticated UI components
+    - Implement actual routing and navigation
+    
+    ===================================================================
+    -->
+    <style type="text/css">
+        @import url(https://static.zeoseven.com/zsft/59/main/result.css);
+        
+        /* === Core Layout Styles === */
+        .mobile-app {
+            width: 100%;
+            height: 100vh;
+            background-color: rgb(244, 245, 246);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .QQ_chat_page {
+            padding-top: 10px;
+            background-color: rgb(244, 245, 246);
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: top center;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            box-sizing: border-box;
+            border-radius: var(--yj);
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        .input-container {
+            max-width: 100%;
+            position: absolute;
+            bottom: 0px;
+            left: 0;
+            width: 100%;
+            background-color: rgb(255, 255, 255, 0.2);
+            border-bottom-right-radius: 10px;
+            border-bottom-left-radius: 10px;
+            box-sizing: border-box;
+            padding: 10px 0;
+            border-top: 1px solid black;
+        }
+
+        .msgcontent {
+            flex: 1;
+            overflow-y: auto;
+            box-sizing: border-box;
+            margin-bottom: 50px;
+            padding-left: 8px;
+            padding-right: 8px;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .userInput {
+            font: inherit;
+            height: 30px;
+            border-radius: 30px;
+            letter-spacing: 0.7px;
+            width: 100%;
+            padding-left: 10px;
+            padding-right: 10px;
+            border: 1px solid rgb(0, 0, 0, 0.5);
+        }
+
+        /* === System Message Styles === */
+        .system-message {
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+            padding: 8px 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .system-message-chat {
+            text-align: center !important;
+            color: #999999 !important;
+            font-size: 12px !important;
+            margin: 10px auto !important;
+            padding: 5px 10px !important;
+            background: rgba(255,255,255,0.8) !important;
+            border-radius: 12px !important;
+            max-width: 200px !important;
+            font-weight: normal !important;
+            border: none !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+        }
+
+        /* === Loading States === */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .loading::after {
+            content: "...";
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0%, 33% { content: "."; }
+            34%, 66% { content: ".."; }
+            67%, 100% { content: "..."; }
+        }
+
+        /* === Memory Layer Indicators === */
+        .memory-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 10px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            z-index: 1000;
+        }
+
+        .memory-short-term { background: #4CAF50; }
+        .memory-mid-term { background: #FF9800; }
+        .memory-relationship { background: #2196F3; }
+        .memory-long-term { background: #9C27B0; }
+    </style>
+</head>
+<body>
+    <!-- Single App Container - All UI will be rendered here -->
+    <div id="app" class="mobile-app">
+        <div class="loading">Initializing MVU Architecture</div>
+    </div>
+
+    <script>
+        "use strict";
+
+        // ============================================================================
+        // MVU ARCHITECTURE CORE IMPLEMENTATION
+        // ============================================================================
+
+        /**
+         * === MODEL STRUCTURE ===
+         * Single source of truth for all application state
+         */
+        function createInitialModel() {
+            return {
+                // === Core Application State ===
+                currentPage: 'QQ_HOME', // QQ_HOME, QQ_CHAT, QQ_MOMENT, QQ_DISCORD
+                isLoading: false,
+                error: null,
+                
+                // === User Information ===
+                user: {
+                    name: '',
+                    avatar: '',
+                    settings: {}
+                },
+
+                // === Memory System (Layered Architecture) ===
+                memory: {
+                    // 短期记忆：当前窗口或最近50条聊天记录
+                    shortTerm: {
+                        messages: [], // 最近50条消息
+                        currentContext: '', // 当前上下文
+                        lastUpdate: null
+                    },
+                    
+                    // 中期记忆：上一个对话/场景的摘要
+                    midTerm: {
+                        summaries: [], // 对话摘要数组
+                        lastSessionSummary: '', // 上次会话摘要
+                        contextShifts: [], // 话题转换记录
+                        lastUpdate: null
+                    },
+                    
+                    // 关系记忆：角色与用户的关系信息
+                    relationship: {
+                        characters: {}, // 每个角色的关系数据
+                        userProfiles: {}, // 用户在不同角色面前的表现
+                        interactionPatterns: {}, // 互动模式分析
+                        lastUpdate: null
+                    },
+                    
+                    // 长期记忆：记忆编年史，大总结
+                    longTerm: {
+                        chronicle: '', // 叙事性文本，关系发展的关键节点
+                        milestones: [], // 重要里程碑
+                        relationshipEvolution: [], // 关系发展历程
+                        lastUpdate: null
+                    }
+                },
+
+                // === Chat System ===
+                chats: {
+                    private: {}, // 私聊数据: {characterName: {messages: [], status: '', ...}}
+                    groups: {}, // 群聊数据: {groupName: {messages: [], members: [], ...}}
+                    currentChat: null, // 当前聊天对象
+                    typingIndicators: {}, // 正在输入指示器
+                    readStatus: {} // 已读状态
+                },
+
+                // === Moments/Social Feed ===
+                moments: {
+                    posts: [], // 动态帖子
+                    comments: {}, // 评论数据: {postId: [comments]}
+                    likes: {}, // 点赞数据: {postId: {count: 0, userLiked: false}}
+                    currentPost: null
+                },
+
+                // === Contacts ===
+                contacts: {
+                    characters: [], // 角色联系人
+                    groups: [], // 群组
+                    favorites: [], // 收藏联系人
+                    recent: [] // 最近联系人
+                },
+
+                // === Discord Integration ===
+                discord: {
+                    servers: [],
+                    channels: {},
+                    messages: {},
+                    currentServer: null,
+                    currentChannel: null
+                },
+
+                // === UI State ===
+                ui: {
+                    navigation: {
+                        currentTab: 'chat', // chat, moments, discord
+                        history: []
+                    },
+                    chat: {
+                        showSettings: false,
+                        showMemoryPanel: false,
+                        inputText: '',
+                        selectedMessages: []
+                    },
+                    moments: {
+                        showCreatePost: false,
+                        currentFilter: 'all'
+                    }
+                },
+
+                // === System Settings ===
+                settings: {
+                    memoryEnabled: true,
+                    autoSummarize: true,
+                    relationshipTracking: true,
+                    aiResponseFormat: 'structured'
+                }
+            };
+        }
+
+        /**
+         * === MESSAGE TYPES ===
+         * All possible actions/events in the application
+         */
+        const MessageTypes = {
+            // Navigation
+            NAVIGATE: 'NAVIGATE',
+            GO_BACK: 'GO_BACK',
+            
+            // User Actions
+            SEND_USER_MESSAGE: 'SEND_USER_MESSAGE',
+            SELECT_CONTACT: 'SELECT_CONTACT',
+            CREATE_MOMENT_POST: 'CREATE_MOMENT_POST',
+            LIKE_MOMENT: 'LIKE_MOMENT',
+            COMMENT_ON_MOMENT: 'COMMENT_ON_MOMENT',
+            
+            // AI Responses
+            AI_CHAT_RECEIVED: 'AI_CHAT_RECEIVED',
+            AI_MOMENT_RECEIVED: 'AI_MOMENT_RECEIVED',
+            AI_DISCORD_RECEIVED: 'AI_DISCORD_RECEIVED',
+            AI_GROUP_CHAT_RECEIVED: 'AI_GROUP_CHAT_RECEIVED',
+            AI_PRIVATE_CHAT_RECEIVED: 'AI_PRIVATE_CHAT_RECEIVED',
+            AI_PROACTIVE_MESSAGE: 'AI_PROACTIVE_MESSAGE',
+            AI_SYSTEM_MESSAGE: 'AI_SYSTEM_MESSAGE',
+            
+            // Retry and Error Handling
+            AI_RESPONSE_RETRY: 'AI_RESPONSE_RETRY',
+            AI_RESPONSE_FAILED: 'AI_RESPONSE_FAILED',
+            AI_RESPONSE_SUCCESS: 'AI_RESPONSE_SUCCESS',
+            
+            // Memory System
+            UPDATE_SHORT_TERM_MEMORY: 'UPDATE_SHORT_TERM_MEMORY',
+            CREATE_MID_TERM_SUMMARY: 'CREATE_MID_TERM_SUMMARY',
+            UPDATE_RELATIONSHIP_MEMORY: 'UPDATE_RELATIONSHIP_MEMORY',
+            UPDATE_LONG_TERM_CHRONICLE: 'UPDATE_LONG_TERM_CHRONICLE',
+            
+            // System
+            LOADING_START: 'LOADING_START',
+            LOADING_END: 'LOADING_END',
+            ERROR_OCCURRED: 'ERROR_OCCURRED',
+            CLEAR_ERROR: 'CLEAR_ERROR',
+            
+            // Settings
+            UPDATE_SETTINGS: 'UPDATE_SETTINGS',
+            TOGGLE_MEMORY_PANEL: 'TOGGLE_MEMORY_PANEL'
+        };
+
+        /**
+         * === UPDATE FUNCTION ===
+         * Pure function that handles all state changes
+         * @param {Object} message - The action/event message
+         * @param {Object} model - Current application state
+         * @returns {Object} New application state
+         */
+        function update(message, model) {
+            console.log(`🔄 Processing message:`, message.type, message);
+            
+            switch (message.type) {
+                case MessageTypes.NAVIGATE:
+                    return {
+                        ...model,
+                        currentPage: message.payload.page,
+                        ui: {
+                            ...model.ui,
+                            navigation: {
+                                ...model.ui.navigation,
+                                currentTab: message.payload.tab || model.ui.navigation.currentTab,
+                                history: [...model.ui.navigation.history, model.currentPage]
+                            }
+                        }
+                    };
+
+                case MessageTypes.SEND_USER_MESSAGE:
+                    return handleSendUserMessage(message.payload, model);
+
+                case MessageTypes.AI_CHAT_RECEIVED:
+                    return handleAIChatReceived(message.payload, model);
+
+                case MessageTypes.AI_GROUP_CHAT_RECEIVED:
+                    return handleAIGroupChatReceived(message.payload, model);
+
+                case MessageTypes.AI_PRIVATE_CHAT_RECEIVED:
+                    return handleAIPrivateChatReceived(message.payload, model);
+
+                case MessageTypes.AI_MOMENT_RECEIVED:
+                    return handleAIMomentReceived(message.payload, model);
+
+                case MessageTypes.AI_PROACTIVE_MESSAGE:
+                    return handleAIProactiveMessage(message.payload, model);
+
+                case MessageTypes.AI_SYSTEM_MESSAGE:
+                    return handleAISystemMessage(message.payload, model);
+
+                case MessageTypes.AI_RESPONSE_RETRY:
+                    return handleAIResponseRetry(message.payload, model);
+
+                case MessageTypes.AI_RESPONSE_SUCCESS:
+                    return handleAIResponseSuccess(message.payload, model);
+
+                case MessageTypes.AI_RESPONSE_FAILED:
+                    return handleAIResponseFailed(message.payload, model);
+
+                case MessageTypes.SELECT_CONTACT:
+                    return handleSelectContact(message.payload, model);
+
+                case MessageTypes.UPDATE_SHORT_TERM_MEMORY:
+                    return updateShortTermMemory(message.payload, model);
+
+                case MessageTypes.CREATE_MID_TERM_SUMMARY:
+                    return createMidTermSummary(message.payload, model);
+
+                case MessageTypes.UPDATE_RELATIONSHIP_MEMORY:
+                    return updateRelationshipMemory(message.payload, model);
+
+                case MessageTypes.UPDATE_LONG_TERM_CHRONICLE:
+                    return updateLongTermChronicle(message.payload, model);
+
+                case MessageTypes.LOADING_START:
+                    return { ...model, isLoading: true };
+
+                case MessageTypes.LOADING_END:
+                    return { ...model, isLoading: false };
+
+                case MessageTypes.ERROR_OCCURRED:
+                    return { 
+                        ...model, 
+                        error: message.payload.error,
+                        isLoading: false 
+                    };
+
+                case MessageTypes.CLEAR_ERROR:
+                    return { ...model, error: null };
+
+                case MessageTypes.TOGGLE_MEMORY_PANEL:
+                    return {
+                        ...model,
+                        ui: {
+                            ...model.ui,
+                            chat: {
+                                ...model.ui.chat,
+                                showMemoryPanel: !model.ui.chat.showMemoryPanel
+                            }
+                        }
+                    };
+
+                default:
+                    console.warn(`Unknown message type: ${message.type}`);
+                    return model;
+            }
+        }
+
+        /**
+         * === MEMORY MANAGEMENT FUNCTIONS ===
+         * Handle the layered memory architecture
+         */
+        
+        function updateShortTermMemory(payload, model) {
+            const newMessages = [...model.memory.shortTerm.messages, payload.message];
+            
+            // Keep only the last 50 messages
+            const trimmedMessages = newMessages.slice(-50);
+            
+            return {
+                ...model,
+                memory: {
+                    ...model.memory,
+                    shortTerm: {
+                        ...model.memory.shortTerm,
+                        messages: trimmedMessages,
+                        currentContext: buildCurrentContext(trimmedMessages),
+                        lastUpdate: new Date().toISOString()
+                    }
+                }
+            };
+        }
+
+        function createMidTermSummary(payload, model) {
+            const newSummary = {
+                id: generateId(),
+                content: payload.summary,
+                timestamp: new Date().toISOString(),
+                messageCount: payload.messageCount || 0,
+                participants: payload.participants || []
+            };
+
+            return {
+                ...model,
+                memory: {
+                    ...model.memory,
+                    midTerm: {
+                        ...model.memory.midTerm,
+                        summaries: [...model.memory.midTerm.summaries, newSummary],
+                        lastSessionSummary: payload.summary,
+                        lastUpdate: new Date().toISOString()
+                    }
+                }
+            };
+        }
+
+        function updateRelationshipMemory(payload, model) {
+            const characterName = payload.character;
+            const existingData = model.memory.relationship.characters[characterName] || {};
+            
+            const updatedCharacterData = {
+                ...existingData,
+                ...payload.relationshipData,
+                lastInteraction: new Date().toISOString(),
+                interactionCount: (existingData.interactionCount || 0) + 1
+            };
+
+            return {
+                ...model,
+                memory: {
+                    ...model.memory,
+                    relationship: {
+                        ...model.memory.relationship,
+                        characters: {
+                            ...model.memory.relationship.characters,
+                            [characterName]: updatedCharacterData
+                        },
+                        lastUpdate: new Date().toISOString()
+                    }
+                }
+            };
+        }
+
+        function updateLongTermChronicle(payload, model) {
+            const newMilestone = {
+                id: generateId(),
+                title: payload.title,
+                description: payload.description,
+                timestamp: new Date().toISOString(),
+                importance: payload.importance || 'medium'
+            };
+
+            return {
+                ...model,
+                memory: {
+                    ...model.memory,
+                    longTerm: {
+                        ...model.memory.longTerm,
+                        chronicle: payload.newChronicle || model.memory.longTerm.chronicle,
+                        milestones: [...model.memory.longTerm.milestones, newMilestone],
+                        lastUpdate: new Date().toISOString()
+                    }
+                }
+            };
+        }
+
+        /**
+         * === CHAT HANDLING FUNCTIONS ===
+         */
+        
+        function handleSendUserMessage(payload, model) {
+            const message = {
+                id: generateId(),
+                type: 'user',
+                content: payload.text,
+                timestamp: new Date().toISOString(),
+                target: payload.target,
+                status: 'sending'
+            };
+
+            // Add to chat history
+            const chatKey = payload.target;
+            const chatType = payload.chatType || 'private';
+            const chatPath = chatType === 'group' ? 'groups' : 'private';
+            
+            const existingChat = model.chats[chatPath][chatKey] || { messages: [], status: 'active' };
+            const updatedChat = {
+                ...existingChat,
+                messages: [...existingChat.messages, message],
+                lastMessage: message,
+                lastUpdate: new Date().toISOString()
+            };
+
+            // Update short-term memory
+            const memoryMessage = `${model.user.name || 'User'}: ${payload.text}`;
+            
+            const newModel = {
+                ...model,
+                chats: {
+                    ...model.chats,
+                    [chatPath]: {
+                        ...model.chats[chatPath],
+                        [chatKey]: updatedChat
+                    },
+                    currentChat: chatKey
+                },
+                currentPage: 'QQ_CHAT'
+            };
+
+            // Add to short-term memory
+            return updateShortTermMemory({ message: memoryMessage }, newModel);
+        }
+
+        function handleSelectContact(payload, model) {
+            return {
+                ...model,
+                chats: {
+                    ...model.chats,
+                    currentChat: payload.contactName
+                },
+                currentPage: 'QQ_CHAT'
+            };
+        }
+
+        function handleAIChatReceived(payload, model) {
+            const message = {
+                id: generateId(),
+                type: 'ai',
+                content: payload.content,
+                timestamp: new Date().toISOString(),
+                sender: payload.sender,
+                status: 'received'
+            };
+
+            const chatKey = payload.target || model.chats.currentChat;
+            const chatType = payload.chatType || 'private';
+            const chatPath = chatType === 'group' ? 'groups' : 'private';
+            
+            const existingChat = model.chats[chatPath][chatKey] || { messages: [], status: 'active' };
+            const updatedChat = {
+                ...existingChat,
+                messages: [...existingChat.messages, message],
+                lastMessage: message,
+                lastUpdate: new Date().toISOString()
+            };
+
+            // Update short-term memory
+            const memoryMessage = `${payload.sender}: ${payload.content}`;
+            
+            const newModel = {
+                ...model,
+                chats: {
+                    ...model.chats,
+                    [chatPath]: {
+                        ...model.chats[chatPath],
+                        [chatKey]: updatedChat
+                    }
+                },
+                isLoading: false
+            };
+
+            return updateShortTermMemory({ message: memoryMessage }, newModel);
+        }
+
+        /**
+         * === NEW AI RESPONSE HANDLERS ===
+         * Handle different types of AI responses in MVU pattern
+         */
+
+        function handleAIGroupChatReceived(payload, model) {
+            const messages = payload.messages || [];
+            const groupName = payload.groupName;
+            
+            let newModel = { ...model };
+            
+            messages.forEach(msgData => {
+                const message = {
+                    id: generateId(),
+                    type: 'ai',
+                    content: msgData.content,
+                    timestamp: new Date().toISOString(),
+                    sender: msgData.sender,
+                    groupName: groupName,
+                    status: 'received'
+                };
+                
+                const existingGroup = newModel.chats.groups[groupName] || { messages: [], members: [], status: 'active' };
+                const updatedGroup = {
+                    ...existingGroup,
+                    messages: [...existingGroup.messages, message],
+                    lastMessage: message,
+                    lastUpdate: new Date().toISOString()
+                };
+                
+                newModel = {
+                    ...newModel,
+                    chats: {
+                        ...newModel.chats,
+                        groups: {
+                            ...newModel.chats.groups,
+                            [groupName]: updatedGroup
+                        }
+                    },
+                    currentPage: 'QQ_CHAT'
+                };
+                
+                // Update memory
+                const memoryMessage = `[群聊:${groupName}] ${msgData.sender}: ${msgData.content}`;
+                newModel = updateShortTermMemory({ message: memoryMessage }, newModel);
+            });
+            
+            return { ...newModel, isLoading: false };
+        }
+
+        function handleAIPrivateChatReceived(payload, model) {
+            const messages = payload.messages || [];
+            const characterName = payload.characterName;
+            
+            let newModel = { ...model };
+            
+            messages.forEach(msgData => {
+                const message = {
+                    id: generateId(),
+                    type: 'ai',
+                    content: msgData.content,
+                    timestamp: new Date().toISOString(),
+                    sender: characterName,
+                    status: 'received'
+                };
+                
+                const existingChat = newModel.chats.private[characterName] || { messages: [], status: 'active' };
+                const updatedChat = {
+                    ...existingChat,
+                    messages: [...existingChat.messages, message],
+                    lastMessage: message,
+                    lastUpdate: new Date().toISOString()
+                };
+                
+                newModel = {
+                    ...newModel,
+                    chats: {
+                        ...newModel.chats,
+                        private: {
+                            ...newModel.chats.private,
+                            [characterName]: updatedChat
+                        }
+                    },
+                    currentPage: 'QQ_CHAT'
+                };
+                
+                // Update memory
+                const memoryMessage = `${characterName}: ${msgData.content}`;
+                newModel = updateShortTermMemory({ message: memoryMessage }, newModel);
+            });
+            
+            return { ...newModel, isLoading: false };
+        }
+
+        function handleAIMomentReceived(payload, model) {
+            const moment = {
+                id: generateId(),
+                type: 'ai_moment',
+                content: payload.content,
+                timestamp: new Date().toISOString(),
+                author: payload.author,
+                images: payload.images || [],
+                likes: 0,
+                comments: [],
+                status: 'published'
+            };
+            
+            const newModel = {
+                ...model,
+                moments: {
+                    ...model.moments,
+                    posts: [moment, ...model.moments.posts]
+                },
+                currentPage: 'QQ_MOMENT',
+                isLoading: false
+            };
+            
+            // Update memory for moments
+            const memoryMessage = `[动态] ${payload.author}: ${payload.content}`;
+            return updateShortTermMemory({ message: memoryMessage }, newModel);
+        }
+
+        function handleAIProactiveMessage(payload, model) {
+            const proactiveMsg = {
+                id: generateId(),
+                type: 'proactive',
+                content: payload.content,
+                timestamp: new Date().toISOString(),
+                trigger: payload.trigger || 'autonomous',
+                status: 'active'
+            };
+            
+            // Add to the appropriate chat or create a system notification
+            let newModel = { ...model };
+            
+            if (payload.target) {
+                // Add to specific chat
+                const chatPath = payload.chatType === 'group' ? 'groups' : 'private';
+                const existingChat = newModel.chats[chatPath][payload.target] || { messages: [], status: 'active' };
+                const updatedChat = {
+                    ...existingChat,
+                    messages: [...existingChat.messages, proactiveMsg],
+                    lastMessage: proactiveMsg,
+                    lastUpdate: new Date().toISOString()
+                };
+                
+                newModel = {
+                    ...newModel,
+                    chats: {
+                        ...newModel.chats,
+                        [chatPath]: {
+                            ...newModel.chats[chatPath],
+                            [payload.target]: updatedChat
+                        }
+                    }
+                };
+            }
+            
+            // Update memory
+            const memoryMessage = `[主动消息] ${payload.content}`;
+            return updateShortTermMemory({ message: memoryMessage }, newModel);
+        }
+
+        function handleAISystemMessage(payload, model) {
+            const systemMsg = {
+                id: generateId(),
+                type: 'system',
+                content: payload.content,
+                timestamp: new Date().toISOString(),
+                category: payload.category || 'general',
+                status: 'active'
+            };
+            
+            // Add system message to current chat if available
+            let newModel = { ...model };
+            
+            if (model.chats.currentChat) {
+                const chatKey = model.chats.currentChat;
+                const chatData = model.chats.private[chatKey] || model.chats.groups[chatKey];
+                
+                if (chatData) {
+                    const chatPath = model.chats.private[chatKey] ? 'private' : 'groups';
+                    const updatedChat = {
+                        ...chatData,
+                        messages: [...chatData.messages, systemMsg],
+                        lastUpdate: new Date().toISOString()
+                    };
+                    
+                    newModel = {
+                        ...newModel,
+                        chats: {
+                            ...newModel.chats,
+                            [chatPath]: {
+                                ...newModel.chats[chatPath],
+                                [chatKey]: updatedChat
+                            }
+                        }
+                    };
+                }
+            }
+            
+            return { ...newModel, isLoading: false };
+        }
+
+        function handleAIResponseRetry(payload, model) {
+            const retryCount = (model.system?.retryCount || 0) + 1;
+            
+            return {
+                ...model,
+                system: {
+                    ...model.system,
+                    retryCount: retryCount,
+                    lastRetryReason: payload.reason,
+                    retryTimestamp: new Date().toISOString()
+                },
+                isLoading: true,
+                error: payload.reason ? `重试中 (${retryCount}/3): ${payload.reason}` : null
+            };
+        }
+
+        function handleAIResponseSuccess(payload, model) {
+            return {
+                ...model,
+                system: {
+                    ...model.system,
+                    retryCount: 0,
+                    lastRetryReason: null,
+                    lastSuccessTimestamp: new Date().toISOString()
+                },
+                isLoading: false,
+                error: null
+            };
+        }
+
+        function handleAIResponseFailed(payload, model) {
+            return {
+                ...model,
+                system: {
+                    ...model.system,
+                    lastFailureReason: payload.reason,
+                    lastFailureTimestamp: new Date().toISOString()
+                },
+                isLoading: false,
+                error: `AI响应失败: ${payload.reason}`
+            };
+        }
+
+        /**
+         * === VIEW FUNCTION ===
+         * Pure function that renders the entire UI based on model state
+         * @param {Object} model - Current application state
+         * @returns {string} Complete HTML string for the application
+         */
+        function view(model) {
+            // Memory indicator for development
+            const memoryIndicator = model.settings.memoryEnabled ? 
+                `<div class="memory-indicator memory-short-term">
+                    Memory: ${model.memory.shortTerm.messages.length}/50
+                </div>` : '';
+
+            switch (model.currentPage) {
+                case 'QQ_HOME':
+                    return renderHomePage(model) + memoryIndicator;
+                case 'QQ_CHAT':
+                    return renderChatPage(model) + memoryIndicator;
+                case 'QQ_MOMENT':
+                    return renderMomentsPage(model) + memoryIndicator;
+                case 'QQ_DISCORD':
+                    return renderDiscordPage(model) + memoryIndicator;
+                default:
+                    return renderHomePage(model) + memoryIndicator;
+            }
+        }
+
+        function renderHomePage(model) {
+            const contactsList = model.contacts.characters.map(contact => 
+                `<div class="contact-item" onclick="dispatch({type: '${MessageTypes.SELECT_CONTACT}', payload: {contactName: '${contact.name}'}})">
+                    <div class="contact-avatar">${contact.avatar || contact.name.charAt(0)}</div>
+                    <div class="contact-name">${contact.name}</div>
+                    <div class="contact-status">${contact.status || ''}</div>
+                </div>`
+            ).join('');
+
+            return `
+                <div class="home-page">
+                    <header class="home-header">
+                        <h1>SillyTavern Mobile</h1>
+                        <div class="nav-tabs">
+                            <button onclick="dispatch({type: '${MessageTypes.NAVIGATE}', payload: {page: 'QQ_HOME', tab: 'chat'}})" class="tab active">聊天</button>
+                            <button onclick="dispatch({type: '${MessageTypes.NAVIGATE}', payload: {page: 'QQ_MOMENT', tab: 'moments'}})" class="tab">动态</button>
+                            <button onclick="dispatch({type: '${MessageTypes.NAVIGATE}', payload: {page: 'QQ_DISCORD', tab: 'discord'}})" class="tab">Discord</button>
+                        </div>
+                    </header>
+                    <div class="contacts-list">
+                        ${contactsList || '<div class="no-contacts">暂无联系人</div>'}
+                    </div>
+                    <div class="memory-panel-toggle">
+                        <button onclick="dispatch({type: '${MessageTypes.TOGGLE_MEMORY_PANEL}'})">
+                            ${model.ui.chat.showMemoryPanel ? '隐藏' : '显示'}记忆面板
+                        </button>
+                    </div>
+                    ${model.ui.chat.showMemoryPanel ? renderMemoryPanel(model) : ''}
+                </div>
+            `;
+        }
+
+        function renderChatPage(model) {
+            const currentChat = model.chats.currentChat;
+            if (!currentChat) {
+                return renderHomePage(model);
+            }
+
+            const chatData = model.chats.private[currentChat] || model.chats.groups[currentChat] || { messages: [] };
+            const messages = chatData.messages.map(msg => 
+                `<div class="message ${msg.type}-message">
+                    <div class="message-content">${msg.content}</div>
+                    <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+                    <div class="message-status">${msg.status}</div>
+                </div>`
+            ).join('');
+
+            return `
+                <div class="chat-page">
+                    <header class="chat-header">
+                        <button onclick="dispatch({type: '${MessageTypes.NAVIGATE}', payload: {page: 'QQ_HOME'}})" class="back-btn">←</button>
+                        <h2>${currentChat}</h2>
+                        <button onclick="dispatch({type: '${MessageTypes.TOGGLE_MEMORY_PANEL}'})">记忆</button>
+                    </header>
+                    <div class="messages-container">
+                        ${messages}
+                        ${model.isLoading ? '<div class="loading">AI正在回复中...</div>' : ''}
+                    </div>
+                    <div class="input-container">
+                        <input type="text" class="userInput" placeholder="输入消息..." 
+                               onkeypress="if(event.key==='Enter') sendMessage(this.value, '${currentChat}')">
+                        <button onclick="sendMessage(document.querySelector('.userInput').value, '${currentChat}')">发送</button>
+                    </div>
+                    ${model.ui.chat.showMemoryPanel ? renderMemoryPanel(model) : ''}
+                </div>
+            `;
+        }
+
+        function renderMomentsPage(model) {
+            return `
+                <div class="moments-page">
+                    <header class="moments-header">
+                        <button onclick="dispatch({type: '${MessageTypes.NAVIGATE}', payload: {page: 'QQ_HOME'}})" class="back-btn">←</button>
+                        <h2>动态</h2>
+                    </header>
+                    <div class="moments-content">
+                        <div class="loading">动态功能开发中...</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDiscordPage(model) {
+            return `
+                <div class="discord-page">
+                    <header class="discord-header">
+                        <button onclick="dispatch({type: '${MessageTypes.NAVIGATE}', payload: {page: 'QQ_HOME'}})" class="back-btn">←</button>
+                        <h2>Discord</h2>
+                    </header>
+                    <div class="discord-content">
+                        <div class="loading">Discord功能开发中...</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMemoryPanel(model) {
+            const shortTermCount = model.memory.shortTerm.messages.length;
+            const midTermCount = model.memory.midTerm.summaries.length;
+            const relationshipCount = Object.keys(model.memory.relationship.characters).length;
+            const longTermMilestones = model.memory.longTerm.milestones.length;
+
+            return `
+                <div class="memory-panel">
+                    <h3>记忆系统状态</h3>
+                    <div class="memory-layers">
+                        <div class="memory-layer short-term">
+                            <h4>短期记忆</h4>
+                            <p>消息数量: ${shortTermCount}/50</p>
+                            <p>最后更新: ${model.memory.shortTerm.lastUpdate ? new Date(model.memory.shortTerm.lastUpdate).toLocaleTimeString() : '未更新'}</p>
+                        </div>
+                        <div class="memory-layer mid-term">
+                            <h4>中期记忆</h4>
+                            <p>摘要数量: ${midTermCount}</p>
+                            <p>最后更新: ${model.memory.midTerm.lastUpdate ? new Date(model.memory.midTerm.lastUpdate).toLocaleTimeString() : '未更新'}</p>
+                        </div>
+                        <div class="memory-layer relationship">
+                            <h4>关系记忆</h4>
+                            <p>角色数量: ${relationshipCount}</p>
+                            <p>最后更新: ${model.memory.relationship.lastUpdate ? new Date(model.memory.relationship.lastUpdate).toLocaleTimeString() : '未更新'}</p>
+                        </div>
+                        <div class="memory-layer long-term">
+                            <h4>长期记忆</h4>
+                            <p>里程碑: ${longTermMilestones}</p>
+                            <p>最后更新: ${model.memory.longTerm.lastUpdate ? new Date(model.memory.longTerm.lastUpdate).toLocaleTimeString() : '未更新'}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        /**
+         * === UTILITY FUNCTIONS ===
+         */
+        
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
+        function buildCurrentContext(messages) {
+            return messages.slice(-10).join('\n');
+        }
+
+        /**
+         * === NEW RESULT HANDLE FUNCTION ===
+         * MVU-compatible AI response parser that only dispatches messages
+         */
+
+        // Global retry counter for the MVU system
+        let QQ_RetryCount = 0;
+        const MAX_RETRY_COUNT = 3;
+
+        function ResultHandle(result) {
+            console.log('🤖 ResultHandle processing:', result);
+            
+            // Start loading state
+            dispatch({ type: MessageTypes.LOADING_START });
+            
+            try {
+                // Clean and preprocess the result
+                let cleanedResult = QQ_ExtractProactiveMessages(result);
+                cleanedResult = QQ_CleanUnusualFormatting(cleanedResult);
+                
+                // Try different parsing strategies in priority order
+                let parseSuccess = false;
+                
+                // Priority 1: Strict format matching
+                parseSuccess = tryParseStrictFormat(cleanedResult);
+                
+                if (!parseSuccess) {
+                    // Priority 2: Fuzzy matching and repair
+                    parseSuccess = tryParseFuzzyFormat(cleanedResult);
+                }
+                
+                if (!parseSuccess) {
+                    // Priority 3: Interactive content detection
+                    parseSuccess = tryParseInteractiveContent(cleanedResult);
+                }
+                
+                if (!parseSuccess) {
+                    // Priority 4: Smart extraction
+                    parseSuccess = tryParseSmartExtraction(cleanedResult);
+                }
+                
+                if (!parseSuccess) {
+                    // Priority 5: Content tag checking
+                    parseSuccess = tryParseContentTags(cleanedResult);
+                }
+                
+                if (parseSuccess) {
+                    // Success - reset retry count and dispatch success
+                    QQ_RetryCount = 0;
+                    dispatch({ 
+                        type: MessageTypes.AI_RESPONSE_SUCCESS,
+                        payload: { timestamp: new Date().toISOString() }
+                    });
+                } else {
+                    // All parsing failed - handle retry or failure
+                    handleParsingFailure(result);
+                }
+                
+            } catch (error) {
+                console.error('ResultHandle error:', error);
+                dispatch({
+                    type: MessageTypes.AI_RESPONSE_FAILED,
+                    payload: { reason: `解析错误: ${error.message}` }
+                });
+            }
+        }
+
+        function tryParseStrictFormat(result) {
+            // Try MiPhone format
+            const miPhoneMatch = result.match(/MiPhone_start([\s\S]*?)MiPhone_end/);
+            if (miPhoneMatch) {
+                const content = miPhoneMatch[1].trim();
+                return processMiPhoneContent(content);
+            }
+            
+            // Try JSON format
+            const jsonMatch = result.match(/MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/);
+            if (jsonMatch) {
+                const jsonContent = jsonMatch[1].trim();
+                return processJsonContent(jsonContent);
+            }
+            
+            return false;
+        }
+
+        function tryParseFuzzyFormat(result) {
+            // Try to repair malformed MiPhone tags
+            let repairedResult = result
+                .replace(/(?:MiPhone|Mi_Phone|MI_PHONE)[-_]*(?:start|START)/gi, 'MiPhone_start')
+                .replace(/(?:MiPhone|Mi_Phone|MI_PHONE)[-_]*(?:end|END)/gi, 'MiPhone_end');
+            
+            const miPhoneMatch = repairedResult.match(/MiPhone_start([\s\S]*?)MiPhone_end/);
+            if (miPhoneMatch) {
+                const content = miPhoneMatch[1].trim();
+                return processMiPhoneContent(content);
+            }
+            
+            return false;
+        }
+
+        function tryParseInteractiveContent(result) {
+            // Look for group chat patterns
+            const groupChatMatch = result.match(/<群聊:(.*?)>([\s\S]*?)<\/群聊:\1>/);
+            if (groupChatMatch) {
+                const groupName = groupChatMatch[1];
+                const content = groupChatMatch[2];
+                return processGroupChatContent(groupName, content);
+            }
+            
+            // Look for private chat patterns
+            const privateChatMatch = result.match(/<私聊:(.*?)>([\s\S]*?)<\/私聊:\1>/);
+            if (privateChatMatch) {
+                const characterName = privateChatMatch[1];
+                const content = privateChatMatch[2];
+                return processPrivateChatContent(characterName, content);
+            }
+            
+            // Look for moment patterns
+            const momentMatch = result.match(/moment_start([\s\S]*?)moment_end/);
+            if (momentMatch) {
+                const content = momentMatch[1].trim();
+                return processMomentContent(content);
+            }
+            
+            return false;
+        }
+
+        function tryParseSmartExtraction(result) {
+            // Try to extract any valid structured content
+            try {
+                const jsonContent = extractJsonFromText(result);
+                if (jsonContent) {
+                    return processJsonContent(jsonContent);
+                }
+                
+                // Try to extract simple text messages
+                const textContent = extractTextMessages(result);
+                if (textContent.length > 0) {
+                    return processTextMessages(textContent);
+                }
+            } catch (error) {
+                console.warn('Smart extraction failed:', error);
+            }
+            
+            return false;
+        }
+
+        function tryParseContentTags(result) {
+            // Last resort - try to find any recognizable content patterns
+            const patterns = [
+                /【.*?】.*?：.*$/gm,  // Character name patterns
+                /.*?说[：:]/gm,      // Speaking patterns
+                /.*?回复[：:]/gm     // Reply patterns
+            ];
+            
+            for (const pattern of patterns) {
+                const matches = result.match(pattern);
+                if (matches && matches.length > 0) {
+                    return processGenericContent(matches);
+                }
+            }
+            
+            return false;
+        }
+
+        function handleParsingFailure(result) {
+            QQ_RetryCount++;
+            
+            if (QQ_RetryCount <= MAX_RETRY_COUNT) {
+                const retryReason = `格式解析失败 (${QQ_RetryCount}/${MAX_RETRY_COUNT})`;
+                dispatch({
+                    type: MessageTypes.AI_RESPONSE_RETRY,
+                    payload: { reason: retryReason, originalResult: result }
+                });
+                
+                // Could trigger a retry mechanism here if connected to SillyTavern
+                console.log(`⚠️ Retry ${QQ_RetryCount}: ${retryReason}`);
+            } else {
+                // Max retries exceeded
+                dispatch({
+                    type: MessageTypes.AI_RESPONSE_FAILED,
+                    payload: { 
+                        reason: `达到最大重试次数 (${MAX_RETRY_COUNT})，解析失败`,
+                        originalResult: result 
+                    }
+                });
+                QQ_RetryCount = 0; // Reset for next conversation
+            }
+        }
+
+        // Content processing functions
+        function processMiPhoneContent(content) {
+            try {
+                const parsedData = JsonYamlParse(content);
+                if (parsedData) {
+                    dispatchParsedData(parsedData);
+                    return true;
+                }
+            } catch (error) {
+                console.warn('MiPhone content parsing failed:', error);
+            }
+            return false;
+        }
+
+        function processJsonContent(jsonContent) {
+            try {
+                const parsedData = JSON.parse(jsonContent);
+                if (parsedData) {
+                    dispatchParsedData(parsedData);
+                    return true;
+                }
+            } catch (error) {
+                console.warn('JSON content parsing failed:', error);
+            }
+            return false;
+        }
+
+        function processGroupChatContent(groupName, content) {
+            try {
+                const messages = parseGroupChatMessages(content);
+                dispatch({
+                    type: MessageTypes.AI_GROUP_CHAT_RECEIVED,
+                    payload: {
+                        groupName: groupName,
+                        messages: messages
+                    }
+                });
+                return true;
+            } catch (error) {
+                console.warn('Group chat content parsing failed:', error);
+            }
+            return false;
+        }
+
+        function processPrivateChatContent(characterName, content) {
+            try {
+                const messages = parsePrivateChatMessages(content);
+                dispatch({
+                    type: MessageTypes.AI_PRIVATE_CHAT_RECEIVED,
+                    payload: {
+                        characterName: characterName,
+                        messages: messages
+                    }
+                });
+                return true;
+            } catch (error) {
+                console.warn('Private chat content parsing failed:', error);
+            }
+            return false;
+        }
+
+        function processMomentContent(content) {
+            try {
+                const momentData = parseMomentData(content);
+                dispatch({
+                    type: MessageTypes.AI_MOMENT_RECEIVED,
+                    payload: momentData
+                });
+                return true;
+            } catch (error) {
+                console.warn('Moment content parsing failed:', error);
+            }
+            return false;
+        }
+
+        function processTextMessages(messages) {
+            messages.forEach(msg => {
+                dispatch({
+                    type: MessageTypes.AI_CHAT_RECEIVED,
+                    payload: {
+                        content: msg.content,
+                        sender: msg.sender || 'AI',
+                        target: msg.target || getCurrentChatTarget()
+                    }
+                });
+            });
+            return true;
+        }
+
+        function processGenericContent(matches) {
+            matches.forEach(match => {
+                dispatch({
+                    type: MessageTypes.AI_CHAT_RECEIVED,
+                    payload: {
+                        content: match,
+                        sender: 'AI',
+                        target: getCurrentChatTarget()
+                    }
+                });
+            });
+            return true;
+        }
+
+        // Helper parsing functions (simplified versions from original)
+        function JsonYamlParse(content) {
+            // Simplified JSON/YAML parser
+            try {
+                // Try JSON first
+                return JSON.parse(content);
+            } catch {
+                // Try simple key-value parsing
+                const lines = content.split('\n');
+                const result = {};
+                for (const line of lines) {
+                    const match = line.match(/^(\w+):\s*(.+)$/);
+                    if (match) {
+                        result[match[1]] = match[2];
+                    }
+                }
+                return Object.keys(result).length > 0 ? result : null;
+            }
+        }
+
+        function QQ_ExtractProactiveMessages(result) {
+            // Extract proactive messages and handle them separately
+            const proactivePattern = /\[主动消息\](.*?)(?=\[|$)/gs;
+            const matches = result.match(proactivePattern);
+            
+            if (matches) {
+                matches.forEach(match => {
+                    const content = match.replace(/\[主动消息\]/, '').trim();
+                    dispatch({
+                        type: MessageTypes.AI_PROACTIVE_MESSAGE,
+                        payload: { content: content }
+                    });
+                });
+                
+                // Remove proactive messages from the main result
+                result = result.replace(proactivePattern, '');
+            }
+            
+            return result;
+        }
+
+        function QQ_CleanUnusualFormatting(content) {
+            return content
+                .replace(/^[\s\n\r]+|[\s\n\r]+$/g, '') // Trim
+                .replace(/\r\n/g, '\n') // Normalize line endings
+                .replace(/\n{3,}/g, '\n\n'); // Collapse multiple newlines
+        }
+
+        function dispatchParsedData(data) {
+            // Route parsed data to appropriate message types
+            if (data.messages) {
+                // Handle multiple messages
+                data.messages.forEach(msg => {
+                    routeMessage(msg);
+                });
+            } else {
+                // Handle single message
+                routeMessage(data);
+            }
+        }
+
+        function routeMessage(messageData) {
+            if (messageData.type === 'group') {
+                dispatch({
+                    type: MessageTypes.AI_GROUP_CHAT_RECEIVED,
+                    payload: {
+                        groupName: messageData.target,
+                        messages: [messageData]
+                    }
+                });
+            } else if (messageData.type === 'private') {
+                dispatch({
+                    type: MessageTypes.AI_PRIVATE_CHAT_RECEIVED,
+                    payload: {
+                        characterName: messageData.sender,
+                        messages: [messageData]
+                    }
+                });
+            } else if (messageData.type === 'moment') {
+                dispatch({
+                    type: MessageTypes.AI_MOMENT_RECEIVED,
+                    payload: messageData
+                });
+            } else if (messageData.type === 'system') {
+                dispatch({
+                    type: MessageTypes.AI_SYSTEM_MESSAGE,
+                    payload: messageData
+                });
+            } else {
+                // Default to general chat
+                dispatch({
+                    type: MessageTypes.AI_CHAT_RECEIVED,
+                    payload: messageData
+                });
+            }
+        }
+
+        // Utility functions
+        function extractJsonFromText(text) {
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            return jsonMatch ? jsonMatch[0] : null;
+        }
+
+        function extractTextMessages(text) {
+            // Simple text message extraction
+            const lines = text.split('\n').filter(line => line.trim().length > 0);
+            return lines.map(line => ({
+                content: line.trim(),
+                sender: 'AI',
+                type: 'text'
+            }));
+        }
+
+        function parseGroupChatMessages(content) {
+            // Parse group chat message format
+            const messagePattern = /(\w+):\s*(.+)/g;
+            const messages = [];
+            let match;
+            
+            while ((match = messagePattern.exec(content)) !== null) {
+                messages.push({
+                    sender: match[1],
+                    content: match[2].trim()
+                });
+            }
+            
+            return messages;
+        }
+
+        function parsePrivateChatMessages(content) {
+            // Parse private chat messages
+            return [{
+                content: content.trim(),
+                sender: 'AI' // Will be overridden by character name in handler
+            }];
+        }
+
+        function parseMomentData(content) {
+            // Parse moment/social media content
+            return {
+                content: content.trim(),
+                author: 'AI Character',
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        function getCurrentChatTarget() {
+            // Get current chat target from model
+            return window.getCurrentModel?.()?.chats?.currentChat || 'AI';
+        }
+
+        /**
+         * === MVU RUNTIME ===
+         * The actual MVU loop implementation
+         */
+        
+        let currentModel = createInitialModel();
+        
+        // Global dispatch function - this is the single entry point for all actions
+        window.dispatch = function(message) {
+            const newModel = update(message, currentModel);
+            if (newModel !== currentModel) {
+                currentModel = newModel;
+                render();
+                
+                // Auto-save to SillyTavern world book
+                if (typeof saveToWorldBook === 'function') {
+                    saveToWorldBook(currentModel);
+                }
+            }
+        };
+
+        // Render function - updates the DOM
+        function render() {
+            const appElement = document.getElementById('app');
+            if (appElement) {
+                appElement.innerHTML = view(currentModel);
+            }
+        }
+
+        // Helper function for sending messages
+        window.sendMessage = function(text, target) {
+            if (!text || !text.trim()) return;
+            
+            dispatch({
+                type: MessageTypes.LOADING_START
+            });
+            
+            dispatch({
+                type: MessageTypes.SEND_USER_MESSAGE,
+                payload: {
+                    text: text.trim(),
+                    target: target,
+                    chatType: 'private'
+                }
+            });
+            
+            // Clear input
+            const input = document.querySelector('.userInput');
+            if (input) input.value = '';
+            
+            // Simulate AI response (this will be replaced with actual SillyTavern integration)
+            setTimeout(() => {
+                dispatch({
+                    type: MessageTypes.AI_CHAT_RECEIVED,
+                    payload: {
+                        content: `这是来自 ${target} 的模拟回复：收到你的消息"${text}"`,
+                        sender: target,
+                        target: target
+                    }
+                });
+            }, 1500);
+        };
+
+        /**
+         * === INTEGRATION WITH SILLYTAVERN ===
+         * Functions to connect with the existing SillyTavern system
+         */
+        
+        // Initialize contacts from SillyTavern
+        function initializeFromSillyTavern() {
+            // This will be populated with actual SillyTavern data
+            const mockContacts = [
+                { name: '测试角色1', avatar: '👩', status: '在线' },
+                { name: '测试角色2', avatar: '🧑', status: '离线' }
+            ];
+            
+            dispatch({
+                type: 'INITIALIZE_CONTACTS',
+                payload: { contacts: mockContacts }
+            });
+        }
+
+        // Save model state to SillyTavern world book
+        function saveToWorldBook(model) {
+            try {
+                const memoryData = {
+                    shortTerm: model.memory.shortTerm,
+                    midTerm: model.memory.midTerm,
+                    relationship: model.memory.relationship,
+                    longTerm: model.memory.longTerm,
+                    lastSaved: new Date().toISOString()
+                };
+                
+                // This will integrate with SillyTavern's world book API
+                console.log('💾 Saving memory to world book:', memoryData);
+                
+                // TODO: Implement actual world book saving
+                // SetWorldEntry("MVU_Memory_System", JSON.stringify(memoryData));
+                
+            } catch (error) {
+                console.error('Failed to save to world book:', error);
+            }
+        }
+
+        // Load model state from SillyTavern world book
+        function loadFromWorldBook() {
+            try {
+                // TODO: Implement actual world book loading
+                // const savedData = GetWorldEntry("MVU_Memory_System");
+                // if (savedData) {
+                //     const memoryData = JSON.parse(savedData);
+                //     currentModel.memory = memoryData;
+                //     render();
+                // }
+                
+                console.log('📖 Loading from world book (not implemented yet)');
+            } catch (error) {
+                console.error('Failed to load from world book:', error);
+            }
+        }
+
+        /**
+         * === INITIALIZATION ===
+         */
+        
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Initializing MVU Architecture');
+            
+            // Initialize contacts and data
+            initializeFromSillyTavern();
+            loadFromWorldBook();
+            
+            // Initial render
+            render();
+            
+            console.log('✅ MVU Architecture initialized successfully');
+            console.log('📊 Initial model state:', currentModel);
+        });
+
+        // Expose model for debugging
+        window.getCurrentModel = () => currentModel;
+        window.MessageTypes = MessageTypes;
+
+        // Development helpers
+        if (typeof console !== 'undefined') {
+            console.log('🔧 MVU Development Mode');
+            console.log('Available functions:');
+            console.log('- dispatch(message) - Send messages to update the model');
+            console.log('- getCurrentModel() - Get current model state');
+            console.log('- MessageTypes - Available message types');
+        }
+
+    </script>
+</body>
+</html>

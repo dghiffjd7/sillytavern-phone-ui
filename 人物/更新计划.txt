@@ -144,3 +144,113 @@ npx @agentdeskai/browser-tools-server@latest
 3. 已读功能，让每个使用者点进聊天界面的AI回复讯息都会出现已读标识，AI也能看到使用者已读的标记，让比如这种情况：AI发现使用者上线后发送欢迎消息，使用者点击进入聊天界面，之前发送的消息显示已读后。AI原本缓存的消息持续输出如，‘我看到Alan已读了哦~怎么不回我？不知道该怎么回复吗？嘿嘿~’
 
 请对于这些给出具体的阶段性实施建议，不需要提供代码，我会取舍并进行优化，谢谢。
+
+
+接下来我们需要大更新，请确认我们现在要更改的文件变成了'手机MVU.html'之前的版本请不要再做改动。
+我打算将实现世界书记忆分层架构来优化我们的程式，首先简要说明一下这个分层架构：
+1.短期记忆-当前窗口或最近（大概50条）聊天记录
+2.中期记忆-上一个对话/场景的摘要，小总结
+3.关系记忆-记忆增强表格，简易版本，角色与使用者的关系信息，这里也可以加进AI分析出来的角色打字速度、回复速度、错字概率等等。
+4.长期记忆-记忆编年史，即大总结，到小总结一定数量时，总结中期记忆的所有摘要。内容： 一段叙事性的文本，描述了使用者和角色之间关系发展的关键节点和故事。
+
+而在实施这些重要的记忆方式时，我们首先要对我们的代码进行一个大更新，即将我们现有的结构转化成Model-View-Update (模型-視圖-更新) 的軟體架構模式。
+这个迁移的核心思想是：将所有“状态”集中到Model中，所有“状态变更逻辑”集中到Update函数中，所有“UI渲染”集中到View函数中。前端不再直接操作DOM来更新界面，而是通过更新Model来驱动View重新渲染。
+
+一、 需要“重构”或“替换”的核心函数 (Functions to Refactor/Replace)
+这些函数是当前系统命令和控制的核心，它们包含了大量的直接DOM操作和分散的状态管理，是迁移到MVU的重点改造对象。
+
+ResultHandle(result, isRetry):
+
+当前职责: 这是一个巨大的、多优先级的“上帝函数”，负责解析AI的完整回复、修复格式、处理聊天、处理动态、处理互动、触发重试等所有事情。
+
+MVU中的新角色: 它的功能将被大幅削减。新ResultHandle的唯一职责是：解析AI的原始回复，将其转化为一个或多个**消息（Messages）**对象，然后把这些消息发送给Update函数。它不再负责任何UI渲染或状态修改。
+
+迁移路径:
+
+QQ_ProcessStrictFormat, QQ_ProcessFuzzyRepair, QQ_ProcessInteractiveContent 等所有解析逻辑，最终都只输出一个结构化的Message对象，例如 { type: 'AI_CHAT_RECEIVED', payload: { ...chatData } } 或 { type: 'AI_MOMENT_RECEIVED', payload: { ...momentData } }。
+
+所有$(...).append(...), $(...).show(), $(...).hide()等UI操作都将被移除。
+
+QQ_Chat_AddMsg(...), QQ_Moment_Parse(...), Discord_Parse(...) 及所有渲染函数:
+
+当前职责: 接收解析好的数据，然后使用 _.template() 和 jQuery append() 来动态创建和插入HTML，直接修改DOM。
+
+MVU中的新角色: 这些函数将被一个统一的、巨大的 View(model) 函数所取代。这个View函数接收**整个应用的状态Model**作为唯一参数，然后返回一个完整的HTML字符串，描述整个手机界面的样子。框架会负责将这个HTML字符串应用到页面上。
+
+迁移路径:
+
+所有独立的 _.template(...) 调用将被整合。
+
+View函数会像这样工作：
+
+JavaScript
+
+function view(model) {
+  // 根据 model.currentPage 的值来决定渲染哪个主页面
+  if (model.currentPage === 'QQ_HOME') {
+    return render_QQ_HomePage(model);
+  } else if (model.currentPage === 'QQ_CHAT') {
+    return render_QQ_ChatPage(model.currentChat, model);
+  } // ...等等
+}
+所有直接的事件处理函数 (Event Handlers):
+
+例如: QQ_SendMsg(), QQ_Nav(), QQ_ChangeChatPage(), QQ_Moment_Comment(), handleChatTitleClick() 等所有 onclick="..." 和 $(...).on('click', ...) 的函数。
+
+当前职责: 执行复杂的业务逻辑，并直接操作DOM来改变UI状态（如隐藏/显示页面）。
+
+MVU中的新角色: 这些函数将被极度简化。它们唯一的作用就是创建一个消息（Message）并发送给Update函数。
+
+迁移路径:
+
+QQ_Nav('moment') 将变为 dispatch({ type: 'NAVIGATE', page: 'QQ_MOMENT' })。
+
+QQ_SendMsg(...) 将变为 dispatch({ type: 'SEND_USER_MESSAGE', payload: { text: '...', target: '...' } })。
+
+所有的逻辑（比如QQ_SendMsg中构建Prompt的部分）都将被移入Update函数中。
+
+二、 需要“舍弃”或“重新思考”的逻辑 (Logic to Abandon or Rethink)
+这些逻辑是围绕着旧的、直接操作DOM的模式建立的，在MVU架构下它们不再必要，或者需要用全新的方式实现。
+
+关于“净化上下文”和组合Prompt的复杂逻辑:
+
+当前问题: 你提到现有逻辑“有时候会遗漏或是没有反应”，而且过于复杂。
+
+MVU中的新思路: 所有的记忆层级（短期、中期、关系、长期）都清晰地存储在Model中。构建Prompt的函数会变得非常纯粹和简单：它只是一个从model.memory中读取数据并按格式组装字符串的工具函数。这个函数由Update在处理SEND_USER_MESSAGE消息时调用。因为所有源数据都来自唯一的Model，所以不会再有遗漏或状态不一致的问题。
+
+QQ_Msg_DeletOld(json) 等用于防止AI重复回复的函数:
+
+当前问题: 为了防止AI在上下文中看到它刚说过的话而重复，你需要手动清理历史记录。
+
+MVU中的新思路: 在MVU中，Update函数在处理完AI_REPLY_RECEIVED消息后，会生成一个包含新聊天记录的新Model。构建Prompt的工具函数会从这个**最新的Model**中读取历史记录。这意味着AI看到的上下文永远是最新的，自然就解决了重复回复的问题，不再需要这些复杂的手动清理函数。
+
+分散的全局变量和缓存:
+
+例如: QQ_msgjson, QQ_MomentsData, proactiveMessageUnreadCounts, characterChatStyles, contactGroups 等等。
+
+MVU中的新思路: 所有这些变量都将被废弃。它们的数据将全部统一整合进唯一的Model对象中。这是MVU带来的最大好处之一：单一数据源 (Single Source of Truth)。
+
+迁移路径总结
+总的来说，迁移到MVU架构需要你进行以下核心转变：
+
+旧模式 (你现在的架构)
+
+新模式 (MVU架构)
+
+状态管理：分散在多个全局变量 (QQ_msgjson等) 和世界书。
+
+Model: 一个单一、巨大的JavaScript对象，包含所有应用状态。
+
+UI更新：通过jQuery和DOM操作 ($().append, $().show)。
+
+View(model): 一个纯函数，根据Model生成HTML。
+
+业务逻辑：分散在各个事件处理函数中 (QQ_SendMsg等)。
+
+Update(msg, model): 一个纯函数，集中处理所有业务逻辑。
+
+数据流：混乱，双向（代码既读取状态又修改UI）。
+
+单向数据流：View -> Message -> Update -> New Model -> View
+
+请帮我完成这个重要的更新，谢谢。
