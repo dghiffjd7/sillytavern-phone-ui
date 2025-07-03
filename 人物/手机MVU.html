@@ -1063,7 +1063,7 @@
             }
 
             .QQ_bottom_nav {
-                position: absolute;
+                position: fixed;
                 bottom: 0px;
                 width: 100%;
                 height: 40px;
@@ -1075,7 +1075,7 @@
                 justify-content: space-evenly;
                 font-size: 10px;
                 background-color: white;
-                z-index: 1000;
+                z-index: 999999999;
                 border-top: 1px solid #e6e6e6;
             }
             body div {
@@ -6069,6 +6069,18 @@
                 return pageStateMap[page] || "QQ_HOME";
             }
             
+            // 反向映射：将页面状态常量转换为页面名称
+            function getCurrentPageName(pageState) {
+                const stateToPageMap = {
+                    "QQ_HOME": "people",
+                    "QQ_MESSAGE": "message", 
+                    "QQ_MOMENT": "moment",
+                    "QQ_CHAT": "chat",
+                    "QQ_GROUP": "group"
+                };
+                return stateToPageMap[pageState] || "people";
+            }
+            
             // 导航图标状态更新
             function updateNavigationIcons(activePage) {
                 return {
@@ -6114,8 +6126,14 @@
                         // 清理聊天状态
                         if (message.payload.fromGroupChat) {
                             newModel.ui.activeGroupChat = null;
-                            // 根据来源页面决定返回位置
-                            const targetPage = message.payload.sourcePage === 'messages' ? 'message' : 'people';
+                            // 根据群聊来源页面决定返回位置
+                            const targetPage = message.payload.groupSourcePage === 'messages' ? 'message' : 'people';
+                            newModel.ui.currentPage = getQQPageState(targetPage);
+                            newModel.ui.navigationIcons = updateNavigationIcons(targetPage);
+                            newModel.ui.backgroundColor = getBackgroundColor(targetPage);
+                        } else if (message.payload.fromPrivateChat) {
+                            // 根据私聊来源页面决定返回位置
+                            const targetPage = message.payload.privateSourcePage === 'messages' ? 'message' : 'people';
                             newModel.ui.currentPage = getQQPageState(targetPage);
                             newModel.ui.navigationIcons = updateNavigationIcons(targetPage);
                             newModel.ui.backgroundColor = getBackgroundColor(targetPage);
@@ -6529,11 +6547,20 @@
                     case 'CHAT_ITEM_CLICK':
                         const selectedChatName = message.payload.chatName;
                         const isGroupChat = message.payload.isGroup || false;
+                        
+                        // 记录来源页面以支持正确的返回导航
+                        const currentPageState = newModel.ui.currentPage;
+                        if (isGroupChat) {
+                            window.groupChatSourcePage = getCurrentPageName(currentPageState);
+                        } else {
+                            window.privateChatSourcePage = getCurrentPageName(currentPageState);
+                        }
+                        
                         newModel.ui.activeChat = selectedChatName;
                         newModel.ui.activeChatType = isGroupChat ? 'group' : 'private';
                         newModel.ui.currentPage = getQQPageState('chat');
                         newModel.ui.showBottomNav = false;
-                        console.log(`📱 打开聊天: ${selectedChatName} (${isGroupChat ? '群聊' : '私聊'})`);
+                        console.log(`📱 打开聊天: ${selectedChatName} (${isGroupChat ? '群聊' : '私聊'}), 来源页面: ${getCurrentPageName(currentPageState)}`);
                         break;
                         
                     case 'SHOW_CHAT_SETTINGS':
@@ -7960,9 +7987,12 @@
                     }
                 }
                 
-                // 如果还没有设置样式，使用传统的字符串处理逻辑
+                // 如果还没有设置样式，优先检查 head 字段（匹配原版）
                 if (!avatarStyle) {
-                    if (avatar && typeof avatar === 'string') {
+                    if (chatItem.head && chatItem.head.trim()) {
+                        // 使用 head 字段作为头像（与原版 chat_list_item 模板一致）
+                        avatarStyle = `background-image: url('${chatItem.head.trim()}'); background-size: cover; background-position: center;`;
+                    } else if (avatar && typeof avatar === 'string') {
                         if (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('data:')) {
                             // URL头像
                             avatarStyle = `background-image: url('${avatar}'); background-size: cover; background-position: center;`;
@@ -7986,18 +8016,15 @@
                 }
                 
                 const $element = $(`
-                    <div class="QQ_home_usermsg" 
-                         data-name="${name}" 
+                    <div data-name="${name}" class="QQ_home_usermsg" 
                          data-group-type="${isGroup}"
                          onclick="handleViewAction({type: 'CHAT_ITEM_CLICK', payload: {chatName: '${name}', isGroup: ${isGroup}}}, event)">
-                        <div class="QQ_home_head ${avatar && typeof avatar === 'string' && avatar.startsWith('head') ? avatar : ''}" 
-                             data-name="${name}" 
-                             style="${avatarStyle}">${avatarText}</div>
+                        <div class="QQ_home_head" style="${avatarStyle}">${avatarText}</div>
                         <div style="width:100%;display:grid;grid-template-columns:1fr auto;grid-template-rows:1fr 1fr;row-gap:4px">
                             <span class="QQ_home_name"><strong>${name}</strong></span>
                             <span class="QQ_home_lasttime" style="color:#626367;justify-self:end">${lastTime}</span>
-                            <span class="QQ_home_lastmsg" style="color:#626367;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lastMessage || '暂无消息'}</span>
-                            ${(chatItem.unread && chatItem.unread > 0) ? `<div class="QQ_home_usermsg_new" style="justify-self:end">${chatItem.unread}</div>` : ''}
+                            <span class="QQ_home_lastmsg" style="color:#626367;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lastMessage || '...'}</span>
+                            <div class="QQ_home_usermsg_new" style="display:none"></div>
                         </div>
                     </div>
                 `);
@@ -8310,9 +8337,6 @@
                                 <!-- 标题区域 -->
                                 <div style="display:flex;align-items:center;position:relative">
                                     <span style="margin-left:8px;color:#000;font-size:16px;cursor:pointer" id="QQ_chat_username" onclick="handleChatTitleClick(this)">${chatName}</span>
-                                    <div class="group-member-dropdown" id="group_member_dropdown" style="display:none;position:absolute;top:25px;left:8px;background:#fff;border:1px solid #ddd;border-radius:5px;box-shadow:0 2px 10px rgba(0,0,0,0.1);z-index:1000;min-width:200px;max-height:300px;overflow-y:auto;">
-                                        <div class="group-member-list" id="group_member_list"></div>
-                                    </div>
                                 </div>
                                 
                                 <!-- 设置按钮 -->
@@ -9496,7 +9520,7 @@
                         pointer-events: auto;
                     ">
                         <div style="padding: 20px; text-align: center;">
-                            <img src="${modalData.avatar || ''}" style="width: 80px; height: 80px; border-radius: 50%; margin-bottom: 16px;">
+                            <img src="${modalData.avatar || ''}" alt="${modalData.characterName || ''}" style="width: 80px; height: 80px; border-radius: 50%; margin-bottom: 16px; object-fit: cover;" onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div style=\\'width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg, #667eea, #764ba2);margin:0 auto 16px;display:flex;align-items:center;justify-content:center;color:white;font-size:32px;font-weight:bold;\\'>${(modalData.characterName || '').charAt(0)}</div>' + this.parentElement.innerHTML.split('</div>').slice(1).join('</div>'); console.log('模态框头像加载失败，使用首字母头像: ' + (modalData.characterName || ''));"
                             <h3 style="margin: 0 0 8px 0;">${modalData.characterName || ''}</h3>
                             <p style="margin: 0; color: #666;">${modalData.status || '在线'}</p>
                         </div>
@@ -17910,7 +17934,8 @@ ${character.significantEvents && character.significantEvents.length > 0
                                     margin-right: 15px;
                                     border: 3px solid white;
                                     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
-                                ">
+                                    object-fit: cover;
+                                " onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div style=\\'width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg, #667eea, #764ba2);margin-right:15px;border:3px solid white;box-shadow:0 3px 10px rgba(0, 0, 0, 0.2);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:bold;\\'>${(spaceData.characterName || '').charAt(0)}</div>' + this.parentElement.innerHTML.split('</div>').slice(1).join('</div>'); console.log('互动空间头像加载失败，使用首字母头像: ' + (spaceData.characterName || ''));"
                                 <div style="flex: 1;">
                                     <h3 style="margin: 0; font-size: 18px; font-weight: 600;">${spaceData.name}</h3>
                                     <p style="margin: 5px 0 0 0; font-size: 13px; opacity: 0.9;">
@@ -21118,7 +21143,7 @@ ${replyText}
                                 height: 32px;
                                 border-radius: 50%;
                                 object-fit: cover;
-                            ">
+                            " onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div style=\\'width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg, #667eea, #764ba2);display:flex;align-items:center;justify-content:center;color:white;font-size:16px;font-weight:bold;\\'>${(space.characterName || '').charAt(0)}</div>' + this.parentElement.innerHTML.split('</div>').slice(1).join('</div>'); console.log('空间列表头像加载失败，使用首字母头像: ' + (space.characterName || ''));"
                             <div style="flex: 1;">
                                 <div style="font-size: 14px; font-weight: 500; color: #333;">${space.name}</div>
                                 <div style="font-size: 12px; color: #666; margin-top: 2px;">
@@ -21360,7 +21385,8 @@ ${replyText}
                                     margin-right: 15px;
                                     border: 3px solid white;
                                     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-                                ">
+                                    object-fit: cover;
+                                " onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div style=\\'width:45px;height:45px;border-radius:50%;background:linear-gradient(135deg, #667eea, #764ba2);margin-right:15px;border:3px solid white;box-shadow:0 2px 8px rgba(0, 0, 0, 0.2);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:bold;\\'>${(space.characterName || '').charAt(0)}</div>' + this.parentElement.innerHTML.split('</div>').slice(1).join('</div>'); console.log('公共空间头像加载失败，使用首字母头像: ' + (space.characterName || ''));"
                                 <div style="flex: 1;">
                                     <h3 style="margin: 0; font-size: 17px; font-weight: 600;">${space.name}</h3>
                                     <p style="margin: 3px 0 0 0; font-size: 13px; opacity: 0.9;">现实互动模式</p>
@@ -22596,7 +22622,9 @@ ${index + 1}. ${space.name}
                     type: MessageTypes.NAVIGATE_HOME,
                     payload: {
                         fromGroupChat: !!window.currentGroupChat,
-                        sourcePage: window.groupChatSourcePage,
+                        fromPrivateChat: !window.currentGroupChat, // 检测是否来自私聊
+                        groupSourcePage: window.groupChatSourcePage,
+                        privateSourcePage: window.privateChatSourcePage,
                         currentPage: QQ_currentPage
                     }
                 });
@@ -30704,18 +30732,6 @@ ${index + 1}. ${space.name}
             }
         </script>
 
-        <!-- 群聊管理下拉菜单 -->
-        <div id="group_management_dropdown" class="group-management-dropdown" style="display: none;">
-            <div class="group-management-header">
-                <div class="group-management-title">群聊成员</div>
-                <svg class="group-settings-icon" onclick="showGroupSettings()" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11.03L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11.03C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
-                </svg>
-            </div>
-            <div class="group-members-list" id="group_members_display">
-                <!-- 群成员列表将在这里动态生成 -->
-            </div>
-        </div>
         
         <!-- 群聊设置模态窗口 -->
         <div id="group_settings_modal" class="group-settings-modal">
@@ -33906,10 +33922,17 @@ ${index + 1}. ${space.name}
                     const homePageVisible = QQ_IsElementVisible(document.getElementById('QQ_home_page'));
                     if (!homePageVisible) {
                         console.warn('⚠️ 全屏模式下联系人页面不可见，尝试显示');
-                        // 可能需要切换到联系人页面
+                        // MVU版本需要特殊处理：先更新状态，再直接确保DOM显示
                         QQ_Nav('people');
                         // 短暂延迟确保页面切换完成
                         await new Promise(resolve => setTimeout(resolve, 100));
+                        // 如果MVU渲染周期未完成，直接强制显示联系人页面
+                        if (!QQ_IsElementVisible(document.getElementById('QQ_home_page'))) {
+                            console.log('🔧 MVU渲染延迟，强制显示联系人页面');
+                            $("#QQ_home_page").css('display', 'flex');
+                            $("#QQ_message_list_page").css('display', 'none');
+                            $("#QQ_space_page").css('display', 'none');
+                        }
                     }
                 }
                 
@@ -35542,6 +35565,9 @@ ${index + 1}. ${space.name}
             function switchToGroupChat(groupData) {
                 console.log('切换到群聊:', groupData.name);
                 console.log('群聊成员:', groupData.members);
+                
+                // 记录来源页面（修复返回导航问题）
+                window.groupChatSourcePage = QQ_currentPage; // 'message', 'people', 'moment' 等
                 
                 // 设置当前活跃的群聊
                 window.currentGroupChat = groupData;
@@ -45200,34 +45226,150 @@ MiPhone_JSON_END`;
                     };
                 }
                 
-                // 找到下拉菜单容器
-                const dropdown = element.parentElement.querySelector('#group_member_dropdown');
-                const memberList = element.parentElement.querySelector('#group_member_list');
-                
-                if (dropdown && memberList) {
-                    // 清空现有内容
-                    memberList.innerHTML = '';
-                    
-                    // 添加群成员
-                    groupData.members.forEach(member => {
-                        const memberElement = document.createElement('div');
-                        memberElement.style.cssText = 'padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer;';
-                        memberElement.textContent = member;
-                        memberElement.onclick = () => {
-                            console.log(`点击群成员: ${member}`);
-                            // 这里可以添加点击成员的逻辑
-                            dropdown.style.display = 'none';
-                        };
-                        memberList.appendChild(memberElement);
-                    });
-                    
-                    // 切换显示状态
-                    if (dropdown.style.display === 'none' || !dropdown.style.display) {
-                        dropdown.style.display = 'block';
-                    } else {
-                        dropdown.style.display = 'none';
-                    }
+                // 移除现有的下拉菜单
+                const existingDropdown = document.getElementById('group_management_dropdown');
+                if (existingDropdown) {
+                    existingDropdown.remove();
                 }
+                
+                // 创建新的群管理下拉菜单（匹配原版设计）
+                const dropdown = document.createElement('div');
+                dropdown.id = 'group_management_dropdown';
+                dropdown.className = 'group-management-dropdown';
+                dropdown.style.cssText = `
+                    position: absolute;
+                    background: white;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                    z-index: 10000;
+                    max-height: 300px;
+                    overflow-y: auto;
+                    margin-top: 5px;
+                    min-width: 200px;
+                    display: block;
+                `;
+                
+                // 获取触发元素位置信息用于定位
+                const rect = element.getBoundingClientRect();
+                dropdown.style.top = (rect.bottom + 5) + 'px';
+                dropdown.style.left = rect.left + 'px';
+                
+                // 创建标题栏（包含设置按钮）
+                const header = document.createElement('div');
+                header.className = 'group-management-header';
+                header.style.cssText = `
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 12px 15px;
+                    border-bottom: 1px solid #f0f0f0;
+                    background: #f8f9fa;
+                    border-radius: 8px 8px 0 0;
+                `;
+                
+                const title = document.createElement('div');
+                title.className = 'group-management-title';
+                title.textContent = '群聊成员';
+                title.style.cssText = 'font-weight: 500; color: #333;';
+                
+                const settingsIcon = document.createElement('svg');
+                settingsIcon.className = 'group-settings-icon';
+                settingsIcon.setAttribute('viewBox', '0 0 24 24');
+                settingsIcon.setAttribute('fill', 'currentColor');
+                settingsIcon.style.cssText = `
+                    width: 20px;
+                    height: 20px;
+                    cursor: pointer;
+                    opacity: 0.7;
+                    transition: opacity 0.2s;
+                `;
+                settingsIcon.innerHTML = `
+                    <path d="M12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-.97l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.32-.07.65-.07.97s.03.66.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1.01c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
+                `;
+                settingsIcon.onmouseover = () => settingsIcon.style.opacity = '1';
+                settingsIcon.onmouseout = () => settingsIcon.style.opacity = '0.7';
+                settingsIcon.onclick = () => {
+                    dropdown.remove();
+                    // 触发群聊设置模态框
+                    handleViewAction({type: 'SHOW_CHAT_SETTINGS', payload: {chatName: groupName}}, event);
+                };
+                
+                header.appendChild(title);
+                header.appendChild(settingsIcon);
+                
+                // 创建成员列表容器
+                const memberListContainer = document.createElement('div');
+                memberListContainer.className = 'group-members-list';
+                memberListContainer.id = 'group_members_display';
+                
+                // 添加群成员
+                groupData.members.forEach(member => {
+                    const memberItem = document.createElement('div');
+                    memberItem.className = 'group-member-item';
+                    memberItem.style.cssText = `
+                        display: flex;
+                        align-items: center;
+                        padding: 8px 15px;
+                        transition: background-color 0.2s;
+                        cursor: pointer;
+                    `;
+                    memberItem.onmouseover = () => memberItem.style.backgroundColor = '#f5f5f5';
+                    memberItem.onmouseout = () => memberItem.style.backgroundColor = 'transparent';
+                    
+                    // 创建头像
+                    const avatar = document.createElement('div');
+                    avatar.className = 'group-member-avatar';
+                    avatar.style.cssText = `
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 50%;
+                        margin-right: 10px;
+                        flex-shrink: 0;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 12px;
+                        font-weight: bold;
+                        color: white;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                    `;
+                    avatar.textContent = member.charAt(0);
+                    
+                    // 创建名称
+                    const name = document.createElement('div');
+                    name.className = 'group-member-name';
+                    name.textContent = member;
+                    name.style.cssText = 'flex: 1; font-size: 14px; color: #333;';
+                    
+                    memberItem.appendChild(avatar);
+                    memberItem.appendChild(name);
+                    
+                    memberItem.onclick = () => {
+                        console.log(`点击群成员: ${member}`);
+                        dropdown.remove();
+                        // 可以添加更多点击成员的逻辑
+                    };
+                    
+                    memberListContainer.appendChild(memberItem);
+                });
+                
+                dropdown.appendChild(header);
+                dropdown.appendChild(memberListContainer);
+                
+                // 添加到页面并设置点击外部关闭
+                document.body.appendChild(dropdown);
+                
+                // 点击外部关闭功能
+                const closeDropdown = (e) => {
+                    if (!dropdown.contains(e.target)) {
+                        dropdown.remove();
+                        document.removeEventListener('click', closeDropdown);
+                    }
+                };
+                setTimeout(() => {
+                    document.addEventListener('click', closeDropdown);
+                }, 100);
             }
             
             /**
@@ -45311,16 +45453,15 @@ MiPhone_JSON_END`;
                             padding: 20px;
                             text-align: center;
                         ">
-                            <div style="
+                            <img src="${characterAvatar}" alt="${characterName}" style="
                                 width: 60px;
                                 height: 60px;
                                 border-radius: 50%;
-                                background-image: url('${characterAvatar}');
-                                background-size: cover;
-                                background-position: center;
+                                object-fit: cover;
                                 margin: 0 auto 10px;
                                 border: 3px solid rgba(255,255,255,0.8);
-                            "></div>
+                                display: block;
+                            " onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML+='<div style=\\'width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg, #667eea, #764ba2);margin:0 auto 10px;border:3px solid rgba(255,255,255,0.8);display:flex;align-items:center;justify-content:center;color:white;font-size:24px;font-weight:bold;\\'>${characterName.charAt(0)}</div>'; console.log('精灵面板头像加载失败，使用首字母头像: ${characterName}');">
                             <h3 style="margin: 0; font-size: 18px;">${characterName}</h3>
                             <p style="margin: 5px 0 0; font-size: 14px; opacity: 0.9;">角色精灵面板</p>
                             <button class="QQ_close_spirit_panel" style="
