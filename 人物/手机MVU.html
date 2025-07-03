@@ -8278,8 +8278,8 @@
                 renderUnreadCounts(model);
                 renderOnlineStatus(model.system && model.system.isOnline);
                 
-                // 初始化联系人分组功能（如果有）
-                if (typeof initContactGroups === 'function') {
+                // 初始化联系人分组功能（如果有且未初始化）
+                if (typeof initContactGroups === 'function' && !window.contactGroupsInitialized) {
                     setTimeout(initContactGroups, 200);
                 }
             }
@@ -22846,8 +22846,8 @@ ${index + 1}. ${space.name}
                     
                     // 联系人页面只需要显示已加载的群聊，不需要重新初始化
                     
-                    // 初始化联系人分组功能
-                    if (typeof initContactGroups === 'function') {
+                    // 初始化联系人分组功能（如果未初始化）
+                    if (typeof initContactGroups === 'function' && !window.contactGroupsInitialized) {
                         setTimeout(initContactGroups, 200);
                     }
                 } else if (page === "moment") {
@@ -23308,7 +23308,7 @@ ${index + 1}. ${space.name}
                     if (typeof initContactSearch === 'function') {
                         initContactSearch();
                     }
-                    if (typeof initContactGroups === 'function') {
+                    if (typeof initContactGroups === 'function' && !window.contactGroupsInitialized) {
                         initContactGroups();
                     }
                     // 延迟初始化点赞功能，确保不与优先级逻辑冲突
@@ -30846,8 +30846,8 @@ ${index + 1}. ${space.name}
                 // 搜索功能初始化不需要重新加载群聊数据
                 console.log('initContactSearch: 搜索功能已初始化');
                 
-                // 初始化联系人分组功能
-                if (typeof initContactGroups === 'function') {
+                // 初始化联系人分组功能（如果未初始化）
+                if (typeof initContactGroups === 'function' && !window.contactGroupsInitialized) {
                     initContactGroups();
                 }
                 
@@ -33973,6 +33973,10 @@ ${index + 1}. ${space.name}
                 if (currentCharId !== newCharId) {
                     console.log(`检测到角色切换: ${currentCharId} -> ${newCharId}`);
                     currentCharId = newCharId;
+                    
+                    // 角色切换时重置初始化状态，允许重新初始化
+                    window.contactGroupsInitialized = false;
+                    
                     QQ_LoadContactGroups(); // 修复：角色切换时加载分组，不是群聊
                     renderContactGroups();
                 }
@@ -34141,6 +34145,20 @@ ${index + 1}. ${space.name}
              * 初始化分组功能
              */
             async function initContactGroups() {
+                // 防止重复初始化
+                if (window.contactGroupsInitialized) {
+                    console.log('分组功能已经初始化过，跳过重复初始化');
+                    return;
+                }
+                
+                console.log('开始初始化分组功能...');
+                
+                // 清理旧的定时器（如果存在）
+                if (window.characterChangeInterval) {
+                    clearInterval(window.characterChangeInterval);
+                    window.characterChangeInterval = null;
+                }
+                
                 // 初始化当前角色ID
                 currentCharId = getCurrentCharacterId();
                 
@@ -34149,10 +34167,30 @@ ${index + 1}. ${space.name}
                 initGroupDragAndDrop();
                 
                 // 启动角色切换检测
-                setInterval(checkCharacterChange, 1000); // 每秒检测一次角色切换
+                window.characterChangeInterval = setInterval(checkCharacterChange, 1000); // 每秒检测一次角色切换
                 
-                console.log(`分组功能已初始化，当前角色ID: ${currentCharId}`);
+                // 标记为已初始化
+                window.contactGroupsInitialized = true;
+                
+                console.log(`✅ 分组功能已初始化，当前角色ID: ${currentCharId}`);
             }
+            
+            /**
+             * 重置联系人分组初始化状态 - 用于调试或强制重新初始化
+             */
+            function resetContactGroupsInitialization() {
+                console.log('🔄 重置联系人分组初始化状态');
+                window.contactGroupsInitialized = false;
+                
+                // 清理旧的定时器
+                if (window.characterChangeInterval) {
+                    clearInterval(window.characterChangeInterval);
+                    window.characterChangeInterval = null;
+                }
+            }
+            
+            // 导出重置函数供调试使用
+            window.resetContactGroupsInitialization = resetContactGroupsInitialization;
             
             /**
              * 初始化拖拽功能
@@ -34261,8 +34299,9 @@ ${index + 1}. ${space.name}
                                     QQ_Nav('people');
                                     await new Promise(resolve => setTimeout(resolve, 200));
                                     
-                                    // 重新初始化分组功能
+                                    // 全屏模式下强制重新初始化分组功能
                                     if (typeof initContactGroups === 'function') {
+                                        window.contactGroupsInitialized = false; // 强制重新初始化
                                         initContactGroups();
                                     }
                                     
@@ -37337,7 +37376,7 @@ ${index + 1}. ${space.name}
                     console.log('initializeEnhancedFeatures: worldbook未初始化，跳过分组加载');
                 }
                 
-                if (typeof initContactGroups === 'function') {
+                if (typeof initContactGroups === 'function' && !window.contactGroupsInitialized) {
                     initContactGroups();
                 }
                 
