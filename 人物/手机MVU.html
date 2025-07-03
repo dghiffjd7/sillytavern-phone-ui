@@ -3959,7 +3959,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月4日</span>
+                            <span>台北</span> <span id="day">7月3日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5938,6 +5938,7 @@
                 // 用户操作
                 SEND_USER_MESSAGE: 'SEND_USER_MESSAGE',
                 SEND_MOMENT_COMMENT: 'SEND_MOMENT_COMMENT',
+                DELETE_MOMENT: 'DELETE_MOMENT',
                 
                 // AI回复处理
                 AI_REPLY_RECEIVED: 'AI_REPLY_RECEIVED',
@@ -5969,6 +5970,11 @@
                 UPDATE_MODAL_DATA: 'UPDATE_MODAL_DATA',
                 SHOW_GROUP_SETTINGS: 'SHOW_GROUP_SETTINGS',
                 CHARACTER_SPIRIT_CLICK: 'CHARACTER_SPIRIT_CLICK',
+                
+                // 新建群组模态框
+                UPDATE_NEW_GROUP_INPUT: 'UPDATE_NEW_GROUP_INPUT',
+                UPDATE_NEW_GROUP_ERROR: 'UPDATE_NEW_GROUP_ERROR',
+                CREATE_NEW_GROUP: 'CREATE_NEW_GROUP',
                 
                 // 记忆管理 (完善版)
                 UPDATE_SHORT_TERM_MEMORY: 'UPDATE_SHORT_TERM_MEMORY',
@@ -9252,26 +9258,38 @@
                 container.innerHTML = `
                     <div style="
                         position: absolute;
-                        left: ${position.x}px;
-                        top: ${position.y}px;
+                        left: ${position.x - 80}px;
+                        top: ${position.y + 5}px;
                         background: white;
+                        border: 1px solid #e1e1e1;
                         border-radius: 8px;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                        padding: 8px 0;
-                        min-width: 150px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        min-width: 120px;
+                        overflow: hidden;
                         pointer-events: auto;
+                        z-index: 1000;
                     ">
-                        <div onclick="hideMomentMenu(); QQ_MomentLike('${modalData.momentId}')" style="padding: 12px 16px; cursor: pointer;">
-                            👍 点赞
-                        </div>
-                        <div onclick="hideMomentMenu(); QQ_CommentMoment('${modalData.momentId}')" style="padding: 12px 16px; cursor: pointer;">
-                            💬 评论
-                        </div>
-                        <div onclick="hideMomentMenu(); QQ_ShareMoment('${modalData.momentId}')" style="padding: 12px 16px; cursor: pointer;">
-                            📤 分享
+                        <div onclick="hideMomentMenu(); QQ_Delete_Moment('${modalData.momentId}')" style="
+                            padding: 12px 16px;
+                            cursor: pointer;
+                            font-size: 14px;
+                            color: #e74c3c;
+                            border-bottom: 1px solid #f5f5f5;
+                            background: white;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+                            🗑️ 删除动态
                         </div>
                     </div>
                 `;
+            }
+            
+            // 隐藏动态菜单
+            function hideMomentMenu() {
+                dispatch({
+                    type: MessageTypes.HIDE_MODAL,
+                    payload: {}
+                });
             }
             
             // 渲染聊天菜单弹窗
@@ -10453,6 +10471,63 @@
                     
                 } catch (error) {
                     console.error('❌ 保存记忆到世界书失败:', error);
+                }
+            }
+            
+            // 保存聊天数据到世界书
+            async function saveChatsToWorldbook(chats) {
+                try {
+                    if (!worldbook || !entries) {
+                        console.warn('世界书未初始化，跳过聊天数据保存');
+                        return;
+                    }
+                    
+                    // 创建聊天备份数据
+                    const chatBackup = {
+                        lastUpdated: new Date().toISOString(),
+                        data: {
+                            私聊: chats.private || {},
+                            群聊: chats.group || {},
+                            动态: chats.moments || []
+                        },
+                        version: version || "MVU"
+                    };
+                    
+                    // 查找或创建聊天备份条目
+                    let chatBackupEntry = entries.find(entry => 
+                        entry.comment === "手机MVU-聊天消息备份" || 
+                        entry.comment === "手机-聊天消息备份"
+                    );
+                    
+                    const backupJson = JSON.stringify(chatBackup, null, 2);
+                    
+                    if (chatBackupEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: chatBackupEntry.uid,
+                            content: backupJson,
+                        }]);
+                        console.log('✅ 聊天数据已更新到现有worldbook备份条目');
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: "手机MVU-聊天消息备份",
+                            key: ["此世界书永不触发_聊天备份_MVU"],
+                            content: backupJson,
+                            position: "at_depth_as_system", 
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9997,
+                            enabled: true,
+                        });
+                        console.log('✅ 聊天数据已保存到新worldbook备份条目');
+                        
+                        // 重新获取entries以包含新创建的条目
+                        entries = await getLorebookEntries(worldbook);
+                    }
+                } catch (error) {
+                    console.error('❌ 保存聊天数据到世界书失败:', error);
                 }
             }
             
@@ -19857,243 +19932,7 @@ ${character.significantEvents && character.significantEvents.length > 0
             
             // 旧的jQuery拖拽系统已移除，现在使用MVU事件系统
             
-            /**
-             * 显示角色精灵面板
-             * @param {string} characterName - 角色名称
-             */
-            function QQ_ShowCharacterSpiritPanel(characterName) {
-                console.log(`显示角色 ${characterName} 精灵面板`);
-                
-                // 确保角色名称有效
-                if (!characterName || typeof characterName !== 'string') {
-                    console.error('无效的角色名称:', characterName);
-                    return;
-                }
-                
-                // 移除现有的面板
-                $('.QQ_character_spirit_panel').remove();
-                
-                // 使用独立性检查确保数据安全
-                if (!QQ_EnsureCharacterSpaceIndependence(characterName)) {
-                    console.error(`角色 ${characterName} 的互动空间独立性检查失败`);
-                    toastr.error('互动空间数据错误');
-                    return;
-                }
-                
-                // 获取角色的互动空间列表
-                const characterSpaces = QQ_CharacterSpaces[characterName];
-                const spaceList = Object.values(characterSpaces);
-                
-                // 创建面板HTML
-                const panelHtml = `
-                    <div class="QQ_character_spirit_panel" style="
-                        position: fixed;
-                        top: 50%;
-                        left: 50%;
-                        transform: translate(-50%, -50%);
-                        background: white;
-                        border-radius: 15px;
-                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-                        z-index: 99999999;
-                        overflow: hidden;
-                        animation: spiritPanelSlideIn 0.3s ease;
-                        max-width: 90%;
-                        max-height: 80%;
-                        width: 350px;
-                    ">
-                        <div class="panel-header" style="
-                            background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
-                            color: white;
-                            padding: 20px;
-                            text-align: center;
-                            font-weight: 600;
-                        ">
-                            <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
-                                <img src="${charAvatarPath || getAvatarUrl(characterName)}" alt="${characterName}" style="
-                                    width: 40px;
-                                    height: 40px;
-                                    border-radius: 50%;
-                                    border: 2px solid white;
-                                ">
-                                <span style="font-size: 16px;">💕 ${characterName}的互动空间</span>
-                            </div>
-                        </div>
-                        
-                        ${spaceList.length > 0 ? `
-                            <div class="space-list" style="max-height: 300px; overflow-y: auto;">
-                                ${spaceList.slice(0, 30).map(space => `
-                                    <div class="space-item" data-space-id="${space.id}" style="
-                                        padding: 15px 20px;
-                                        border-bottom: 1px solid #f0f0f0;
-                                        cursor: pointer;
-                                        transition: background-color 0.2s ease;
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 12px;
-                                    " onmouseover="this.style.backgroundColor='#f8f9fa'" 
-                                       onmouseout="this.style.backgroundColor='transparent'">
-                                        <div style="
-                                            width: 10px;
-                                            height: 10px;
-                                            border-radius: 50%;
-                                            background: #FF6B6B;
-                                            flex-shrink: 0;
-                                        "></div>
-                                        <div style="flex: 1; min-width: 0;">
-                                            <div style="
-                                                font-size: 14px;
-                                                font-weight: 500;
-                                                color: #333;
-                                                margin-bottom: 3px;
-                                                overflow: hidden;
-                                                text-overflow: ellipsis;
-                                                white-space: nowrap;
-                                            ">${space.name}</div>
-                                            <div style="
-                                                font-size: 12px;
-                                                color: #999;
-                                            ">${QQ_FormatDate(space.createdAt)}</div>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        ` : `
-                            <div style="
-                                padding: 40px 20px;
-                                text-align: center;
-                                color: #999;
-                            ">
-                                <div style="font-size: 48px; margin-bottom: 15px;">🌟</div>
-                                <div style="font-size: 14px; margin-bottom: 8px;">还没有互动记录</div>
-                                <div style="font-size: 12px; color: #bbb;">开始一段现实互动吧～</div>
-                            </div>
-                        `}
-                        
-                        <div class="panel-actions" style="
-                            padding: 20px;
-                            background: #fafafa;
-                            display: flex;
-                            gap: 10px;
-                        ">
-                            <button class="new-space-btn" style="
-                                flex: 1;
-                                background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
-                                border: none;
-                                color: white;
-                                padding: 12px 16px;
-                                border-radius: 8px;
-                                cursor: pointer;
-                                font-size: 13px;
-                                font-weight: 500;
-                                transition: all 0.2s ease;
-                            " onmouseover="this.style.transform='translateY(-1px)'" 
-                               onmouseout="this.style.transform='translateY(0)'">
-                                ✨ 创建新互动
-                            </button>
-                            <button class="close-panel-btn" style="
-                                background: #e9ecef;
-                                border: none;
-                                color: #666;
-                                padding: 12px 16px;
-                                border-radius: 8px;
-                                cursor: pointer;
-                                font-size: 13px;
-                                font-weight: 500;
-                                transition: all 0.2s ease;
-                            " onmouseover="this.style.background='#dee2e6'" 
-                               onmouseout="this.style.background='#e9ecef'">
-                                关闭
-                            </button>
-                        </div>
-                        
-                        <!-- 新增：互动状态提示 -->
-                        <div class="interactive-tip" style="
-                            padding: 12px 20px;
-                            background: linear-gradient(135deg, #E8F5E8 0%, #F0F8FF 100%);
-                            border-top: 1px solid #e9ecef;
-                            font-size: 12px;
-                            color: #666;
-                            line-height: 1.4;
-                        ">
-                            <div style="
-                                display: flex;
-                                align-items: center;
-                                gap: 8px;
-                                margin-bottom: 6px;
-                                font-weight: 500;
-                            ">
-                                <span style="
-                                    display: inline-block;
-                                    width: 16px;
-                                    height: 16px;
-                                    background: #4CAF50;
-                                    border-radius: 50%;
-                                    color: white;
-                                    text-align: center;
-                                    line-height: 16px;
-                                    font-size: 10px;
-                                ">💡</span>
-                                <span style="color: #4CAF50;">当前互动触发状态</span>
-                            </div>
-                            <div id="interactive-status-content" style="margin-left: 24px; font-size: 11px;">
-                                <!-- 状态内容将通过JS动态填充 -->
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <style>
-                        @keyframes spiritPanelSlideIn {
-                            from {
-                                opacity: 0;
-                                transform: translate(-50%, -60%);
-                            }
-                            to {
-                                opacity: 1;
-                                transform: translate(-50%, -50%);
-                            }
-                        }
-                    </style>
-                `;
-                
-                // 添加到页面
-                $('body').append(panelHtml);
-                
-                // 动态更新互动状态
-                QQ_UpdateInteractiveStatus();
-                
-                // 绑定事件
-                $('.QQ_character_spirit_panel').on('click', function(e) {
-                    e.stopPropagation();
-                    
-                    const spaceItem = e.target.closest('.space-item');
-                    const newSpaceBtn = e.target.closest('.new-space-btn');
-                    const closePanelBtn = e.target.closest('.close-panel-btn');
-                    
-                    if (spaceItem) {
-                        const spaceId = spaceItem.getAttribute('data-space-id');
-                        console.log(`点击查看互动空间: ${spaceId}`);
-                        QQ_DisplayEnhancedInteractiveSpace(spaceId, `${characterName}的互动空间`, characterName);
-                        $('.QQ_character_spirit_panel').remove();
-                    } else if (newSpaceBtn) {
-                        console.log(`为角色 ${characterName} 创建新的互动空间`);
-                        $('.QQ_character_spirit_panel').remove();
-                        QQ_ShowCharacterInteractiveSpace(characterName);
-                    } else if (closePanelBtn) {
-                        $('.QQ_character_spirit_panel').remove();
-                    }
-                });
-                
-                // 点击外部关闭面板
-                $(document).one('click', function() {
-                    $('.QQ_character_spirit_panel').remove();
-                });
-            }
-            
-            /**
-             * 格式化日期显示
-             * @param {string} dateStr - ISO日期字符串
-             * @returns {string} 格式化后的日期
-             */
+            // Duplicate function removed - keeping only the main implementation at line 18811
             function QQ_FormatDate(dateStr) {
                 const date = new Date(dateStr);
                 const now = new Date();
@@ -29539,7 +29378,19 @@ ${index + 1}. ${space.name}
                         if (matches) {
                             for (const m of matches) {
                                 message = message.replace(m[0], "");
-                                fakeimg += `\n<div class="space_fakeimg">${m[1]}</div>`;
+                                const imageUrl = m[1];
+                                // 生成带有错误处理的图片HTML
+                                const imageWithErrorHandling = `
+                                    <div class="space_fakeimg" style="max-width: 100%; margin: 10px 0;">
+                                        <img src="${imageUrl}" 
+                                             alt="动态图片" 
+                                             style="max-width: 100%; border-radius: 8px; cursor: pointer; display: block;"
+                                             onclick="showImagePreview('${imageUrl}')"
+                                             onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div style=\\'background:#f5f5f5;border:1px solid #ddd;border-radius:8px;padding:20px;text-align:center;color:#999;font-size:14px;\\'><div style=\\'font-size:24px;margin-bottom:8px;\\'>🖼️</div><div>图片加载失败</div><div style=\\'font-size:12px;margin-top:4px;word-break:break-all;\\'>${imageUrl}</div></div>'; console.log('动态图片加载失败:', '${imageUrl}');" 
+                                             onload="console.log('动态图片加载成功:', '${imageUrl}');">
+                                    </div>
+                                `;
+                                fakeimg += imageWithErrorHandling;
                             }
                         }
                         
@@ -40130,14 +39981,25 @@ ${index + 1}. ${space.name}
                 const contactsContainer = document.getElementById('QQ_home_chars');
                 if (!contactsContainer) {
                     console.error('联系人容器未找到');
+                    // 尝试从AppModel获取联系人数据作为备选方案
+                    loadContactsFromAppModel();
                     return;
                 }
+                
+                console.log('🔍 尝试从QQ_home_chars加载联系人...');
                 
                 // *** 修复：使用正确的选择器 .QQ_home_usermsg，与联系人界面搜索保持一致 ***
                 const contactElements = contactsContainer.querySelectorAll('.QQ_home_usermsg');
                 const currentMembers = new Set(currentManagingGroup.members);
                 
                 console.log(`找到 ${contactElements.length} 个联系人，当前群聊成员:`, currentMembers);
+                
+                // 如果没有找到联系人，尝试备选方案
+                if (contactElements.length === 0) {
+                    console.warn('⚠️ 在QQ_home_chars中未找到联系人，尝试备选方案...');
+                    loadContactsFromAppModel();
+                    return;
+                }
                 
                 let addedCount = 0;
                 contactElements.forEach(element => {
@@ -40280,6 +40142,82 @@ ${index + 1}. ${space.name}
                 }
                 
                 updateAddMemberConfirmButton();
+            }
+            
+            /**
+             * 从AppModel加载联系人数据的备选方案
+             */
+            function loadContactsFromAppModel() {
+                console.log('🔄 使用备选方案从AppModel加载联系人...');
+                
+                const contactList = document.getElementById('add_member_contact_list');
+                if (!contactList) return;
+                
+                // 尝试从AppModel获取联系人
+                const contacts = AppModel?.contacts || [];
+                const currentMembers = new Set(currentManagingGroup.members);
+                
+                console.log(`从AppModel找到 ${contacts.length} 个联系人`);
+                
+                if (contacts.length === 0) {
+                    // 如果AppModel中也没有联系人，显示提示信息
+                    contactList.innerHTML = `
+                        <div style="
+                            text-align: center;
+                            padding: 40px 20px;
+                            color: #666;
+                        ">
+                            <div style="font-size: 48px; margin-bottom: 16px;">👥</div>
+                            <div style="font-size: 16px; margin-bottom: 8px;">暂无可添加的联系人</div>
+                            <div style="font-size: 14px; color: #999;">请先在联系人页面添加一些角色</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let addedCount = 0;
+                contacts.forEach(contact => {
+                    const contactName = contact.name || contact;
+                    
+                    // 跳过已在群聊中的成员
+                    if (currentMembers.has(contactName)) {
+                        return;
+                    }
+                    
+                    const contactItem = document.createElement('div');
+                    contactItem.className = 'add-member-contact-item';
+                    contactItem.setAttribute('data-contact-name', contactName);
+                    
+                    contactItem.innerHTML = `
+                        <div style="
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 50%;
+                            background: linear-gradient(135deg, #667eea, #764ba2);
+                            color: white;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 16px;
+                            margin-right: 12px;
+                            flex-shrink: 0;
+                        ">${contactName.charAt(0)}</div>
+                        <span style="flex: 1; font-size: 16px;">${contactName}</span>
+                        <input type="checkbox" style="width: 20px; height: 20px;">
+                    `;
+                    
+                    // 绑定点击事件
+                    contactItem.addEventListener('click', function() {
+                        const checkbox = this.querySelector('input[type="checkbox"]');
+                        checkbox.checked = !checkbox.checked;
+                        toggleMemberSelection(contactName, checkbox.checked);
+                    });
+                    
+                    contactList.appendChild(contactItem);
+                    addedCount++;
+                });
+                
+                console.log(`成功添加 ${addedCount} 个联系人到列表`);
             }
             
             /**
@@ -45869,138 +45807,6 @@ MiPhone_JSON_END`;
             }
             
             
-            /**
-             * 显示角色精灵面板
-             * @param {string} characterName - 角色名称
-             */
-            function QQ_ShowCharacterSpiritPanel(characterName) {
-                console.log(`显示角色 ${characterName} 的精灵面板`);
-                
-                // 移除现有面板
-                $('.QQ_character_spirit_panel').remove();
-                
-                const characterAvatar = getCharacterAvatarFromModel(characterName, AppModel) || 'https://files.catbox.moe/skngqq.jpg';
-                
-                // 创建精灵面板HTML
-                const panelHtml = `
-                    <div class="QQ_character_spirit_panel" style="
-                        position: fixed;
-                        top: 50%;
-                        left: 50%;
-                        transform: translate(-50%, -50%);
-                        width: 300px;
-                        background: #fff;
-                        border-radius: 15px;
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-                        z-index: 2000;
-                        overflow: hidden;
-                    ">
-                        <div class="spirit-panel-header" style="
-                            background: linear-gradient(135deg, #667eea, #764ba2);
-                            color: white;
-                            padding: 20px;
-                            text-align: center;
-                        ">
-                            <img src="${characterAvatar}" alt="${characterName}" style="
-                                width: 60px;
-                                height: 60px;
-                                border-radius: 50%;
-                                object-fit: cover;
-                                margin: 0 auto 10px;
-                                border: 3px solid rgba(255,255,255,0.8);
-                                display: block;
-                            " onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML+='<div style=\\'width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg, #667eea, #764ba2);margin:0 auto 10px;border:3px solid rgba(255,255,255,0.8);display:flex;align-items:center;justify-content:center;color:white;font-size:24px;font-weight:bold;\\'>${characterName.charAt(0)}</div>'; console.log('精灵面板头像加载失败，使用首字母头像: ${characterName}');">
-                            <h3 style="margin: 0; font-size: 18px;">${characterName}</h3>
-                            <p style="margin: 5px 0 0; font-size: 14px; opacity: 0.9;">角色精灵面板</p>
-                            <button class="QQ_close_spirit_panel" style="
-                                position: absolute;
-                                top: 10px;
-                                right: 10px;
-                                background: none;
-                                border: none;
-                                color: white;
-                                font-size: 20px;
-                                cursor: pointer;
-                                width: 30px;
-                                height: 30px;
-                                border-radius: 50%;
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                            ">×</button>
-                        </div>
-                        <div class="spirit-panel-body" style="padding: 20px;">
-                            <div class="spirit-options" style="display: flex; flex-direction: column; gap: 10px;">
-                                <button class="QQ_spirit_option" data-action="interactive_space" style="
-                                    padding: 12px;
-                                    border: none;
-                                    border-radius: 8px;
-                                    background: #f0f0f0;
-                                    cursor: pointer;
-                                    transition: background 0.2s;
-                                ">🌟 互动空间</button>
-                                <button class="QQ_spirit_option" data-action="create_space" style="
-                                    padding: 12px;
-                                    border: none;
-                                    border-radius: 8px;
-                                    background: #f0f0f0;
-                                    cursor: pointer;
-                                    transition: background 0.2s;
-                                ">✨ 创建空间</button>
-                                <button class="QQ_spirit_option" data-action="public_spaces" style="
-                                    padding: 12px;
-                                    border: none;
-                                    border-radius: 8px;
-                                    background: #f0f0f0;
-                                    cursor: pointer;
-                                    transition: background 0.2s;
-                                ">🌍 公共空间</button>
-                                <button class="QQ_spirit_option" data-action="hide_spirit" style="
-                                    padding: 12px;
-                                    border: none;
-                                    border-radius: 8px;
-                                    background: #f0f0f0;
-                                    cursor: pointer;
-                                    transition: background 0.2s;
-                                ">👻 隐藏精灵</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                
-                // 添加到页面
-                $('body').append(panelHtml);
-                
-                // 绑定事件
-                $('.QQ_close_spirit_panel').on('click', function() {
-                    $('.QQ_character_spirit_panel').fadeOut(300, function() {
-                        $(this).remove();
-                    });
-                });
-                
-                $('.QQ_spirit_option[data-action="interactive_space"]').on('click', function() {
-                    console.log('点击互动空间');
-                    $('.QQ_character_spirit_panel').remove();
-                });
-                
-                $('.QQ_spirit_option[data-action="create_space"]').on('click', function() {
-                    console.log('点击创建空间');
-                    $('.QQ_character_spirit_panel').remove();
-                });
-                
-                $('.QQ_spirit_option[data-action="public_spaces"]').on('click', function() {
-                    console.log('点击公共空间');
-                    $('.QQ_character_spirit_panel').remove();
-                });
-                
-                $('.QQ_spirit_option[data-action="hide_spirit"]').on('click', function() {
-                    console.log('点击隐藏精灵');
-                    $('.QQ_character_spirit_panel').remove();
-                    $('.QQ_character_spirit').remove();
-                });
-                
-                console.log(`✅ 角色 ${characterName} 的精灵面板已显示`);
-            }
             
             /**
              * 显示聊天设置弹窗
@@ -46176,22 +45982,6 @@ MiPhone_JSON_END`;
                 hideCommentInput();
             }
             
-            /**
-             * 显示动态菜单
-             */
-            function showMomentMenu(momentIndex, event) {
-                event.stopPropagation();
-                console.log('显示动态菜单:', momentIndex);
-                
-                dispatch({
-                    type: 'SHOW_MODAL',
-                    payload: {
-                        modalName: 'moment_menu',
-                        data: { momentId: momentIndex },
-                        position: { x: event.clientX, y: event.clientY }
-                    }
-                });
-            }
             
             /**
              * 分享动态
