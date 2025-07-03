@@ -3023,6 +3023,77 @@
                 box-shadow: 0 4px 12px rgba(25, 154, 255, 0.3);
             }
             
+            /* 群组成员下拉菜单样式 */
+            .group-member-dropdown {
+                position: absolute;
+                top: 100%;
+                left: 0;
+                width: 250px;
+                max-height: 300px;
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+                z-index: 1000;
+                overflow-y: auto;
+                padding: 8px 0;
+                margin-top: 4px;
+            }
+
+            .group-member-dropdown .member-item {
+                display: flex;
+                align-items: center;
+                padding: 8px 12px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+
+            .group-member-dropdown .member-item:hover {
+                background-color: #f5f5f5;
+            }
+
+            .group-member-dropdown .member-avatar {
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                margin-right: 10px;
+                object-fit: cover;
+                border: 1px solid #eee;
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+            }
+
+            .group-member-dropdown .member-name {
+                font-size: 14px;
+                color: #333;
+                font-weight: 500;
+            }
+
+            .group-member-dropdown .dropdown-header {
+                padding: 8px 12px;
+                font-size: 12px;
+                color: #666;
+                font-weight: bold;
+                border-bottom: 1px solid #eee;
+                margin-bottom: 4px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .group-member-dropdown .settings-icon {
+                width: 20px;
+                height: 20px;
+                cursor: pointer;
+                opacity: 0.7;
+                transition: opacity 0.2s;
+            }
+
+            .group-member-dropdown .settings-icon:hover {
+                opacity: 1;
+            }
+            
             /* 分组容器 */
             .contact-group {
                 margin-bottom: 8px;
@@ -5754,6 +5825,7 @@
                 // 页面状态
                 ui: {
                     currentPage: 'QQ_HOME',
+                    previousPage: 'QQ_HOME', // 记录来源页面
                     currentApp: null,
                     showHomePage: true,
                     showAppPage: false,
@@ -6130,7 +6202,18 @@
                         
                     case MessageTypes.NAVIGATE_HOME:
                         // 清理聊天状态
-                        if (message.payload.fromGroupChat) {
+                        newModel.ui.activeChat = null;
+                        newModel.ui.activeChatType = null;
+                        newModel.ui.showBottomNav = true;
+                        
+                        // 如果指定返回来源页面，则使用previousPage
+                        if (message.payload.returnToSource && model.ui.previousPage) {
+                            const targetPageName = getCurrentPageName(model.ui.previousPage);
+                            console.log(`📱 返回来源页面: ${targetPageName}`);
+                            newModel.ui.currentPage = model.ui.previousPage;
+                            newModel.ui.navigationIcons = updateNavigationIcons(targetPageName);
+                            newModel.ui.backgroundColor = getBackgroundColor(targetPageName);
+                        } else if (message.payload.fromGroupChat) {
                             newModel.ui.activeGroupChat = null;
                             // 根据群聊来源页面决定返回位置
                             const targetPage = message.payload.groupSourcePage === 'message' ? 'message' : 'people';
@@ -6558,6 +6641,10 @@
                         const isGroupChat = message.payload.isGroup || false;
                         
                         // 记录来源页面以支持正确的返回导航
+                        newModel.ui.previousPage = model.ui.currentPage;
+                        console.log(`📱 从 ${model.ui.currentPage} 进入聊天 ${selectedChatName}`);
+                        
+                        // 保持兼容性，同时设置全局变量
                         if (isGroupChat) {
                             window.groupChatSourcePage = getCurrentPageName(model.ui.currentPage);
                         } else {
@@ -8345,7 +8432,7 @@
                             <div style="width:100%;height:20px;display:grid;top:0;left:0;grid-template-columns:auto 1fr auto;align-items:center;margin-top:20px">
                                 <!-- 返回按钮 -->
                                 <svg class="QQ-close-btn" viewBox="0 0 1024 1024" style="height:18px;width:18px;margin-left:8px;cursor:pointer;" 
-                                     onclick="dispatch({type: 'NAVIGATE_HOME', payload: {source: 'chat', previousPage: 'message'}})">
+                                     onclick="dispatch({type: 'NAVIGATE_HOME', payload: {source: 'chat', returnToSource: true}})">
                                     <path d="M769.137778 153.372444L444.984889 512l324.152889 358.684444c36.408889 35.043556 36.408889 91.989333 0 126.976a95.744 95.744 0 0 1-131.868445 0l-377.571555-417.678222c-1.536-1.365333-3.584-1.877333-5.063111-3.299555A87.438222 87.438222 0 0 1 227.555556 512c-0.341333-23.324444 8.533333-46.876444 27.079111-64.739556 1.479111-1.422222 3.527111-1.934222 5.063111-3.185777L637.269333 26.339556a95.744 95.744 0 0 1 131.868445 0c36.408889 35.043556 36.408889 91.932444 0 127.032888z" fill="#666666" p-id="1570"></path>
                                 </svg>
                                 
@@ -8356,7 +8443,7 @@
                                 
                                 <!-- 设置按钮 -->
                                 <svg id="QQ_chat_page_setting" viewBox="0 0 1024 1024" style="height:20px;width:20px;margin-right:20px;cursor:pointer;"
-                                     onclick="dispatch({type: 'SHOW_CHAT_MENU', payload: {chatName: '${chatName}'}})">
+                                     onclick="dispatch({type: 'SHOW_CHAT_SETTINGS', payload: {chatName: '${chatName}'}})">
                                     <path d="M901.632 896H122.368c-30.72 0-55.808-25.088-55.808-55.808v-1.536c0-30.72 25.088-55.808 55.808-55.808h779.776c30.72 0 55.808 25.088 55.808 55.808v1.536c-0.512 30.72-25.6 55.808-56.32 55.808zM901.632 568.32H122.368c-30.72 0-55.808-25.088-55.808-55.808v-1.536c0-30.72 25.088-55.808 55.808-55.808h779.776c30.72 0 55.808 25.088 55.808 55.808v1.536c-0.512 30.72-25.6 55.808-56.32 55.808zM901.632 240.64H122.368c-30.72 0-55.808-25.088-55.808-55.808v-1.536c0-30.72 25.088-55.808 55.808-55.808h779.776c30.72 0 55.808 25.088 55.808 55.808v1.536c-0.512 30.72-25.6 55.808-56.32 55.808z" p-id="4301" fill="#666666"></path>
                                 </svg>
                             </div>
@@ -45250,23 +45337,10 @@ MiPhone_JSON_END`;
                     existingDropdown.remove();
                 }
                 
-                // 创建新的群管理下拉菜单（匹配原版设计）
+                // 创建新的群管理下拉菜单（使用原版样式）
                 const dropdown = document.createElement('div');
                 dropdown.id = 'group_management_dropdown';
-                dropdown.className = 'group-management-dropdown';
-                dropdown.style.cssText = `
-                    position: absolute;
-                    background: white;
-                    border: 1px solid #e0e0e0;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                    z-index: 10000;
-                    max-height: 300px;
-                    overflow-y: auto;
-                    margin-top: 5px;
-                    min-width: 200px;
-                    display: block;
-                `;
+                dropdown.className = 'group-member-dropdown';
                 
                 // 获取触发元素位置信息用于定位
                 const rect = element.getBoundingClientRect();
@@ -45275,114 +45349,63 @@ MiPhone_JSON_END`;
                 
                 // 创建标题栏（包含设置按钮）
                 const header = document.createElement('div');
-                header.className = 'group-management-header';
-                header.style.cssText = `
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 12px 15px;
-                    border-bottom: 1px solid #f0f0f0;
-                    background: #f8f9fa;
-                    border-radius: 8px 8px 0 0;
-                `;
+                header.className = 'dropdown-header';
                 
-                const title = document.createElement('div');
-                title.className = 'group-management-title';
-                title.textContent = '群聊成员';
-                title.style.cssText = 'font-weight: 500; color: #333;';
+                const title = document.createElement('span');
+                title.textContent = `群聊成员 (${groupData.members.length})`;
                 
                 const settingsIcon = document.createElement('svg');
-                settingsIcon.className = 'group-settings-icon';
+                settingsIcon.className = 'settings-icon';
                 settingsIcon.setAttribute('viewBox', '0 0 24 24');
                 settingsIcon.setAttribute('fill', 'currentColor');
-                settingsIcon.style.cssText = `
-                    width: 20px;
-                    height: 20px;
-                    cursor: pointer;
-                    opacity: 0.7;
-                    transition: opacity 0.2s;
-                `;
                 settingsIcon.innerHTML = `
                     <path d="M12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-.97l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.32-.07.65-.07.97s.03.66.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1.01c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
                 `;
-                settingsIcon.onmouseover = () => settingsIcon.style.opacity = '1';
-                settingsIcon.onmouseout = () => settingsIcon.style.opacity = '0.7';
                 settingsIcon.onclick = () => {
                     dropdown.remove();
-                    // 触发群聊设置模态框
-                    handleViewAction({type: 'SHOW_CHAT_SETTINGS', payload: {chatName: groupName}}, event);
+                    // 触发群聊设置
+                    dispatch({type: 'SHOW_CHAT_SETTINGS', payload: {chatName: groupName}});
                 };
                 
                 header.appendChild(title);
                 header.appendChild(settingsIcon);
+                dropdown.appendChild(header);
                 
-                // 创建成员列表容器
-                const memberListContainer = document.createElement('div');
-                memberListContainer.className = 'group-members-list';
-                memberListContainer.id = 'group_members_display';
-                memberListContainer.style.cssText = `
-                    max-height: 250px;
-                    overflow-y: auto;
-                    padding: 5px 0;
-                `;
-                
-                // 添加群成员
+                // 添加群成员（垂直列表布局）
                 groupData.members.forEach(member => {
                     const memberItem = document.createElement('div');
-                    memberItem.className = 'group-member-item';
-                    memberItem.style.cssText = `
-                        display: flex;
-                        align-items: center;
-                        padding: 8px 15px;
-                        transition: background-color 0.2s;
-                        cursor: pointer;
-                    `;
-                    memberItem.onmouseover = () => memberItem.style.backgroundColor = '#f5f5f5';
-                    memberItem.onmouseout = () => memberItem.style.backgroundColor = 'transparent';
+                    memberItem.className = 'member-item';
                     
                     // 创建头像
                     const avatar = document.createElement('div');
-                    avatar.className = 'group-member-avatar';
-                    avatar.style.cssText = `
-                        width: 32px;
-                        height: 32px;
-                        border-radius: 50%;
-                        margin-right: 10px;
-                        flex-shrink: 0;
-                        background-size: cover;
-                        background-position: center;
-                        background-repeat: no-repeat;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 12px;
-                        font-weight: bold;
-                        color: white;
-                    `;
+                    avatar.className = 'member-avatar';
                     
                     // 尝试从世界书获取头像
                     const worldbookAvatar = getCharacterAvatarFromWorldbook(member);
                     if (worldbookAvatar && worldbookAvatar.backgroundImage) {
                         avatar.style.backgroundImage = worldbookAvatar.backgroundImage;
-                        avatar.textContent = '';
                     } else {
                         // 尝试从模型获取头像
                         const modelAvatar = getCharacterAvatarFromModel(member, AppModel);
                         if (modelAvatar) {
                             avatar.style.backgroundImage = `url("${modelAvatar}")`;
-                            avatar.textContent = '';
                         } else {
                             // 回退到渐变背景
                             avatar.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+                            avatar.style.color = 'white';
+                            avatar.style.display = 'flex';
+                            avatar.style.alignItems = 'center';
+                            avatar.style.justifyContent = 'center';
+                            avatar.style.fontSize = '12px';
+                            avatar.style.fontWeight = 'bold';
                             avatar.textContent = member.charAt(0);
                         }
                     }
                     
                     // 创建名称
                     const name = document.createElement('div');
-                    name.className = 'group-member-name';
+                    name.className = 'member-name';
                     name.textContent = member;
-                    name.style.cssText = 'flex: 1; font-size: 14px; color: #333;';
                     
                     memberItem.appendChild(avatar);
                     memberItem.appendChild(name);
@@ -45393,11 +45416,8 @@ MiPhone_JSON_END`;
                         // 可以添加更多点击成员的逻辑
                     };
                     
-                    memberListContainer.appendChild(memberItem);
+                    dropdown.appendChild(memberItem);
                 });
-                
-                dropdown.appendChild(header);
-                dropdown.appendChild(memberListContainer);
                 
                 // 添加到页面并设置点击外部关闭
                 document.body.appendChild(dropdown);
