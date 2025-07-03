@@ -3959,7 +3959,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月3日</span>
+                            <span>台北</span> <span id="day">7月4日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -6554,33 +6554,41 @@
                         const { groupName } = message.payload;
                         
                         // 检查分组名是否已存在
-                        if (newModel.groups && newModel.groups[groupName]) {
+                        const existingGroup = contactGroups.find(group => group.name === groupName);
+                        if (existingGroup) {
                             newModel.ui.modal.modalData.errorMessage = `分组"${groupName}"已存在`;
                             break;
                         }
                         
-                        // 创建新分组
-                        if (!newModel.groups) {
-                            newModel.groups = {};
-                        }
-                        newModel.groups[groupName] = {
-                            id: Date.now().toString(),
+                        // 创建新分组对象
+                        const newGroup = {
+                            id: 'group_' + Date.now(),
                             name: groupName,
-                            members: [],
-                            createdAt: new Date().toISOString()
+                            contacts: [],
+                            collapsed: false,
+                            order: contactGroups.length
                         };
+                        
+                        // 添加到contactGroups数组
+                        contactGroups.push(newGroup);
                         
                         // 关闭弹窗
                         newModel.ui.modal.activeModal = null;
                         newModel.ui.modal.modalData = {};
                         newModel.ui.modal.isVisible = false;
                         
+                        // 重新渲染联系人分组
+                        setTimeout(() => {
+                            renderContactGroups();
+                        }, 50);
+                        
                         // 异步保存到世界书
                         setTimeout(() => {
-                            QQ_SafeSaveToWorldBook('新建分组', newModel.groups[groupName], `分组_${groupName}`);
+                            saveGroupsToStorage();
                             if (typeof toastr !== 'undefined') {
                                 toastr.success(`分组"${groupName}"创建成功`, '分组管理');
                             }
+                            console.log(`✅ 分组"${groupName}"已创建并保存到世界书`);
                         }, 100);
                         
                         break;
@@ -9723,18 +9731,28 @@
                 const errorMessage = modalData.errorMessage || '';
                 
                 container.innerHTML = `
-                    <div style="
+                    <div class="modal-backdrop" style="
                         position: fixed;
-                        top: 50%;
-                        left: 50%;
-                        transform: translate(-50%, -50%);
-                        background: white;
-                        border-radius: 12px;
-                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-                        width: 90%;
-                        max-width: 400px;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0,0,0,0.5);
                         pointer-events: auto;
-                    ">
+                        z-index: 1000;
+                    " onclick="closeNewGroupModal()">
+                        <div class="modal-content" style="
+                            position: fixed;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%);
+                            background: white;
+                            border-radius: 12px;
+                            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                            width: 90%;
+                            max-width: 400px;
+                            pointer-events: auto;
+                        " onclick="event.stopPropagation()">
                         <div style="padding: 20px; border-bottom: 1px solid #eee;">
                             <h3 style="margin: 0; font-size: 18px;">新建分组</h3>
                         </div>
@@ -9747,6 +9765,12 @@
                                     id="new_group_name_input_mvu"
                                     value="${groupName}" 
                                     placeholder="请输入分组名称"
+                                    inputmode="text"
+                                    autocomplete="off"
+                                    autocorrect="off"
+                                    autocapitalize="off"
+                                    spellcheck="false"
+                                    maxlength="50"
                                     style="
                                         width: 100%; 
                                         padding: 10px; 
@@ -9784,6 +9808,7 @@
                                 "
                                 ${!groupName.trim() ? 'disabled' : ''}
                             >确定</button>
+                        </div>
                         </div>
                     </div>
                 `;
