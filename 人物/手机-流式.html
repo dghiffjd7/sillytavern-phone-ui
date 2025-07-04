@@ -21359,6 +21359,34 @@ ${index + 1}. ${space.name}
             }
 
             /**
+             * 过滤掉用户消息以避免重复显示
+             * @param {Array} messages - 消息数组
+             * @returns {Array} 过滤后的消息数组
+             */
+            function QQ_FilterUserMessages(messages) {
+                if (!Array.isArray(messages)) {
+                    return messages;
+                }
+                
+                return messages.filter(msg => {
+                    if (typeof msg !== 'string') {
+                        return true; // 保留非字符串消息
+                    }
+                    
+                    const parts = msg.split('--');
+                    if (parts.length >= 2) {
+                        const senderName = parts[0].trim();
+                        // 过滤掉用户发送的消息，但保留其他角色的消息
+                        if (senderName === '{{user}}' || senderName === UserName) {
+                            console.log(`过滤用户重复消息: ${msg}`);
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+            }
+
+            /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
              */
@@ -21441,6 +21469,9 @@ ${index + 1}. ${space.name}
                         let NewMsgCount = 0;
                         let LastTime = "";
                         let LastMsg = "";
+                        
+                        // *** 新增：过滤用户重复消息 ***
+                        json.私聊[str] = QQ_FilterUserMessages(json.私聊[str]);
                         
                         // *** 阶段一：收集新消息用于流式显示 ***
                         const newMessages = [];
@@ -21809,6 +21840,9 @@ ${index + 1}. ${space.name}
                         let NewMsgCount = 0;
                         let LastTime = "";
                         let LastMsg = "";
+                        
+                        // *** 新增：过滤用户重复消息 ***
+                        json.群聊[name]["msgs"] = QQ_FilterUserMessages(json.群聊[name]["msgs"]);
                         
                         // *** 阶段一：收集新消息用于流式显示 ***
                         const newMessages = [];
@@ -22951,8 +22985,15 @@ ${index + 1}. ${space.name}
                         // 处理评论格式
                         const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
                         if (commentMatch) {
+                            const commenterName = commentMatch[1].trim();
+                            // *** 新增：过滤用户重复评论 ***
+                            if (commenterName === '{{user}}' || commenterName === UserName) {
+                                console.log(`过滤用户重复评论: ${commenterName} - ${commentMatch[2]}`);
+                                continue;
+                            }
+                            
                             commentLines.push({
-                                name: commentMatch[1],
+                                name: commenterName,
                                 content: commentMatch[2],
                                 timestamp: new Date().toISOString()
                             });
@@ -23067,12 +23108,19 @@ ${index + 1}. ${space.name}
                     }
                     match = line.match(/^\s*(.+?)(?::|：|--)(.+)$/m);
                     if (match && momentdiv && list && currentMomentData) {
+                        // *** 新增：过滤用户重复评论 ***
+                        const commenterName = match[1].trim();
+                        if (commenterName === '{{user}}' || commenterName === UserName) {
+                            console.log(`过滤用户重复评论: ${commenterName} - ${match[2]}`);
+                            continue;
+                        }
+                        
                         // 是评论内容
                         //console.log(`评论人:${match[1]}  评论内容:${match[2]}`)
                         
                         // *** 新增：保存评论到数据对象 ***
                         const commentData = {
-                            name: match[1],
+                            name: commenterName,
                             content: match[2],
                             timestamp: new Date().toISOString()
                         };
@@ -23087,7 +23135,7 @@ ${index + 1}. ${space.name}
                             class: "user_leave_message",
                         });
                         messageDiv.html(
-                            `<span><strong>${match[1]}</strong>：${match[2]}</span>`,
+                            `<span><strong>${commenterName}</strong>：${match[2]}</span>`,
                         );
                         list.append(messageDiv);
                     }
