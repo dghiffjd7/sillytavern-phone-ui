@@ -7148,6 +7148,26 @@
             }
 
             /**
+             * 保存用户消息到私聊数据结构
+             * @param {string} name - 聊天对象名称
+             * @param {string} userMessage - 用户消息
+             */
+            function QQ_SaveUserMessageToPrivateChat(name, userMessage) {
+                const chatKey = `${UserName}和${name}的聊天`;
+                if (!QQ_msgjson.私聊[chatKey]) {
+                    QQ_msgjson.私聊[chatKey] = [];
+                }
+                if (!QQ_msgjson.私聊[chatKey].includes(userMessage)) {
+                    QQ_msgjson.私聊[chatKey].push(userMessage);
+                    // 同时更新User_LastMsgMap
+                    if (!User_LastMsgMap.私聊) {
+                        User_LastMsgMap.私聊 = {};
+                    }
+                    User_LastMsgMap.私聊[name] = userMessage;
+                }
+            }
+
+            /**
              * 按下回车键
              * @param e 事件对象
              * @param element 元素
@@ -7179,13 +7199,35 @@
                 $msgContent[0].scrollTop = $msgContent[0].scrollHeight;
                 $(element).val("");
                 
+                // *** 新增：立即将缓存的用户消息保存到数据结构和世界书 ***
+                const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                const userMessage = `${UserName}--${content}--${currentTime}`;
+                
                 if (QQ_Groups.includes(name)) {
                     QQ_CacheSendMsg += `\n在群聊${name}中发送:${content}`;
                     
-                    // 群聊消息处理（简化，避免重复加载）
-                    console.log(`群聊消息: ${name} - ${content}`);
+                    // *** 新增：保存群聊缓存消息到数据结构 ***
+                    if (!QQ_msgjson.群聊[name]) {
+                        QQ_msgjson.群聊[name] = { msgs: [] };
+                    }
+                    if (!QQ_msgjson.群聊[name].msgs.includes(userMessage)) {
+                        QQ_msgjson.群聊[name].msgs.push(userMessage);
+                        console.log(`✅ 群聊缓存消息已保存到数据结构: ${userMessage}`);
+                    }
                 } else {
                     QQ_CacheSendMsg += `\n给${name}发消息:${content}`;
+                    
+                    // *** 新增：保存私聊缓存消息到数据结构 ***
+                    QQ_SaveUserMessageToPrivateChat(name, userMessage);
+                    console.log(`✅ 私聊缓存消息已保存到数据结构: ${userMessage}`);
+                }
+                
+                // *** 新增：立即保存缓存消息到世界书 ***
+                try {
+                    await QQ_Save_Chat_Backup();
+                    console.log(`✅ 缓存消息已保存到世界书: ${userMessage}`);
+                } catch (error) {
+                    console.error('❌ 保存缓存消息到世界书失败:', error);
                 }
             }
             /**
