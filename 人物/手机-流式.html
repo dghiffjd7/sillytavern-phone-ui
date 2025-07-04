@@ -4977,6 +4977,25 @@
                 群聊: {},
             };
             let QQ_moment = /* unused pure expression or super */ null && [];
+            
+            /**
+             * MVU记忆系统 - 全局记忆模型
+             * 这是整个记忆系统的"唯一真实之源"
+             * 包含了所有角色的关系记忆、中期记忆和长期记忆
+             */
+            let memoryModel = {
+                // 关系记忆层 - 每个角色的核心关系数据
+                relationship: {},
+                // 中期记忆层 - 场景切换时的摘要
+                mediumTerm: {},
+                // 长期记忆层 - 记忆编年史
+                longTerm: {},
+                // 系统元数据
+                metadata: {
+                    lastUpdate: null,
+                    version: "1.0.0"
+                }
+            };
                     /**
              * 一个用于解析和操作键值对格式文本的通用设置类。
              * 支持从文本加载设置，读取/写入值，以及处理带区段的配置。
@@ -5779,6 +5798,563 @@
                 // --- 步骤 2: 保持AI记忆完整性，不进行上下文净化 ---
                 // 为了保持AI记忆的完整性和连续性，跳过任何上下文净化操作
                 console.log('✅ 保持AI原始回复，不进行上下文净化以维护记忆完整性。');
+            }
+            
+            /**
+             * ================ MVU记忆系统核心函数 ================
+             */
+            
+            /**
+             * [MVU-Model] 从世界书加载记忆数据到运行时Model
+             * @returns {Promise<void>}
+             */
+            async function QQ_LoadMemoryFromWorldbook() {
+                console.log('🧠 开始从世界书加载记忆数据...');
+                
+                if (!entries || entries.length === 0) {
+                    console.warn('⚠️ 世界书条目为空，无法加载记忆');
+                    return;
+                }
+                
+                // 查找所有记忆相关的世界书条目
+                const memoryEntries = entries.filter(entry => 
+                    entry.comment && entry.comment.includes('[Memory -') 
+                );
+                
+                for (const entry of memoryEntries) {
+                    try {
+                        // 从条目注释中提取角色名
+                        const match = entry.comment.match(/\[Memory - (.+?)\]/);
+                        if (!match) continue;
+                        
+                        const characterName = match[1];
+                        const memoryData = {};
+                        
+                        // 解析键值对格式的记忆数据
+                        const lines = entry.content.split('\n');
+                        for (const line of lines) {
+                            const trimmedLine = line.trim();
+                            // 跳过注释和空行
+                            if (trimmedLine.startsWith('//') || trimmedLine === '') continue;
+                            
+                            // 解析键值对（支持冒号和等号）
+                            const separatorIndex = Math.max(
+                                trimmedLine.indexOf(':'),
+                                trimmedLine.indexOf('=')
+                            );
+                            
+                            if (separatorIndex > -1) {
+                                const key = trimmedLine.substring(0, separatorIndex).trim();
+                                let value = trimmedLine.substring(separatorIndex + 1).trim();
+                                
+                                // 移除引号
+                                if ((value.startsWith('"') && value.endsWith('"')) ||
+                                    (value.startsWith("'") && value.endsWith("'"))) {
+                                    value = value.slice(1, -1);
+                                }
+                                
+                                // 尝试转换数字
+                                if (!isNaN(value) && value !== '') {
+                                    value = Number(value);
+                                }
+                                
+                                memoryData[key] = value;
+                            }
+                        }
+                        
+                        // 将解析的数据存入memoryModel
+                        memoryModel.relationship[characterName] = memoryData;
+                        console.log(`✅ 已加载角色 [${characterName}] 的记忆数据:`, memoryData);
+                        
+                    } catch (error) {
+                        console.error(`❌ 解析记忆条目失败: ${entry.comment}`, error);
+                    }
+                }
+                
+                // 更新元数据
+                memoryModel.metadata.lastUpdate = new Date().toISOString();
+                
+                // *** 新增：自动初始化新角色的记忆 ***
+                await QQ_AutoInitializeMemoryForNewCharacters();
+                
+                console.log('🧠 记忆加载完成，当前memoryModel:', memoryModel);
+            }
+            
+            /**
+             * [MVU-AUTO] 自动为新角色初始化记忆
+             * 检查所有已知角色，为没有记忆数据的角色创建初始记忆结构
+             */
+            async function QQ_AutoInitializeMemoryForNewCharacters() {
+                console.log('🆕 开始自动初始化新角色记忆...');
+                
+                // 获取所有已知角色名
+                const knownCharacters = new Set();
+                
+                // 从现有数据结构中收集角色名
+                if (typeof QQ_Names === 'object' && QQ_Names !== null) {
+                    Object.keys(QQ_Names).forEach(name => knownCharacters.add(name));
+                }
+                
+                if (typeof QQ_msgjson === 'object' && QQ_msgjson !== null) {
+                    // 从私聊记录中获取角色名
+                    if (QQ_msgjson.私聊) {
+                        Object.keys(QQ_msgjson.私聊).forEach(chatKey => {
+                            const match = chatKey.match(/(.+)和(.+)的聊天/);
+                            if (match) {
+                                const [, user, char] = match;
+                                if (char !== UserName) knownCharacters.add(char);
+                            }
+                        });
+                    }
+                    
+                    // 从群聊记录中获取角色名
+                    if (QQ_msgjson.群聊) {
+                        Object.keys(QQ_msgjson.群聊).forEach(groupName => {
+                            knownCharacters.add(groupName);
+                        });
+                    }
+                }
+                
+                // 为每个没有记忆数据的角色创建初始记忆
+                for (const characterName of knownCharacters) {
+                    if (!memoryModel.relationship[characterName]) {
+                        console.log(`🆕 为角色 [${characterName}] 创建初始记忆结构...`);
+                        
+                        // 创建初始记忆结构 - 更丰富的关系定义
+                        const initialMemory = {
+                            // 核心社交度量 - 更中性的词汇
+                            Familiarity: 30,        // 熟悉度 (0-100)
+                            Closeness: 20,          // 亲密度 (0-100)
+                            Mood: "平静",           // 当前心情
+                            
+                            // 关系背景与分类 - 新增多维度关系定义
+                            RelationshipStatus: "陌生人",  // 陌生人, 网友, 同事, 朋友, 挚友, 家人, 暧昧期, 恋人
+                            RelationshipTags: "新认识",    // 关系标签 (用逗号分隔)
+                            SocialCircle: "未知",          // 所属社交圈
+                            
+                            // 互动历史与记忆点
+                            LastInteractionType: "初次相遇",
+                            LastInteractionTime: new Date().toISOString(),
+                            RecentKeyTopics: "尚无",
+                            UnresolvedQuestions: "对用户感到好奇",
+                            
+                            // 聊天风格与行为特征
+                            TypingSpeed: "normal",    // fast, normal, slow
+                            ReplyDelay: "normal",     // quick, normal, slow
+                            TypoRate: 0.02,          // 错字概率
+                            
+                            // 记忆节点
+                            ImportantEvents: [],
+                            Preferences: {},
+                            Topics: [],
+                            
+                            // 元数据
+                            CreatedAt: new Date().toISOString(),
+                            UpdatedAt: new Date().toISOString(),
+                            Version: "2.0.0"
+                        };
+                        
+                        // 存储到记忆模型
+                        memoryModel.relationship[characterName] = initialMemory;
+                        
+                        // 保存到世界书
+                        await QQ_SaveMemoryToWorldbook(characterName, initialMemory);
+                        
+                        console.log(`✅ 已为角色 [${characterName}] 创建初始记忆结构`);
+                    }
+                }
+                
+                console.log('🆕 新角色记忆初始化完成');
+            }
+            
+            /**
+             * [MVU-View] 根据记忆数据构建Prompt
+             * @param {string} characterName - 角色名称
+             * @returns {string} 构建好的记忆Prompt
+             */
+            function buildPromptFromMemory(characterName) {
+                const profile = memoryModel.relationship[characterName];
+                if (!profile) {
+                    console.log(`⚠️ 未找到角色 [${characterName}] 的记忆数据`);
+                    return "";
+                }
+                
+                // 构建记忆上下文Prompt - 支持新的关系结构
+                const promptParts = [];
+                
+                promptParts.push(`[当前关系状态 - ${characterName}]`);
+                promptParts.push("");
+                
+                // 核心社交度量
+                if (profile.Familiarity !== undefined) {
+                    promptParts.push(`我们的熟悉度: ${profile.Familiarity}/100`);
+                }
+                if (profile.Closeness !== undefined) {
+                    promptParts.push(`我们的亲密度: ${profile.Closeness}/100`);
+                }
+                if (profile.Mood) {
+                    promptParts.push(`我现在的心情: ${profile.Mood}`);
+                }
+                
+                promptParts.push("");
+                
+                // 关系背景与分类
+                if (profile.RelationshipStatus) {
+                    promptParts.push(`我们目前的关系: ${profile.RelationshipStatus}`);
+                }
+                if (profile.RelationshipTags && profile.RelationshipTags !== "新认识") {
+                    promptParts.push(`关系标签: ${profile.RelationshipTags}`);
+                }
+                if (profile.SocialCircle && profile.SocialCircle !== "未知") {
+                    promptParts.push(`所属圈子: ${profile.SocialCircle}`);
+                }
+                
+                promptParts.push("");
+                
+                // 互动历史与记忆点
+                if (profile.LastInteractionType && profile.LastInteractionType !== "初次相遇") {
+                    promptParts.push(`上次互动类型: ${profile.LastInteractionType}`);
+                }
+                if (profile.RecentKeyTopics && profile.RecentKeyTopics !== "尚无") {
+                    promptParts.push(`最近核心话题: ${profile.RecentKeyTopics}`);
+                }
+                if (profile.UnresolvedQuestions && profile.UnresolvedQuestions !== "对用户感到好奇") {
+                    promptParts.push(`未解决的问题: ${profile.UnresolvedQuestions}`);
+                }
+                
+                // 聊天风格提示
+                if (profile.TypingSpeed && profile.TypingSpeed !== "normal") {
+                    promptParts.push(`我的打字速度: ${profile.TypingSpeed === "fast" ? "较快" : profile.TypingSpeed === "slow" ? "较慢" : "正常"}`);
+                }
+                if (profile.ReplyDelay && profile.ReplyDelay !== "normal") {
+                    promptParts.push(`我的回复速度: ${profile.ReplyDelay === "quick" ? "很快" : profile.ReplyDelay === "slow" ? "偏慢" : "正常"}`);
+                }
+                
+                promptParts.push("");
+                promptParts.push("#行为指导：请根据以上关系状态，自然地进行回复。");
+                promptParts.push("");
+                promptParts.push("#记忆更新指导：请在回复最后添加<memoryUpdate>标签，分析本次互动对关系的影响。");
+                promptParts.push("格式示例：<memoryUpdate>{\"familiarityChange\": \"+3\", \"closenessChange\": \"+1\", \"moodChange\": \"更愉快\", \"newTopics\": \"讨论了工作压力\", \"relationshipProgress\": \"关系更进一步\"}</memoryUpdate>");
+                promptParts.push("");
+                
+                const memoryPrompt = promptParts.join('\n');
+                console.log(`🧠 为 [${characterName}] 构建的记忆Prompt:`, memoryPrompt);
+                
+                return memoryPrompt;
+            }
+            
+            /**
+             * [MVU-Extract] 从AI回复中提取记忆更新信息
+             * @param {string} aiResponse - AI的完整回复
+             * @returns {Object|null} 提取到的记忆更新信息，如果没有则返回null
+             */
+            function QQ_ExtractMemoryUpdate(aiResponse) {
+                try {
+                    // 使用正则表达式提取memoryUpdate标签内容
+                    const memoryUpdateMatch = aiResponse.match(/<memoryUpdate>([\s\S]*?)<\/memoryUpdate>/i);
+                    
+                    if (!memoryUpdateMatch) {
+                        console.log('⚠️ AI回复中未找到memoryUpdate标签');
+                        return null;
+                    }
+                    
+                    const memoryUpdateContent = memoryUpdateMatch[1].trim();
+                    console.log(`🔍 提取到记忆更新内容: ${memoryUpdateContent}`);
+                    
+                    // 尝试解析JSON
+                    const memoryUpdate = JSON.parse(memoryUpdateContent);
+                    
+                    // 验证必要字段
+                    if (typeof memoryUpdate === 'object' && memoryUpdate !== null) {
+                        console.log('✅ 记忆更新信息解析成功:', memoryUpdate);
+                        return memoryUpdate;
+                    } else {
+                        console.warn('⚠️ 记忆更新信息格式无效');
+                        return null;
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 解析记忆更新信息失败:', error);
+                    return null;
+                }
+            }
+            
+            /**
+             * [MVU-Apply] 应用记忆更新到角色档案
+             * @param {string} characterName - 角色名称
+             * @param {Object} memoryUpdate - 记忆更新信息
+             */
+            async function QQ_ApplyMemoryUpdate(characterName, memoryUpdate) {
+                if (!characterName || !memoryUpdate) {
+                    console.warn('⚠️ 记忆更新参数无效');
+                    return;
+                }
+                
+                const profile = memoryModel.relationship[characterName];
+                if (!profile) {
+                    console.warn(`⚠️ 未找到角色 [${characterName}] 的记忆档案`);
+                    return;
+                }
+                
+                console.log(`🧠 开始应用 [${characterName}] 的记忆更新...`, memoryUpdate);
+                
+                // 应用数值变化
+                if (memoryUpdate.familiarityChange) {
+                    const change = parseInt(memoryUpdate.familiarityChange) || 0;
+                    profile.Familiarity = Math.max(0, Math.min(100, (profile.Familiarity || 30) + change));
+                    console.log(`📈 熟悉度变化: ${memoryUpdate.familiarityChange} -> 当前: ${profile.Familiarity}`);
+                }
+                
+                if (memoryUpdate.closenessChange) {
+                    const change = parseInt(memoryUpdate.closenessChange) || 0;
+                    profile.Closeness = Math.max(0, Math.min(100, (profile.Closeness || 20) + change));
+                    console.log(`💕 亲密度变化: ${memoryUpdate.closenessChange} -> 当前: ${profile.Closeness}`);
+                }
+                
+                // 应用状态更新
+                if (memoryUpdate.moodChange) {
+                    profile.Mood = memoryUpdate.moodChange;
+                    console.log(`😊 心情更新: ${memoryUpdate.moodChange}`);
+                }
+                
+                if (memoryUpdate.newTopics) {
+                    profile.RecentKeyTopics = memoryUpdate.newTopics;
+                    console.log(`💬 话题更新: ${memoryUpdate.newTopics}`);
+                }
+                
+                if (memoryUpdate.relationshipProgress) {
+                    profile.UnresolvedQuestions = memoryUpdate.relationshipProgress;
+                    console.log(`🎯 关系进展: ${memoryUpdate.relationshipProgress}`);
+                }
+                
+                // 更新互动类型和时间
+                profile.LastInteractionType = "深入交流";
+                profile.LastInteractionTime = new Date().toISOString();
+                profile.UpdatedAt = new Date().toISOString();
+                
+                // 保存到世界书
+                await QQ_SaveMemoryToWorldbook(characterName, profile);
+                console.log(`✅ [${characterName}] 的记忆更新已保存`);
+            }
+            
+            /**
+             * [MVU-Process] 处理AI回复并更新记忆系统
+             * @param {string} aiResult - AI的完整回复
+             * @param {string} characterName - 当前对话的角色名称 (可选)
+             */
+            async function QQ_ProcessMemoryUpdateFromAIReply(aiResult, characterName = null) {
+                try {
+                    console.log("🧠 开始处理AI回复的记忆更新...");
+                    
+                    // 如果没有提供角色名，尝试从上下文获取
+                    if (!characterName && typeof QQ_LastRequestName === 'string') {
+                        characterName = QQ_LastRequestName;
+                    }
+                    
+                    if (!characterName) {
+                        console.log('⚠️ 无法确定角色名称，跳过记忆更新');
+                        return;
+                    }
+                    
+                    // 跳过群聊记忆更新（遵循私聊触发策略）
+                    if (QQ_Groups && QQ_Groups.includes(characterName)) {
+                        console.log(`⚠️ 角色 [${characterName}] 是群聊，跳过记忆更新`);
+                        return;
+                    }
+                    
+                    // 确保角色有记忆档案
+                    if (!memoryModel.relationship[characterName]) {
+                        console.log(`⚠️ 角色 [${characterName}] 没有记忆档案，跳过更新`);
+                        return;
+                    }
+                    
+                    // 提取记忆更新信息
+                    const memoryUpdate = QQ_ExtractMemoryUpdate(aiResult);
+                    if (!memoryUpdate) {
+                        console.log('⚠️ AI回复中没有记忆更新信息，跳过更新');
+                        return;
+                    }
+                    
+                    // 应用记忆更新
+                    await QQ_ApplyMemoryUpdate(characterName, memoryUpdate);
+                    console.log(`✅ 角色 [${characterName}] 的记忆更新处理完成`);
+                    
+                } catch (error) {
+                    console.error('❌ 处理记忆更新时发生错误:', error);
+                }
+            }
+            
+            /**
+             * [MVU-Update] 记忆系统的核心更新函数
+             * @param {Object} model - 当前的记忆模型
+             * @param {Object} message - 描述发生事件的动作对象
+             * @returns {Object} 更新后的新模型
+             */
+            function updateMemory(model, message) {
+                // 深拷贝确保不可变性
+                const newModel = JSON.parse(JSON.stringify(model));
+                
+                console.log(`🔄 处理记忆更新事件: ${message.type}`, message.payload);
+                
+                switch (message.type) {
+                    case 'AI_REPLY_PROCESSED':
+                        const { characterName, analysis } = message.payload;
+                        const profile = newModel.relationship[characterName];
+                        
+                        if (!profile) {
+                            console.warn(`⚠️ 未找到角色 [${characterName}] 的记忆配置`);
+                            break;
+                        }
+                        
+                        // 1. 更新好感度
+                        if (analysis.affectionChange !== undefined) {
+                            const oldAffection = profile.Affection || 50;
+                            profile.Affection = Math.max(0, Math.min(100, 
+                                oldAffection + parseInt(analysis.affectionChange, 10)
+                            ));
+                            console.log(`💗 好感度: ${oldAffection} → ${profile.Affection}`);
+                        }
+                        
+                        // 2. 更新信任度
+                        if (analysis.trustChange !== undefined) {
+                            const oldTrust = profile.Trust || 40;
+                            profile.Trust = Math.max(0, Math.min(100,
+                                oldTrust + parseInt(analysis.trustChange, 10)
+                            ));
+                            console.log(`🤝 信任度: ${oldTrust} → ${profile.Trust}`);
+                        }
+                        
+                        // 3. 更新心情
+                        if (analysis.moodChange) {
+                            profile.Mood = analysis.moodChange;
+                            console.log(`😊 心情更新: ${profile.Mood}`);
+                        }
+                        
+                        // 4. 更新最后互动信息
+                        profile.LastInteractionType = analysis.interactionType || "对话";
+                        profile.LastInteractionTime = new Date().toISOString();
+                        
+                        // 5. 更新核心话题
+                        if (analysis.keyTopics) {
+                            profile.RecentKeyTopics = analysis.keyTopics;
+                        }
+                        
+                        // 6. 更新未解决的问题
+                        if (analysis.unresolved) {
+                            profile.UnresolvedQuestions = analysis.unresolved;
+                        }
+                        
+                        // 7. 根据好感度自动更新关系状态
+                        const affection = profile.Affection || 50;
+                        if (affection >= 90) {
+                            profile.RelationshipStatus = "亲密无间";
+                        } else if (affection >= 75) {
+                            profile.RelationshipStatus = "恋人";
+                        } else if (affection >= 60) {
+                            profile.RelationshipStatus = "暧昧期";
+                        } else if (affection >= 40) {
+                            profile.RelationshipStatus = "朋友";
+                        } else if (affection >= 20) {
+                            profile.RelationshipStatus = "熟人";
+                        } else {
+                            profile.RelationshipStatus = "陌生";
+                        }
+                        
+                        console.log(`✅ 记忆更新完成 for ${characterName}:`, profile);
+                        break;
+                        
+                    case 'USER_SWITCHED_CHAT':
+                        // TODO: 实现中期记忆生成
+                        console.log('📝 用户切换了聊天，可以在此生成中期记忆摘要');
+                        break;
+                        
+                    case 'MEMORY_SUMMARY_TRIGGERED':
+                        // TODO: 实现长期记忆生成
+                        console.log('📚 触发长期记忆总结');
+                        break;
+                        
+                    case 'MEMORY_INITIALIZED':
+                        // 初始化新角色的记忆
+                        const { characterName: newChar, initialData } = message.payload;
+                        newModel.relationship[newChar] = initialData;
+                        console.log(`🎉 初始化角色 [${newChar}] 的记忆`);
+                        break;
+                }
+                
+                // 更新元数据
+                newModel.metadata.lastUpdate = new Date().toISOString();
+                
+                return newModel;
+            }
+            
+            /**
+             * [MVU-Helper] 将更新后的记忆保存回世界书
+             * @param {string} characterName - 角色名称
+             * @param {Object} memoryData - 记忆数据
+             * @returns {Promise<boolean>} 是否保存成功
+             */
+            async function QQ_SaveMemoryToWorldbook(characterName, memoryData) {
+                try {
+                    const entryComment = `[Memory - ${characterName}]`;
+                    
+                    // 将记忆数据转换为键值对格式
+                    const lines = [];
+                    lines.push('// --- 核心关系数值 ---');
+                    lines.push(`Affection: ${memoryData.Affection || 50}`);
+                    lines.push(`Trust: ${memoryData.Trust || 40}`);
+                    lines.push(`Mood: "${memoryData.Mood || '平静'}"`);
+                    lines.push('');
+                    lines.push('// --- 关系状态 ---');
+                    lines.push(`RelationshipStatus: "${memoryData.RelationshipStatus || '陌生'}"`);
+                    lines.push(`LastInteractionType: "${memoryData.LastInteractionType || '初次相遇'}"`);
+                    lines.push(`LastInteractionTime: "${memoryData.LastInteractionTime || new Date().toISOString()}"`);
+                    lines.push('');
+                    lines.push('// --- 关键记忆点 ---');
+                    lines.push(`RecentKeyTopics: "${memoryData.RecentKeyTopics || '尚无特别话题'}"`);
+                    lines.push(`UnresolvedQuestions: "${memoryData.UnresolvedQuestions || '无'}"`);
+                    
+                    if (memoryData.TypingSpeed || memoryData.ReplyDelay) {
+                        lines.push('');
+                        lines.push('// --- 聊天风格 ---');
+                        if (memoryData.TypingSpeed) lines.push(`TypingSpeed: ${memoryData.TypingSpeed}`);
+                        if (memoryData.ReplyDelay) lines.push(`ReplyDelay: ${memoryData.ReplyDelay}`);
+                    }
+                    
+                    const content = lines.join('\n');
+                    
+                    // 查找现有条目
+                    const existingEntry = entries.find(e => e.comment === entryComment);
+                    
+                    if (existingEntry) {
+                        // 更新现有条目
+                        await setLorebookEntries(worldbook, [{
+                            uid: existingEntry.uid,
+                            content: content
+                        }]);
+                        console.log(`✅ 已更新角色 [${characterName}] 的记忆到世界书`);
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: entryComment,
+                            key: [`此世界书永不触发_${characterName}_记忆`],
+                            content: content,
+                            position: "at_depth_as_system",
+                            type: "selective",
+                            depth: 0,
+                            order: 1001,
+                            enabled: true
+                        });
+                        console.log(`✅ 已创建角色 [${characterName}] 的记忆条目`);
+                        
+                        // 刷新entries
+                        entries = await getLorebookEntries(worldbook);
+                    }
+                    
+                    return true;
+                } catch (error) {
+                    console.error(`❌ 保存记忆到世界书失败: ${characterName}`, error);
+                    return false;
+                }
             }
             
             
@@ -7422,8 +7998,29 @@
                 // 8. 阶段三：注入主动消息生成指令
                 const proactivePrompt = QQ_GenerateProactiveMessagePrompt();
                 
-                // 9. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 系统上下文 + 主动消息指令 + 动态指令)
-                const finalPayload = `${value}\n\n${timeContext}\n\n${systemContext}${proactivePrompt}${finalPrompt}`;
+                // 9. 注入MVU记忆系统上下文
+                // *** 私聊触发：确保角色有记忆档案 ***
+                if (name && !QQ_Groups.includes(name) && !memoryModel.relationship[name]) {
+                    console.log(`🆕 检测到新角色私聊，为 [${name}] 创建记忆档案...`);
+                    const initialMemory = {
+                        Familiarity: 30, Closeness: 20, Mood: "好奇",
+                        RelationshipStatus: "陌生人", RelationshipTags: "新认识", SocialCircle: "未知",
+                        LastInteractionType: "初次私聊", LastInteractionTime: new Date().toISOString(),
+                        RecentKeyTopics: "尚无", UnresolvedQuestions: "对用户感到好奇",
+                        TypingSpeed: "normal", ReplyDelay: "normal", TypoRate: 0.02,
+                        ImportantEvents: [], Preferences: {}, Topics: [],
+                        CreatedAt: new Date().toISOString(), UpdatedAt: new Date().toISOString(), Version: "2.0.0"
+                    };
+                    memoryModel.relationship[name] = initialMemory;
+                    await QQ_SaveMemoryToWorldbook(name, initialMemory);
+                    console.log(`✅ 已为 [${name}] 创建初始记忆档案`);
+                }
+                
+                const memoryContext = buildPromptFromMemory(name);
+                console.log(`🧠 MVU记忆系统上下文:\n${memoryContext}`);
+                
+                // 10. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 系统上下文 + 记忆上下文 + 主动消息指令 + 动态指令)
+                const finalPayload = `${memoryContext}\n\n${value}\n\n${timeContext}\n\n${systemContext}${proactivePrompt}${finalPrompt}`;
 
                 // 8. 发送请求给AI (保留原有逻辑)
                 console.log(`发送给AI的最终Payload:\n${finalPayload}`);
@@ -7541,6 +8138,9 @@
                 // *** 清理主动消息格式，避免被当作普通消息显示 ***
                 result = QQ_CleanProactiveMessageFormats(result);
                 
+                // *** 新增：清理记忆更新标签，避免显示给用户 ***
+                result = result.replace(/<memoryUpdate>[\s\S]*?<\/memoryUpdate>/gi, '');
+                
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
                 
@@ -7552,6 +8152,10 @@
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
                     await QQ_Save_Chat_Backup(); 
+                    
+                    // *** 新增：更新MVU记忆系统 ***
+                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    
                     return; // 优先级1成功，立即return
                 }
                 
@@ -7567,6 +8171,10 @@
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
                     await QQ_Save_Chat_Backup(); 
+                    
+                    // *** 新增：更新MVU记忆系统 ***
+                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    
                     return; // 优先级2成功，立即return
                 }
                 
@@ -7577,6 +8185,10 @@
                     console.log("✅ 优先级3成功：互动内容处理完成，立即return");
                     QQ_ResetRetry();
                     await QQ_Save_Chat_Backup(); 
+                    
+                    // *** 新增：更新MVU记忆系统 ***
+                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    
                     return; // 优先级3成功，立即return
                 }
                 
@@ -7588,6 +8200,10 @@
                     QQ_ResetRetry();
                     QQ_UpdateNewTips();
                     await QQ_Save_Chat_Backup(); 
+                    
+                    // *** 新增：更新MVU记忆系统 ***
+                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    
                     return; // 优先级4成功，立即return
                 }
                 
@@ -7597,6 +8213,10 @@
                 if (contentResult.success) {
                     console.log("✅ 优先级5成功：content标签处理完成，立即return");
                     QQ_ResetRetry();
+                    
+                    // *** 新增：更新MVU记忆系统 ***
+                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    
                     return; // 优先级5成功，立即return
                 }
                 
@@ -16402,6 +17022,10 @@ ${index + 1}. ${space.name}
                 console.log('开始初始化互动空间系统...');
                 await QQ_InitInteractiveSystem();
                 
+                // *** 新增：加载MVU记忆分层系统 ***
+                console.log('开始加载MVU记忆分层系统...');
+                await QQ_LoadMemoryFromWorldbook();
+                
                 console.log('页面初始化完成');
                 
                 // 为聊天元素绑定点击事件
@@ -21989,13 +22613,15 @@ ${index + 1}. ${space.name}
                     } else {
                         QQ_UserTriggeredInteractive = false;
                     }
+                    //增加：调取记忆
+                    const memoryContext = buildPromptFromMemory(name);
                     
                     // 7. 调用动态指令生成器
                     const finalPrompt = buildDynamicPrompt(tasks);
 
                     // 8. 组合最终发送内容
                     let sendvalue = (QQ_CacheSendMsg ? `${QQ_CacheSendMsg.trim()}\n\n` : '') + `用户在${name}的动态下评论：${value}`;
-                    const finalPayload = `${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
+                    const finalPayload = `${memoryContext}\n\n${sendvalue}\n\n${QQ_GetTimeContext()}\n\n${finalPrompt}`;
                     // *** 修复：延迟清空缓存，确保所有消息都已处理 ***
                     setTimeout(() => {
                         QQ_CacheSendMsg = ""; // 清空缓存
