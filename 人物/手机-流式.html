@@ -5917,42 +5917,31 @@
                 
                 // 为每个没有记忆数据的角色创建初始记忆
                 for (const characterName of knownCharacters) {
+                    // 🚫 新增：跳过群聊，不为群聊创建记忆档案
+                    if (QQ_Groups && QQ_Groups.includes(characterName)) {
+                        console.log(`🚫 跳过为群聊 [${characterName}] 创建记忆档案`);
+                        continue;
+                    }
+                    
                     if (!memoryModel.relationship[characterName]) {
-                        console.log(`🆕 为角色 [${characterName}] 创建初始记忆结构...`);
+                        console.log(`🆕 为角色 [${characterName}] 智能创建初始记忆...`);
                         
-                        // 创建初始记忆结构 - 更丰富的关系定义
-                        const initialMemory = {
-                            // 核心社交度量 - 更中性的词汇
-                            Familiarity: 30,        // 熟悉度 (0-100)
-                            Closeness: 20,          // 亲密度 (0-100)
-                            Mood: "平静",           // 当前心情
-                            
-                            // 关系背景与分类 - 新增多维度关系定义
-                            RelationshipStatus: "陌生人",  // 陌生人, 网友, 同事, 朋友, 挚友, 家人, 暧昧期, 恋人
-                            RelationshipTags: "新认识",    // 关系标签 (用逗号分隔)
-                            SocialCircle: "未知",          // 所属社交圈
-                            
-                            // 互动历史与记忆点
-                            LastInteractionType: "初次相遇",
-                            LastInteractionTime: new Date().toISOString(),
-                            RecentKeyTopics: "尚无",
-                            UnresolvedQuestions: "对用户感到好奇",
-                            
-                            // 聊天风格与行为特征
-                            TypingSpeed: "normal",    // fast, normal, slow
-                            ReplyDelay: "normal",     // quick, normal, slow
-                            TypoRate: 0.02,          // 错字概率
-                            
-                            // 记忆节点
-                            ImportantEvents: [],
-                            Preferences: {},
-                            Topics: [],
-                            
-                            // 元数据
-                            CreatedAt: new Date().toISOString(),
-                            UpdatedAt: new Date().toISOString(),
-                            Version: "2.0.0"
-                        };
+                        // 🤖 使用智能初始化，让AI根据角色背景设定合理关系
+                        let initialMemory = await QQ_IntelligentInitializeMemory(characterName);
+                        
+                        // 如果智能初始化失败，使用保守的默认设置
+                        if (!initialMemory) {
+                            console.warn(`⚠️ 智能初始化失败，为 [${characterName}] 使用默认设置`);
+                            initialMemory = {
+                                Familiarity: 30, Closeness: 20, Mood: "平静",
+                                RelationshipStatus: "陌生人", RelationshipTags: "新认识", SocialCircle: "未知",
+                                LastInteractionType: "初次相遇", LastInteractionTime: new Date().toISOString(),
+                                RecentKeyTopics: "尚无", UnresolvedQuestions: "对用户感到好奇",
+                                CareLevel: 40, TypingSpeed: "normal", ReplyDelay: "normal", TypoRate: 0.02,
+                                ImportantEvents: [], Preferences: {}, Topics: [],
+                                CreatedAt: new Date().toISOString(), UpdatedAt: new Date().toISOString(), Version: "2.1.0"
+                            };
+                        }
                         
                         // 存储到记忆模型
                         memoryModel.relationship[characterName] = initialMemory;
@@ -5960,7 +5949,7 @@
                         // 保存到世界书
                         await QQ_SaveMemoryToWorldbook(characterName, initialMemory);
                         
-                        console.log(`✅ 已为角色 [${characterName}] 创建初始记忆结构`);
+                        console.log(`✅ 已为角色 [${characterName}] 创建初始记忆结构:`, initialMemory.RelationshipStatus);
                     }
                 }
                 
@@ -6022,25 +6011,104 @@
                     promptParts.push(`未解决的问题: ${profile.UnresolvedQuestions}`);
                 }
                 
-                // 聊天风格提示
+                // 行为特征与聊天风格
+                if (profile.CareLevel !== undefined) {
+                    promptParts.push(`我对你的关心程度: ${profile.CareLevel}/100`);
+                }
                 if (profile.TypingSpeed && profile.TypingSpeed !== "normal") {
                     promptParts.push(`我的打字速度: ${profile.TypingSpeed === "fast" ? "较快" : profile.TypingSpeed === "slow" ? "较慢" : "正常"}`);
                 }
                 if (profile.ReplyDelay && profile.ReplyDelay !== "normal") {
                     promptParts.push(`我的回复速度: ${profile.ReplyDelay === "quick" ? "很快" : profile.ReplyDelay === "slow" ? "偏慢" : "正常"}`);
                 }
+                if (profile.TypoRate && profile.TypoRate !== 0.02) {
+                    const typoDescription = profile.TypoRate <= 0.01 ? "极少错字" : profile.TypoRate >= 0.05 ? "偶有错字" : "正常";
+                    promptParts.push(`我的打字准确度: ${typoDescription}`);
+                }
                 
                 promptParts.push("");
                 promptParts.push("#行为指导：请根据以上关系状态，自然地进行回复。");
                 promptParts.push("");
+                
+                // *** 新增：集成表格操作规则 ***
+                const tableRules = QQ_GetTableOperationRules();
+                if (tableRules) {
+                    promptParts.push(tableRules);
+                    promptParts.push("");
+                }
+                
                 promptParts.push("#记忆更新指导：请在回复最后添加<memoryUpdate>标签，分析本次互动对关系的影响。");
-                promptParts.push("格式示例：<memoryUpdate>{\"familiarityChange\": \"+3\", \"closenessChange\": \"+1\", \"moodChange\": \"更愉快\", \"newTopics\": \"讨论了工作压力\", \"relationshipProgress\": \"关系更进一步\"}</memoryUpdate>");
+                promptParts.push("格式示例：<memoryUpdate>{\"familiarityChange\": \"+3\", \"closenessChange\": \"+1\", \"careLevelChange\": \"+2\", \"moodChange\": \"更愉快\", \"newTopics\": \"讨论了工作压力\", \"relationshipProgress\": \"关系更进一步\", \"typingSpeedChange\": \"fast\", \"replyDelayChange\": \"quick\"}</memoryUpdate>");
+                promptParts.push("可选字段说明：数值变化(familiarityChange/closenessChange/careLevelChange)、状态更新(moodChange/newTopics/relationshipProgress)、行为变化(typingSpeedChange/replyDelayChange/typoRateChange)");
                 promptParts.push("");
                 
                 const memoryPrompt = promptParts.join('\n');
                 console.log(`🧠 为 [${characterName}] 构建的记忆Prompt:`, memoryPrompt);
                 
                 return memoryPrompt;
+            }
+            
+            /**
+             * [MVU-Table] 获取表格操作规则
+             * @returns {string} 表格操作规则内容
+             */
+            function QQ_GetTableOperationRules() {
+                try {
+                    // 尝试从世界书中获取表格操作规则
+                    const rulesEntry = GetWorldEntry(["System - MemoryTableRules", "表格操作规则", "MemoryTableRules"], false);
+                    if (rulesEntry && rulesEntry.content) {
+                        console.log('✅ 成功获取世界书中的表格操作规则');
+                        return rulesEntry.content;
+                    }
+                    
+                    // 如果世界书中没有，使用内置的表格操作规则
+                    console.log('⚠️ 世界书中未找到表格操作规则，使用内置规则');
+                    return `《数据表操作指南》
+
+**精简字符控制 (Compaction Character Control):**
+\`精简字符控制=0\`
+说明：
+-   若设置为一个正整数 (例如 \`精简字符控制=1000\`)，此数值将**优先替代**后续规则中提到的"AI动态评估的阈值"，用于判断各项内容是否超限。
+-   若设置为 \`0\` (如当前所示)，则AI将沿用其内部的动态评估机制来确定各项精简阈值。
+-   **此控制不影响"通用单元格内容精简"中固定的50字符上限。**
+
+**一、核心操作块定义**
+*   \`<tableThink>\` (表格变更前瞻思考块):
+    *   执行时机: \`content\` 之后。
+    *   功能: AI记录其对表格 (tableIndex: 0-4) 进行何种操作（增、删、改）的**用户可见的**思考摘要和原因。包裹在HTML注释 \`<!-- -->\` 中。
+    *   **核心输出原则**: **\`tableThink\` 块输出给用户的内容必须高度简洁。**
+*   \`<tableEdit>\` (表格编辑指令块):
+    *   执行时机: 紧随 \`<tableThink>\` 之后。
+    *   功能: 包含具体表格操作指令（如 \`insertRow\`, \`updateRow\`, \`deleteRow\`）。包裹在HTML注释 \`<!-- -->\` 中。
+
+**二、表格执行流程**
+1.  执行顺序: 严格按照 \`content\` → \`<tableThink>\` → \`<tableEdit>\`。
+2.  禁止: \`<tableEdit>\` 绝不能出现在 \`content\` 或 \`<tableThink>\` 之前。
+
+**三、核心数据精简与总结规则 (通用原则)**
+1.  **通用单元格内容精简**:
+    *   限制: 任何表格的任何单元格 (colIndex)，若计划写入数据超 **50字符**，AI须自动精简。
+    *   目标: 内容长度减少至少50%，保留核心意义。
+
+**四、具体表格操作与精简细则**
+1.  **Table 0 (角色信息) 精简规则**:
+    *   单元格精简: 遵循"通用单元格内容精简"（50字符）。
+    *   行总字符数精简: 优先精简非核心部分，保持关键标识字段完整。
+    
+**五、操作规范**
+*   注释块纯净: \`<tableThink>\` 和 \`<tableEdit>\` 内部除规定文本或指令外，无其他字符。
+*   格式与语法: 严格遵守JSON格式键值对及操作指令语法。
+*   **数据完整性**: 所有列须含有效具体数据，未知信息AI须基于上下文合理详尽推测填入。
+
+**六、\`<insert/update/delete operations>\` 语法**
+*   更改指定行: \`updateRow(tableIndex: number, rowIndex: number, { [colIndex: string]: any, ... })\`
+*   删除指定行: \`deleteRow(tableIndex: number, rowIndex: number)\`
+*   插入新行: \`insertRow(tableIndex: number, { [colIndex: string]: any, ... })\``;
+                    
+                } catch (error) {
+                    console.error('❌ 获取表格操作规则时出错:', error);
+                    return '';
+                }
             }
             
             /**
@@ -6112,6 +6180,12 @@
                 }
                 
                 // 应用状态更新
+                if (memoryUpdate.careLevelChange) {
+                    const change = parseInt(memoryUpdate.careLevelChange) || 0;
+                    profile.CareLevel = Math.max(0, Math.min(100, (profile.CareLevel || 40) + change));
+                    console.log(`❤️ 关心程度变化: ${memoryUpdate.careLevelChange} -> 当前: ${profile.CareLevel}`);
+                }
+                
                 if (memoryUpdate.moodChange) {
                     profile.Mood = memoryUpdate.moodChange;
                     console.log(`😊 心情更新: ${memoryUpdate.moodChange}`);
@@ -6127,6 +6201,23 @@
                     console.log(`🎯 关系进展: ${memoryUpdate.relationshipProgress}`);
                 }
                 
+                // 应用行为特征变化
+                if (memoryUpdate.typingSpeedChange) {
+                    profile.TypingSpeed = memoryUpdate.typingSpeedChange;
+                    console.log(`⌨️ 打字速度变化: ${memoryUpdate.typingSpeedChange}`);
+                }
+                
+                if (memoryUpdate.replyDelayChange) {
+                    profile.ReplyDelay = memoryUpdate.replyDelayChange;
+                    console.log(`⏱️ 回复延迟变化: ${memoryUpdate.replyDelayChange}`);
+                }
+                
+                if (memoryUpdate.typoRateChange) {
+                    const newRate = parseFloat(memoryUpdate.typoRateChange) || profile.TypoRate;
+                    profile.TypoRate = Math.max(0, Math.min(0.1, newRate));
+                    console.log(`📝 错字率变化: ${memoryUpdate.typoRateChange} -> 当前: ${profile.TypoRate}`);
+                }
+                
                 // 更新互动类型和时间
                 profile.LastInteractionType = "深入交流";
                 profile.LastInteractionTime = new Date().toISOString();
@@ -6138,11 +6229,127 @@
             }
             
             /**
+             * [MVU-Intelligent] 智能初始化角色记忆 - 让AI根据角色背景设定合理的初始关系
+             * @param {string} characterName - 角色名称
+             * @returns {Object|null} 智能生成的初始记忆对象，失败返回null
+             */
+            async function QQ_IntelligentInitializeMemory(characterName) {
+                try {
+                    console.log(`🤖 开始为角色 [${characterName}] 智能生成初始记忆...`);
+                    
+                    // 尝试获取角色信息
+                    let characterInfo = "";
+                    try {
+                        // 尝试从世界书中获取角色信息
+                        const characterEntry = GetWorldEntry([characterName, `${characterName}的设定`, `角色-${characterName}`], false);
+                        if (characterEntry && characterEntry.content) {
+                            characterInfo = characterEntry.content;
+                        } else {
+                            // 如果世界书中没有，尝试从其他数据源获取
+                            characterInfo = `角色名称: ${characterName}\n暂无详细设定信息`;
+                        }
+                    } catch (error) {
+                        console.warn(`获取角色 [${characterName}] 信息时出错:`, error);
+                        characterInfo = `角色名称: ${characterName}\n暂无详细设定信息`;
+                    }
+                    
+                    // 构建智能分析Prompt
+                    const intelligentPrompt = `# 任务: 智能角色关系初始化
+
+# 背景:
+你是一位经验丰富的社交分析师和故事设定师。你的任务是为角色【${characterName}】和用户【${UserName}】设定一个真实且合理的初始关系。
+
+# 输入数据: [角色核心设定]
+---
+${characterInfo}
+---
+
+# 分析与输出指令:
+请仔细阅读并分析以上角色设定，然后根据角色的背景故事和性格，推断TA和用户【${UserName}】最有可能的初始关系。
+
+例如：
+* 如果描述中提到"从小一起长大"，关系可能是**青梅竹马**
+* 如果描述是"学院里的高傲优等生"，关系可能是**同学**或**竞争对手**  
+* 如果描述是"温柔的姐姐"，关系可能是**家人**
+* 如果描述是"指挥官的秘书舰"，关系可能是**下属**或**工作伙伴**
+* 如果没有任何特殊关联，则关系为**陌生人**
+
+请严格按照以下JSON格式输出，**不要包含任何其他文字**：
+
+<memoryInit>
+{
+    "Familiarity": [根据推断的关系填写0-100的数值],
+    "Closeness": [根据推断的关系填写0-100的数值], 
+    "Mood": "[根据角色性格推断初始心情，如：平静/愉快/傲娇/害羞/警惕等]",
+    "RelationshipStatus": "[青梅竹马/家人/同学/同事/下属/朋友/竞争对手/陌生人等]",
+    "RelationshipTags": "[根据关系打1-2个标签，用逗号分隔，如：可靠的前辈,需要照顾的妹妹]",
+    "SocialCircle": "[所属社交圈，如：学校,港区指挥部,家庭,工作等]",
+    "UnresolvedQuestions": "[根据关系设定一个合理的初始状态，如：想更了解指挥官,期待重逢,保持距离等]",
+    "CareLevel": [根据角色性格和关系设定关心程度0-100，如朋友70，陌生人30],
+    "TypingSpeed": "[根据性格设定打字速度：slow(慢性子/谨慎)/normal(普通)/fast(急性子/活泼)]",
+    "ReplyDelay": "[根据性格设定回复延迟：quick(秒回型)/normal(正常)/slow(慢热/忙碌)]",
+    "TypoRate": [根据性格设定错字概率0.0-0.1，如严谨0.01，马虎0.05，正常0.02]
+}
+</memoryInit>`;
+
+                    console.log(`🔍 发送智能分析请求...`);
+                    const aiResponse = await QQ_Gen(intelligentPrompt);
+                    
+                    // 解析AI回复中的记忆初始化信息
+                    const memoryInitMatch = aiResponse.match(/<memoryInit>([\s\S]*?)<\/memoryInit>/i);
+                    if (!memoryInitMatch) {
+                        console.warn(`⚠️ AI回复中未找到memoryInit标签，使用默认设置`);
+                        return null;
+                    }
+                    
+                    const memoryInitContent = memoryInitMatch[1].trim();
+                    const intelligentMemory = JSON.parse(memoryInitContent);
+                    
+                    // 构建完整的初始记忆对象
+                    const initialMemory = {
+                        // AI智能生成的核心关系字段
+                        Familiarity: intelligentMemory.Familiarity || 30,
+                        Closeness: intelligentMemory.Closeness || 20,
+                        Mood: intelligentMemory.Mood || "平静",
+                        RelationshipStatus: intelligentMemory.RelationshipStatus || "陌生人",
+                        RelationshipTags: intelligentMemory.RelationshipTags || "新认识",
+                        SocialCircle: intelligentMemory.SocialCircle || "未知",
+                        UnresolvedQuestions: intelligentMemory.UnresolvedQuestions || "对用户感到好奇",
+                        
+                        // AI智能生成的行为特征字段
+                        CareLevel: intelligentMemory.CareLevel || 40,
+                        TypingSpeed: intelligentMemory.TypingSpeed || "normal",
+                        ReplyDelay: intelligentMemory.ReplyDelay || "normal",
+                        TypoRate: intelligentMemory.TypoRate || 0.02,
+                        
+                        // 固定字段
+                        LastInteractionType: "初次相遇",
+                        LastInteractionTime: new Date().toISOString(),
+                        RecentKeyTopics: "尚无",
+                        ImportantEvents: [],
+                        Preferences: {},
+                        Topics: [],
+                        CreatedAt: new Date().toISOString(),
+                        UpdatedAt: new Date().toISOString(),
+                        Version: "2.1.0"
+                    };
+                    
+                    console.log(`✅ 角色 [${characterName}] 智能记忆生成成功:`, initialMemory);
+                    return initialMemory;
+                    
+                } catch (error) {
+                    console.error(`❌ 智能生成角色 [${characterName}] 记忆失败:`, error);
+                    return null;
+                }
+            }
+            
+            /**
              * [MVU-Process] 处理AI回复并更新记忆系统
              * @param {string} aiResult - AI的完整回复
              * @param {string} characterName - 当前对话的角色名称 (可选)
+             * @param {Object} memoryUpdateInfo - 预提取的记忆更新信息 (可选)
              */
-            async function QQ_ProcessMemoryUpdateFromAIReply(aiResult, characterName = null) {
+            async function QQ_ProcessMemoryUpdateFromAIReply(aiResult, characterName = null, memoryUpdateInfo = null) {
                 try {
                     console.log("🧠 开始处理AI回复的记忆更新...");
                     
@@ -6168,8 +6375,8 @@
                         return;
                     }
                     
-                    // 提取记忆更新信息
-                    const memoryUpdate = QQ_ExtractMemoryUpdate(aiResult);
+                    // 使用预提取的记忆更新信息，或从AI回复中提取
+                    const memoryUpdate = memoryUpdateInfo || QQ_ExtractMemoryUpdate(aiResult);
                     if (!memoryUpdate) {
                         console.log('⚠️ AI回复中没有记忆更新信息，跳过更新');
                         return;
@@ -8001,25 +8208,38 @@
                 // 9. 注入MVU记忆系统上下文
                 // *** 私聊触发：确保角色有记忆档案 ***
                 if (name && !QQ_Groups.includes(name) && !memoryModel.relationship[name]) {
-                    console.log(`🆕 检测到新角色私聊，为 [${name}] 创建记忆档案...`);
-                    const initialMemory = {
-                        Familiarity: 30, Closeness: 20, Mood: "好奇",
-                        RelationshipStatus: "陌生人", RelationshipTags: "新认识", SocialCircle: "未知",
-                        LastInteractionType: "初次私聊", LastInteractionTime: new Date().toISOString(),
-                        RecentKeyTopics: "尚无", UnresolvedQuestions: "对用户感到好奇",
-                        TypingSpeed: "normal", ReplyDelay: "normal", TypoRate: 0.02,
-                        ImportantEvents: [], Preferences: {}, Topics: [],
-                        CreatedAt: new Date().toISOString(), UpdatedAt: new Date().toISOString(), Version: "2.0.0"
-                    };
+                    console.log(`🆕 检测到新角色私聊，为 [${name}] 智能创建记忆档案...`);
+                    
+                    // 🤖 使用智能初始化，让AI根据角色背景设定合理关系
+                    let initialMemory = await QQ_IntelligentInitializeMemory(name);
+                    
+                    // 如果智能初始化失败，使用保守的默认设置
+                    if (!initialMemory) {
+                        console.warn(`⚠️ 智能初始化失败，为 [${name}] 使用默认设置`);
+                        initialMemory = {
+                            Familiarity: 30, Closeness: 20, Mood: "好奇",
+                            RelationshipStatus: "陌生人", RelationshipTags: "新认识", SocialCircle: "未知",
+                            LastInteractionType: "初次私聊", LastInteractionTime: new Date().toISOString(),
+                            RecentKeyTopics: "尚无", UnresolvedQuestions: "对用户感到好奇",
+                            CareLevel: 40, TypingSpeed: "normal", ReplyDelay: "normal", TypoRate: 0.02,
+                            ImportantEvents: [], Preferences: {}, Topics: [],
+                            CreatedAt: new Date().toISOString(), UpdatedAt: new Date().toISOString(), Version: "2.1.0"
+                        };
+                    } else {
+                        // 智能初始化成功，更新互动类型为私聊
+                        initialMemory.LastInteractionType = "初次私聊";
+                        initialMemory.LastInteractionTime = new Date().toISOString();
+                    }
+                    
                     memoryModel.relationship[name] = initialMemory;
                     await QQ_SaveMemoryToWorldbook(name, initialMemory);
-                    console.log(`✅ 已为 [${name}] 创建初始记忆档案`);
+                    console.log(`✅ 已为 [${name}] 创建初始记忆档案: ${initialMemory.RelationshipStatus}`);
                 }
                 
                 const memoryContext = buildPromptFromMemory(name);
                 console.log(`🧠 MVU记忆系统上下文:\n${memoryContext}`);
                 
-                // 10. 组合最终发送给AI的完整内容 (用户操作 + 时间 + 系统上下文 + 记忆上下文 + 主动消息指令 + 动态指令)
+                // 10. 组合最终发送给AI的完整内容 (记忆上下文 + 用户操作 + 时间 + 系统上下文 + 主动消息指令 + 动态指令)
                 const finalPayload = `${memoryContext}\n\n${value}\n\n${timeContext}\n\n${systemContext}${proactivePrompt}${finalPrompt}`;
 
                 // 8. 发送请求给AI (保留原有逻辑)
@@ -8132,6 +8352,9 @@
                 // *** 阶段三：提取并处理主动消息（在清理之前，避免被误删） ***
                 await QQ_ExtractProactiveMessages(result);
                 
+                // *** 阶段四：提取记忆更新信息（在清理标签之前） ***
+                const memoryUpdateInfo = QQ_ExtractMemoryUpdate(result);
+                
                 // *** 新增：提取并处理tableEdit标签，发送给SillyTavern后端 ***
                 await QQ_ExtractAndProcessTableEdit(result);
                 
@@ -8154,7 +8377,7 @@
                     await QQ_Save_Chat_Backup(); 
                     
                     // *** 新增：更新MVU记忆系统 ***
-                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    await QQ_ProcessMemoryUpdateFromAIReply(result, null, memoryUpdateInfo);
                     
                     return; // 优先级1成功，立即return
                 }
@@ -8173,7 +8396,7 @@
                     await QQ_Save_Chat_Backup(); 
                     
                     // *** 新增：更新MVU记忆系统 ***
-                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    await QQ_ProcessMemoryUpdateFromAIReply(result, null, memoryUpdateInfo);
                     
                     return; // 优先级2成功，立即return
                 }
@@ -8187,7 +8410,7 @@
                     await QQ_Save_Chat_Backup(); 
                     
                     // *** 新增：更新MVU记忆系统 ***
-                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    await QQ_ProcessMemoryUpdateFromAIReply(result, null, memoryUpdateInfo);
                     
                     return; // 优先级3成功，立即return
                 }
@@ -8202,7 +8425,7 @@
                     await QQ_Save_Chat_Backup(); 
                     
                     // *** 新增：更新MVU记忆系统 ***
-                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    await QQ_ProcessMemoryUpdateFromAIReply(result, null, memoryUpdateInfo);
                     
                     return; // 优先级4成功，立即return
                 }
@@ -8215,7 +8438,7 @@
                     QQ_ResetRetry();
                     
                     // *** 新增：更新MVU记忆系统 ***
-                    await QQ_ProcessMemoryUpdateFromAIReply(result);
+                    await QQ_ProcessMemoryUpdateFromAIReply(result, null, memoryUpdateInfo);
                     
                     return; // 优先级5成功，立即return
                 }
