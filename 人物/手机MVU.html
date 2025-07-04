@@ -3959,7 +3959,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月5日</span>
+                            <span>台北</span> <span id="day">7月6日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5927,6 +5927,16 @@
                     lastError: null,
                     isOnline: true,
                     generateState: 'idle' // idle, generating, error
+                },
+                
+                // 设置项
+                settings: {
+                    interactive: {
+                        enabled: false,
+                        useDefaultKeywords: false,
+                        customKeywords: [],
+                        fullscreenEnabled: false
+                    }
                 }
             };
             
@@ -6474,6 +6484,14 @@
                         break;
                         
                     case 'SAVE_INTERACTIVE_SETTINGS':
+                        // 确保settings对象存在
+                        if (!newModel.settings) {
+                            newModel.settings = {};
+                        }
+                        if (!newModel.settings.interactive) {
+                            newModel.settings.interactive = {};
+                        }
+                        
                         newModel.settings.interactive = {
                             ...newModel.settings.interactive,
                             ...message.payload
@@ -44775,6 +44793,27 @@ MiPhone_JSON_END`;
                 console.log('  • QQ_DataManager.showStats() - 查看数据统计');
                 console.log('  • QQ_ShowDataManagerHelp() - 查看使用说明');
                 console.log('  • QQ_Check_Errors() - 检查系统状态');
+                
+                // 加载并应用互动设置
+                setTimeout(() => {
+                    try {
+                        const savedSettings = QQ_GetInteractiveSettings();
+                        if (savedSettings) {
+                            // 更新AppModel中的设置
+                            if (AppModel && AppModel.settings && AppModel.settings.interactive) {
+                                AppModel.settings.interactive = {
+                                    enabled: savedSettings.enableKeywordTrigger || false,
+                                    useDefaultKeywords: savedSettings.enableDefaultKeywords || false,
+                                    customKeywords: savedSettings.customKeywords || [],
+                                    fullscreenEnabled: false // 全屏是临时设置，不保存
+                                };
+                            }
+                            console.log('✅ 已加载互动设置:', savedSettings);
+                        }
+                    } catch (error) {
+                        console.error('❌ 加载互动设置失败:', error);
+                    }
+                }, 1000);
             });
             
             /**
@@ -45409,11 +45448,7 @@ MiPhone_JSON_END`;
                 });
                 
                 // 应用全屏设置
-                if (settings.fullscreenEnabled) {
-                    enableFullscreen();
-                } else {
-                    exitFullscreen();
-                }
+                QQ_ApplyFullscreenMode(settings.fullscreenEnabled);
                 
                 if (typeof toastr !== 'undefined') {
                     toastr.success('✅ 界面设置已保存并生效', '设置完成', {
