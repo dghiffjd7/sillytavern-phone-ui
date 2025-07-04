@@ -26486,8 +26486,7 @@ ${index + 1}. ${space.name}
             }
             
             /**
-             * *** 新增：处理tableEdit标签 ***
-             * 确保tableEdit标签保留在AI回复中，供SillyTavern后端处理
+             * [Table-Management] 提取tableEdit标签并更新专用世界书条目
              * @param {string} result - AI回复内容
              */
             async function QQ_ExtractAndProcessTableEdit(result) {
@@ -26507,69 +26506,271 @@ ${index + 1}. ${space.name}
                 
                 console.log(`🎯 发现${tableEditMatches.length}个tableEdit标签，开始处理`);
                 
-                // *** 收集所有tableEdit内容 ***
-                let allTableEditContent = '';
-                for (let i = 0; i < tableEditMatches.length; i++) {
-                    const match = tableEditMatches[i];
-                    const tableContent = match[1].trim();
-                    
-                    if (tableContent) {
-                        console.log(`📋 收集tableEdit标签${i + 1}内容:`, tableContent.substring(0, 100) + '...');
-                        allTableEditContent += `<tableEdit>${tableContent}</tableEdit>\n`;
-                    } else {
-                        console.log(`⚠️ tableEdit标签${i + 1}内容为空，跳过`);
-                    }
-                }
-                
-                if (!allTableEditContent.trim()) {
-                    console.log('⚠️ 未收集到有效的tableEdit内容');
-                    return;
-                }
-                
-                // *** 使用editLastMessage API修改最后一条消息 ***
                 try {
-                    console.log('📤 使用editLastMessage API添加tableEdit内容');
+                    // 获取或创建表格数据世界书条目
+                    let tableDataEntry = GetWorldEntry(["Table-Data", "表格数据", "TableData"], false);
+                    let currentTableData = {};
                     
-                    if (typeof editLastMessage !== 'undefined') {
-                        // 获取当前最后一条消息内容
-                        // editLastMessage会自动获取最后一条消息，我们只需要提供修改函数
-                        const success = await editLastMessage((currentMessage) => {
-                            let currentContent = currentMessage || '';
-                            
-                            // *** 处理手机JSON结构和表格数据替换 ***
-                            if (currentContent.includes('MiPhone_JSON_END')) {
-                                // 移除旧的tableEdit内容（避免重复）
-                                let cleanedContent = currentContent.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/g, '').trim();
-                                
-                                // 在MiPhone_JSON_END后添加新的表格内容
-                                const updatedContent = cleanedContent.replace(
-                                    'MiPhone_JSON_END', 
-                                    `MiPhone_JSON_END\n\n${allTableEditContent.trim()}`
-                                );
-                                
-                                console.log('✅ tableEdit内容已添加到最后一条消息');
-                                return updatedContent;
-                            } else {
-                                console.warn('⚠️ 最后一条消息中未找到MiPhone_JSON_END标记');
-                                return currentContent;
-                            }
-                        });
-                        
-                        if (success) {
-                            console.log('🎉 editLastMessage执行成功');
-                        } else {
-                            console.warn('⚠️ editLastMessage执行可能失败');
+                    // 如果条目存在，尝试解析现有数据
+                    if (tableDataEntry && tableDataEntry.content) {
+                        try {
+                            currentTableData = JSON.parse(tableDataEntry.content);
+                            console.log('✅ 成功读取现有表格数据');
+                        } catch (error) {
+                            console.warn('⚠️ 解析现有表格数据失败，将创建新数据:', error);
+                            currentTableData = QQ_CreateEmptyTableStructure();
                         }
                     } else {
-                        console.warn('⚠️ editLastMessage API不可用，tableEdit内容将保留在原始回复中');
-                        // 备用策略：让tableEdit保留在原始回复中，由后端处理
+                        console.log('📝 表格数据条目不存在，创建新的表格结构');
+                        currentTableData = QQ_CreateEmptyTableStructure();
+                    }
+                    
+                    // 处理每个tableEdit标签
+                    for (let i = 0; i < tableEditMatches.length; i++) {
+                        const match = tableEditMatches[i];
+                        const tableContent = match[1].trim();
+                        
+                        if (tableContent) {
+                            console.log(`📋 处理tableEdit标签${i + 1}:`, tableContent.substring(0, 100) + '...');
+                            await QQ_ProcessTableEditContent(currentTableData, tableContent);
+                        }
+                    }
+                    
+                    // 保存更新后的表格数据到世界书
+                    await QQ_SaveTableDataToWorldbook(currentTableData);
+                    
+                    console.log('🎉 tableEdit处理完成，表格数据已更新到世界书');
+                    
+                } catch (error) {
+                    console.error('❌ 处理tableEdit时发生错误:', error);
+                }
+            }
+            
+            /**
+             * [Table-Structure] 创建空的表格结构
+             * @returns {Object} 空的表格数据结构
+             */
+            function QQ_CreateEmptyTableStructure() {
+                return [
+                    {
+                        "tableName": "角色信息",
+                        "tableIndex": 0,
+                        "columns": ["角色ID", "姓名|性别", "身份/称谓", "核心性格", "当前状态", "特征(含发/瞳/身形/脸/手/足/标记/性器官细节)", "声音描述", "性经验(含处子状态)", "特殊癖好/倾向", "备注(含性取向)", "背景故事/重要经历", "技能/能力", "目标/动机", "关系(对他人认知)", "态度(对他人基本态度)", "角色互评指标(对他人十项指标)", "综合情感状态"],
+                        "content": []
+                    },
+                    {
+                        "tableName": "纪要",
+                        "tableIndex": 1,
+                        "columns": ["纪要ID", "时间戳", "核心概述", "涉及角色", "主要人物着装(详尽描述规则)", "关键物品", "关键动作", "关键对话", "地点", "情感快照", "角色间距"],
+                        "content": []
+                    },
+                    {
+                        "tableName": "大总结",
+                        "tableIndex": 2,
+                        "columns": ["总结ID", "创建时间戳", "归档时间戳", "标题/主题", "概述", "包含的纪要ID列表", "涉及的主要角色", "关键物品总结"],
+                        "content": []
+                    },
+                    {
+                        "tableName": "用户偏好",
+                        "tableIndex": 3,
+                        "columns": ["偏好项", "偏好值", "备注"],
+                        "content": []
+                    },
+                    {
+                        "tableName": "正文尾部",
+                        "tableIndex": 4,
+                        "columns": ["尾部内容"],
+                        "content": [["初始尾部内容"]]
+                    }
+                ];
+            }
+            
+            /**
+             * [Table-Parser] 解析表格操作指令
+             * @param {string} content - 清理后的操作内容
+             * @returns {Array} 操作指令数组
+             */
+            function QQ_ParseTableOperations(content) {
+                const operations = [];
+                
+                try {
+                    // 使用更安全的解析方式
+                    // 匹配 insertRow(tableIndex, {data})
+                    const insertMatches = content.matchAll(/insertRow\((\d+),\s*(\{[^}]+\})\)/g);
+                    for (const match of insertMatches) {
+                        try {
+                            operations.push({
+                                type: 'insertRow',
+                                tableIndex: parseInt(match[1]),
+                                data: JSON.parse(match[2])
+                            });
+                        } catch (error) {
+                            console.error('❌ 解析insertRow操作失败:', error);
+                        }
+                    }
+                    
+                    // 匹配 updateRow(tableIndex, rowIndex, {data})
+                    const updateMatches = content.matchAll(/updateRow\((\d+),\s*(\d+),\s*(\{[^}]+\})\)/g);
+                    for (const match of updateMatches) {
+                        try {
+                            operations.push({
+                                type: 'updateRow',
+                                tableIndex: parseInt(match[1]),
+                                rowIndex: parseInt(match[2]),
+                                data: JSON.parse(match[3])
+                            });
+                        } catch (error) {
+                            console.error('❌ 解析updateRow操作失败:', error);
+                        }
+                    }
+                    
+                    // 匹配 deleteRow(tableIndex, rowIndex)
+                    const deleteMatches = content.matchAll(/deleteRow\((\d+),\s*(\d+)\)/g);
+                    for (const match of deleteMatches) {
+                        operations.push({
+                            type: 'deleteRow',
+                            tableIndex: parseInt(match[1]),
+                            rowIndex: parseInt(match[2])
+                        });
                     }
                 } catch (error) {
-                    console.error('❌ 使用editLastMessage处理tableEdit时出错:', error);
-                    console.log('📝 回退到保留策略：tableEdit内容将保留在原始回复中');
+                    console.error('❌ 解析表格操作时出错:', error);
                 }
                 
-                console.log(`🎉 tableEdit处理完成，共处理${tableEditMatches.length}个标签`);
+                return operations;
+            }
+            
+            /**
+             * [Table-Operations] 处理tableEdit内容并应用到表格数据
+             * @param {Object} tableData - 当前表格数据
+             * @param {string} editContent - tableEdit标签内的操作内容
+             */
+            async function QQ_ProcessTableEditContent(tableData, editContent) {
+                let cleanContent;
+                let tableOperations;
+                
+                try {
+                    // 移除HTML注释标记
+                    cleanContent = editContent.replace(/<!--[\s\S]*?-->/g, '').trim();
+                    
+                    // 解析操作指令
+                    tableOperations = QQ_ParseTableOperations(cleanContent);
+                    
+                    // 应用每个操作
+                    for (const operation of tableOperations) {
+                        await QQ_ApplyTableOperation(tableData, operation);
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 处理tableEdit内容失败:', error);
+                }
+            }
+            
+            /**
+             * [Table-Execute] 应用表格操作
+             * @param {Object} tableData - 表格数据
+             * @param {Object} operation - 操作对象
+             */
+            async function QQ_ApplyTableOperation(tableData, operation) {
+                try {
+                    const { type, tableIndex, rowIndex, data } = operation;
+                    
+                    if (tableIndex < 0 || tableIndex >= tableData.length) {
+                        console.error(`❌ 无效的tableIndex: ${tableIndex}`);
+                        return;
+                    }
+                    
+                    const table = tableData[tableIndex];
+                    
+                    switch (type) {
+                        case 'insertRow':
+                            // 将data对象转换为数组
+                            const newRow = QQ_ConvertDataToRow(data, table.columns.length);
+                            table.content.push(newRow);
+                            console.log(`✅ 向表格${tableIndex}插入新行:`, newRow);
+                            break;
+                            
+                        case 'updateRow':
+                            if (rowIndex < 0 || rowIndex >= table.content.length) {
+                                console.error(`❌ 无效的rowIndex: ${rowIndex}`);
+                                return;
+                            }
+                            // 更新指定行的指定列
+                            for (const [colIndex, value] of Object.entries(data)) {
+                                const colIdx = parseInt(colIndex);
+                                if (colIdx >= 0 && colIdx < table.columns.length) {
+                                    table.content[rowIndex][colIdx] = value;
+                                }
+                            }
+                            console.log(`✅ 更新表格${tableIndex}行${rowIndex}:`, data);
+                            break;
+                            
+                        case 'deleteRow':
+                            if (rowIndex >= 0 && rowIndex < table.content.length) {
+                                table.content.splice(rowIndex, 1);
+                                console.log(`✅ 删除表格${tableIndex}行${rowIndex}`);
+                            }
+                            break;
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 应用表格操作失败:', error);
+                }
+            }
+            
+            /**
+             * [Table-Converter] 将数据对象转换为行数组
+             * @param {Object} data - 数据对象
+             * @param {number} columnCount - 列数
+             * @returns {Array} 行数组
+             */
+            function QQ_ConvertDataToRow(data, columnCount) {
+                const row = new Array(columnCount).fill('');
+                
+                for (const [colIndex, value] of Object.entries(data)) {
+                    const colIdx = parseInt(colIndex);
+                    if (colIdx >= 0 && colIdx < columnCount) {
+                        row[colIdx] = value;
+                    }
+                }
+                
+                return row;
+            }
+            
+            /**
+             * [Table-Save] 保存表格数据到世界书
+             * @param {Object} tableData - 表格数据
+             */
+            async function QQ_SaveTableDataToWorldbook(tableData) {
+                try {
+                    const tableDataJson = JSON.stringify(tableData, null, 2);
+                    
+                    // 查找现有条目
+                    let tableDataEntry = GetWorldEntry(["Table-Data", "表格数据", "TableData"], false);
+                    
+                    if (tableDataEntry) {
+                        // 更新现有条目
+                        await updateLorebookEntry(worldbook, tableDataEntry.uid, {
+                            content: tableDataJson
+                        });
+                        console.log('✅ 表格数据已更新到现有世界书条目');
+                    } else {
+                        // 创建新条目
+                        await createLorebookEntry(worldbook, {
+                            comment: '[Table-Data] 记忆增强表格数据',
+                            content: tableDataJson,
+                            key: ['Table-Data', '表格数据'],
+                            keysecondary: ['TableData'],
+                            selective: false,
+                            constant: true,
+                            order: 999
+                        });
+                        console.log('✅ 表格数据已保存到新世界书条目');
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ 保存表格数据到世界书失败:', error);
+                }
             }
             
             /**
