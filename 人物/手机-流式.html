@@ -4667,7 +4667,7 @@
                 const minute = now.getMinutes();
                 const clarifiedTime = `${currentTime.period}${hour}点${minute.toString().padStart(2, '0')}分`;
                 
-                const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。请在回复中考虑时间情境，如问候语(早上好/下午好/晚上好)、活动安排等应符合当前时间>`;
+                const timeContext = `<TimeContext:当前真实时间是${currentTime.date} ${currentTime.weekday} ${clarifiedTime}(24小时制${currentTime.time})，现在是${currentTime.period}时段，${currentTime.season}。注意：**仅在开启新话题、或对话长时间中断后，或对方主动问候时，才适合使用时间问候语**。否则，请将此信息作为背景，自然地融入对话（如“时间晚了该睡了，明天再聊吧？”），而不是生硬地打招呼。>`;
                 
                 return timeContext;
             }
@@ -4766,112 +4766,9 @@
                 promptParts.push("\n现在，请严格按照以上所有规则和任务列表，生成你的完整回复。");
                 return promptParts.join('\n\n');
             }
-            /**
-             * (第一层) 寻找AI回复中的表格数据本身
-             * @param {string} fullResponse - AI的完整回复
-             * @returns {string|null} 找到的表格文本或null
-             */
-            function findTableData(fullResponse) {
-                console.log("🔍 第一层检测：寻找表格化数据...");
-                // 这个正则表达式用于匹配常见的Markdown表格格式
-                const tableRegex = /(\|(?:[^\r\n\|]+\|)+\r?\n\|(?:-+\|)+[\s\S]+)/;
-                const match = fullResponse.match(tableRegex);
-                
-                if (match && match[1]) {
-                    console.log("   ✅ 匹配到Markdown表格数据。");
-                    return match[1].trim(); // 返回完整的表格作为上下文
-                }
 
-                console.log("   未找到表格数据。");
-                return null;
-            }
 
-            /**
-             * (第二层) 寻找用户自定义的摘要
-             * @param {string} fullResponse - AI的完整回复
-             * @returns {string|null} 找到的摘要文本或null
-             */
-            function findSummaryUsingUserPatterns(fullResponse) {
-                console.log("🔍 第二层检测：使用用户自定义摘要格式...");
-                const patternsString = Phone_Settings.readValue("下面是基本设置", "SummaryPatterns");
-                if (!patternsString) {
-                    console.log("   用户未定义摘要格式，跳过。");
-                    return null;
-                }
 
-                const patterns = patternsString.split('|||').map(p => p.trim());
-                for (const pattern of patterns) {
-                    try {
-                        const match = pattern.match(new RegExp('^/(.*?)/([gimy]*)$'));
-                        if (!match) continue;
-                        
-                        const regex = new RegExp(match[1], match[2]);
-                        const summaryMatch = fullResponse.match(regex);
-
-                        if (summaryMatch && summaryMatch[1] && summaryMatch[1].trim() !== "") {
-                            console.log(`   ✅ 匹配到用户自定义摘要`);
-                            return summaryMatch[1].trim();
-                        }
-                    } catch (e) { console.error(`无效的摘要正则表达式: ${pattern}`, e); }
-                }
-                return null;
-            }
-
-            /**
-             * (第三层) 寻找通用的摘要格式
-             * @param {string} fullResponse - AI的完整回复
-             * @returns {string|null} 找到的摘要文本或null
-             */
-            function findSummaryUsingHeuristics(fullResponse) {
-                console.log("🔍 第三层检测：使用通用格式启发式检测...");
-                const heuristicPatterns = [
-                    /<details><summary>[摘要总结概括结语].*?<\/summary>([\s\S]+?)<\/details>/i,
-                    /(?:\[|\*\*|##)\s*[摘要总结概括结语Summary]+\s*(?::|\*\*|##)\s*([\s\S]+)/i
-                ];
-
-                for (const regex of heuristicPatterns) {
-                    const summaryMatch = fullResponse.match(regex);
-                    if (summaryMatch && summaryMatch[1] && summaryMatch[1].trim() !== "") {
-                        console.log(`   ✅ 匹配到通用摘要格式`);
-                        return summaryMatch[1].trim();
-                    }
-                }
-                return null;
-            }
-
-            /**
-             * (第四层 - 安全网) 生成备用摘要
-             */
-            function createHistorySummary(newMessages) {
-                console.log("⚠️ 第四层安全网启动：由前端生成历史摘要。");
-                let summaryLines = [];
-                if (newMessages.私聊) {
-                    for (const chatKey in newMessages.私聊) {
-                        newMessages.私聊[chatKey].forEach(msg => {
-                            const parts = msg.split('--');
-                            if (parts.length >= 2 && parts[0] !== '{{user}}') {
-                                summaryLines.push(`[私聊] ${parts[0]}: ${parts[1]}`);
-                            }
-                        });
-                    }
-                }
-                if (newMessages.群聊) {
-                    for (const groupName in newMessages.群聊) {
-                        if (newMessages.群聊[groupName].msgs) {
-                            newMessages.群聊[groupName].msgs.forEach(msg => {
-                                const parts = msg.split('--');
-                                if (parts.length >= 2 && parts[0] !== '{{user}}') {
-                                    summaryLines.push(`[群聊: ${groupName}] ${parts[0]}: ${parts[1]}`);
-                                }
-                            });
-                        }
-                    }
-                }
-                if (summaryLines.length === 0) {
-                    return "[AI进行了操作，但没有新的聊天消息]";
-                }
-                return summaryLines.join('\n');
-            }
 
             /**
              * 压缩图片到指定大小，确保兼容localStorage存储
@@ -5884,80 +5781,7 @@
                 console.log('✅ 保持AI原始回复，不进行上下文净化以维护记忆完整性。');
             }
             
-            /**
-             * *** 新增：检查消息是否包含重要内容 ***
-             * @param {string} content - 消息内容
-             * @returns {Object} 检查结果
-             */
-            function QQ_CheckImportantContent(content) {
-                const reasons = [];
-                let isImportant = false;
-                
-                // 检查表格或数据结构
-                if (content.includes('<table') || content.includes('|') || content.includes('```')) {
-                    reasons.push('包含表格或代码');
-                    isImportant = true;
-                }
-                
-                // 检查角色状态或重要信息
-                if (content.includes('记忆') || content.includes('状态') || content.includes('等级') || content.includes('经验')) {
-                    reasons.push('包含角色状态信息');
-                    isImportant = true;
-                }
-                
-                // 检查重要标签
-                if (content.includes('<tableEdit>') || content.includes('<summary>') || content.includes('<important>')) {
-                    reasons.push('包含重要标签');
-                    isImportant = true;
-                }
-                
-                // 检查数字或统计信息
-                if (/\d+%|\d+\/\d+|\d+\s*points?|\d+\s*分/.test(content)) {
-                    reasons.push('包含数值统计');
-                    isImportant = true;
-                }
-                
-                // 检查列表或清单
-                if (/^[\s]*[-*•]\s/m.test(content) || /^\d+\.\s/m.test(content)) {
-                    reasons.push('包含列表结构');
-                    isImportant = true;
-                }
-                
-                return { isImportant, reasons };
-            }
             
-            /**
-             * *** 新增：温和的上下文清理 ***
-             * 保留关键信息，只压缩冗余部分
-             * @param {string} content - 原始内容
-             * @returns {string} 清理后的内容
-             */
-            function QQ_GentleContextCleanup(content) {
-                let cleaned = content;
-                
-                // 保留重要标签和内容
-                const importantTags = ['<tableEdit>', '<summary>', '<important>', '```', '|'];
-                const hasImportantTags = importantTags.some(tag => content.includes(tag));
-                
-                if (hasImportantTags) {
-                    // 如果有重要标签，只进行轻微压缩
-                    // 移除多余的空行
-                    cleaned = cleaned.replace(/\n\s*\n\s*\n/g, '\n\n');
-                    // 压缩过长的重复表达
-                    cleaned = cleaned.replace(/([。！？])\1{2,}/g, '$1');
-                    // 保留核心内容
-                    return cleaned;
-                } else {
-                    // 普通对话内容，可以适度压缩
-                    // 提取关键句子
-                    const sentences = cleaned.split(/[。！？]/).filter(s => s.trim().length > 5);
-                    if (sentences.length > 3) {
-                        // 保留前两句和最后一句
-                        cleaned = sentences.slice(0, 2).join('。') + '。...' + sentences[sentences.length - 1] + '。';
-                    }
-                    return cleaned;
-                }
-            }
             
             /**
              * *** 新增：保存聊天消息到worldbook备份 ***
@@ -7322,49 +7146,7 @@
                 );
                 return json;
             }
-            // FIXME: 明显 json 的类型可以更准确
-            /**
-             * 删除一条消息
-             * @param type 类型
-             * @param json 消息记录
-             * @returns
-             */
-            // function QQ_MsgDeletOne(type: string, json: Record<string, any>) {
-            //   const reg = new RegExp('${UserName}--');
-            //   for (let name in json[type]) {
-            //     if (type == '群聊') {
-            //       while (true) {
-            //         if (json[type][name]['msgs'].length <= 0) {
-            //           console.log(`数组成员为零,退出循环`);
-            //           break;
-            //         }
-            //         let m = json[type][name]['msgs'][0];
-            //         if (m.match(reg)) {
-            //           console.log(`群聊首句是user,删除`);
-            //           json[type][name]['msgs'].shift();
-            //         } else {
-            //           console.log(`非自己发言,退出循环`);
-            //           break;
-            //         }
-            //       }
-            //     } else if (type == '私聊') {
-            //       while (true) {
-            //         if (json[type][name].length <= 0) {
-            //           break;
-            //         }
-            //         let m = json[type][name][0];
-            //         if (m.match(reg)) {
-            //           console.log(`私聊首句是user,删除`);
-            //           json[type][name].shift();
-            //         } else {
-            //           console.log(`非自己发言,退出循环`);
-            //           break;
-            //         }
-            //       }
-            //     }
-            //   }
-            //   return json;
-            // }
+
             /**
              * 按下回车键
              * @param e 事件对象
@@ -21038,9 +20820,18 @@ ${index + 1}. ${space.name}
                         
                         // 使用本福特定律生成延迟时间
                         const isGroupChat = QQ_Groups.includes(chatName);
-                        const delay = QQ_GenerateBenfordDelay(isGroupChat);
-                        
-                        console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
+                        const baseDelay = QQ_GenerateBenfordDelay(isGroupChat);
+                        // 按照讯息长短延迟
+                        const nextMessageContent = fullMessages[currentIndex].split('--')[1] || "";
+                        const messageLength = nextMessageContent.length;
+                        // 每字延迟毫秒数 (可调整, 80ms 约等于每分钟150字的中等语速)
+                        const TYPING_SPEED_FACTOR_MS = 80; 
+                        const typingDelay = messageLength * TYPING_SPEED_FACTOR_MS;
+                        //组合
+                        const MAX_DELAY_MS = 15000; // 最大延迟15秒
+                        const combinedDelay = Math.min(baseDelay + typingDelay, MAX_DELAY_MS);
+
+                        console.log(`⏱️ 下一条消息(${nextSender})将在 ${combinedDelay.toFixed(0)}ms 后显示 (基础:${baseDelay.toFixed(0)}ms + 打字:${typingDelay.toFixed(0)}ms)`);
                         setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
                     }
                 }
