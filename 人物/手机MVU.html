@@ -3959,7 +3959,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月5日</span>
+                            <span>台北</span> <span id="day">7月6日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5981,6 +5981,7 @@
                 SHOW_GROUP_SETTINGS: 'SHOW_GROUP_SETTINGS',
                 CHARACTER_SPIRIT_CLICK: 'CHARACTER_SPIRIT_CLICK',
                 REFRESH_CURRENT_CHAT: 'REFRESH_CURRENT_CHAT',
+                UPDATE_GROUP_DATA: 'UPDATE_GROUP_DATA',
                 
                 // 新建群组模态框
                 UPDATE_NEW_GROUP_INPUT: 'UPDATE_NEW_GROUP_INPUT',
@@ -7444,6 +7445,19 @@
                     case MessageTypes.HANDLE_ERROR:
                         newModel.system.lastError = message.payload.error;
                         newModel.system.generateState = 'error';
+                        break;
+                        
+                    case MessageTypes.UPDATE_GROUP_DATA:
+                        // 更新群聊数据后触发联系人列表更新
+                        console.log('🔄 MVU更新群聊数据:', message.payload);
+                        // 强制触发联系人列表重新渲染
+                        newModel.system.forceRefresh = true;
+                        newModel.system.lastGroupUpdate = {
+                            timestamp: Date.now(),
+                            oldName: message.payload.oldName,
+                            newName: message.payload.newName,
+                            groupData: message.payload.groupData
+                        };
                         break;
                         
                     default:
@@ -31816,7 +31830,7 @@ ${index + 1}. ${space.name}
                         </div>
                         <!-- 上传头像选项 -->
                         <div id="upload_avatars" class="avatar-options">
-                            <div class="upload-zone" onclick="triggerFileUpload()">
+                            <div class="upload-zone" onclick="event.stopPropagation(); triggerFileUpload()">
                                 <div class="upload-icon">📁</div>
                                 <div class="upload-text">点击上传图片</div>
                                 <div class="upload-hint">支持 JPG、PNG 格式</div>
@@ -36471,14 +36485,36 @@ ${index + 1}. ${space.name}
                             return false;
                     }
                     
-                    // 1. 查找旧群聊条目 - 使用唯一comment查找
+                    // 1. 查找旧群聊条目 - 使用唯一comment查找，支持模糊匹配
                     let oldGroupEntry = null;
                     const oldUniqueComment = `手机-群聊-${oldName}`;
                     
                     if (entries) {
+                        // 首先尝试精确匹配
                         oldGroupEntry = entries.find(e => 
                             e.comment === oldUniqueComment
                         );
+                        
+                        // 如果精确匹配失败，尝试模糊匹配
+                        if (!oldGroupEntry) {
+                            console.warn('精确匹配失败，尝试模糊匹配群聊条目:', oldName);
+                            const groupEntries = entries.filter(e => e.comment.startsWith("手机-群聊"));
+                            
+                            // 按相似度排序，选择最相似的条目
+                            const candidates = groupEntries.map(e => {
+                                const entryName = e.comment.replace('手机-群聊-', '');
+                                // 简单相似度计算：检查是否包含或被包含
+                                const similarity = 
+                                    entryName.includes(oldName) || oldName.includes(entryName) ? 
+                                    Math.min(entryName.length, oldName.length) / Math.max(entryName.length, oldName.length) : 0;
+                                return { entry: e, similarity, entryName };
+                            }).filter(c => c.similarity > 0).sort((a, b) => b.similarity - a.similarity);
+                            
+                            if (candidates.length > 0) {
+                                oldGroupEntry = candidates[0].entry;
+                                console.log(`使用模糊匹配找到群聊条目: ${candidates[0].entryName} (相似度: ${candidates[0].similarity})`);
+                            }
+                        }
                     }
                     
                     if (!oldGroupEntry) {
@@ -39136,6 +39172,28 @@ ${index + 1}. ${space.name}
                     
                     // 保护性联系人更新
                     await protectedContactListUpdate(currentManagingGroup, oldName);
+                    
+                    // *** 关键修复：确保MVU系统也更新群聊数据 ***
+                    if (oldName !== newName) {
+                        // 更新QQ_Groups数组中的群聊名称
+                        const groupIndex = QQ_Groups.findIndex(g => g === oldName);
+                        if (groupIndex !== -1) {
+                            QQ_Groups[groupIndex] = newName;
+                            console.log(`QQ_Groups数组更新: ${oldName} -> ${newName}`);
+                        }
+                        
+                        // 通过MVU系统触发联系人列表重新渲染
+                        if (typeof dispatch === 'function') {
+                            dispatch({
+                                type: 'UPDATE_GROUP_DATA',
+                                payload: {
+                                    oldName: oldName,
+                                    newName: newName,
+                                    groupData: currentManagingGroup
+                                }
+                            });
+                        }
+                    }
                     
                     console.log('界面更新流程完成');
                 }, 150);
