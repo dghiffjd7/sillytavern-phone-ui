@@ -3959,7 +3959,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月7日</span>
+                            <span>台北</span> <span id="day">7月5日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -10064,6 +10064,11 @@
                         </div>
                     </div>
                 `;
+                
+                // 渲染完成后，立即更新头像预览
+                setTimeout(() => {
+                    updateGroupAvatarPreview(groupData);
+                }, 50);
             }
             
             // 渲染角色精灵面板
@@ -35739,29 +35744,36 @@ ${index + 1}. ${space.name}
                 
                 // *** 修复：关闭头像选择器后重新显示群聊设置弹窗 ***
                 if (shouldShowGroupSettings) {
+                    console.log('需要重新显示群聊设置弹窗，当前群聊:', window.currentAvatarGroup);
                     setTimeout(() => {
-                        // 尝试使用MVU模式显示群聊设置
-                        if (typeof dispatch === 'function') {
+                        // 首先尝试使用传统DOM方式显示群聊设置
+                        const groupSettingsModal = document.getElementById('group_settings_modal');
+                        if (groupSettingsModal) {
+                            groupSettingsModal.style.display = 'flex';
+                            console.log('使用DOM方式重新显示群聊设置弹窗');
+                            
+                            // 确保输入框内容保持最新
+                            const nameInput = document.getElementById('group_name_edit_mvu') || document.getElementById('group_name_edit');
+                            if (nameInput && window.currentAvatarGroup) {
+                                nameInput.value = window.currentAvatarGroup.name;
+                            }
+                        } else if (typeof dispatch === 'function') {
+                            // 备选方案：使用MVU模式显示群聊设置
                             console.log('使用MVU模式重新显示群聊设置弹窗');
                             dispatch({
                                 type: MessageTypes.SHOW_MODAL,
                                 payload: {
                                     modalName: 'group_settings',
                                     data: {
-                                        groupName: currentManagingGroup ? currentManagingGroup.name : '',
-                                        groupData: currentManagingGroup
+                                        groupName: window.currentAvatarGroup ? window.currentAvatarGroup.name : '',
+                                        groupData: window.currentAvatarGroup
                                     }
                                 }
                             });
                         } else {
-                            // 备选方案：直接显示群聊设置模态框
-                            const groupSettingsModal = document.getElementById('group_settings_modal');
-                            if (groupSettingsModal) {
-                                groupSettingsModal.style.display = 'flex';
-                                console.log('使用DOM方式重新显示群聊设置弹窗');
-                            }
+                            console.error('无法重新显示群聊设置弹窗：找不到合适的显示方式');
                         }
-                    }, 100);
+                    }, 150);
                 }
                 
                 // 不要重置头像数据，让用户的选择保持
@@ -38790,6 +38802,116 @@ ${index + 1}. ${space.name}
                 }
             }
             
+            /**
+             * 更新群聊头像预览
+             * @param {Object} groupData - 群聊数据（可选，默认使用currentManagingGroup）
+             */
+            function updateGroupAvatarPreview(groupData = null) {
+                const targetGroup = groupData || currentManagingGroup;
+                if (!targetGroup) {
+                    console.warn('updateGroupAvatarPreview: 没有群聊数据');
+                    return;
+                }
+                
+                console.log('更新群聊头像预览:', targetGroup.name);
+                
+                // 获取头像预览元素（支持MVU和传统版本）
+                const avatarPreview = document.getElementById('group_settings_avatar_preview_mvu') || 
+                                     document.getElementById('group_settings_avatar_preview');
+                
+                if (!avatarPreview) {
+                    console.warn('找不到群聊头像预览元素');
+                    return;
+                }
+                
+                // 清空现有内容
+                avatarPreview.innerHTML = '';
+                avatarPreview.style.cssText = avatarPreview.style.cssText.replace(/background[^;]*(;|$)/g, '');
+                
+                // 获取头像数据的优先级：选中的头像 > 群聊头像 > 世界书头像 > 默认头像
+                let avatarData = null;
+                
+                // 1. 检查是否有新选择的头像
+                if (window.selectedAvatarData) {
+                    avatarData = window.selectedAvatarData;
+                    console.log('使用新选择的头像数据');
+                } 
+                // 2. 使用群聊当前头像
+                else if (targetGroup.avatar) {
+                    avatarData = targetGroup.avatar;
+                    console.log('使用群聊当前头像数据');
+                }
+                // 3. 从世界书获取头像
+                else {
+                    const worldbookAvatar = getGroupAvatarFromWorldbook(targetGroup.name);
+                    if (worldbookAvatar && worldbookAvatar.avatarUrl) {
+                        if (worldbookAvatar.avatarUrl.startsWith('data:')) {
+                            avatarData = {
+                                type: 'upload',
+                                imageData: worldbookAvatar.avatarUrl
+                            };
+                        } else {
+                            avatarData = worldbookAvatar.avatarUrl;
+                        }
+                        console.log('使用世界书头像数据');
+                    }
+                }
+                
+                // 应用头像数据
+                if (avatarData) {
+                    if (typeof avatarData === 'string') {
+                        // 字符串类型（URL）
+                        avatarPreview.style.backgroundImage = `url('${avatarData}')`;
+                        avatarPreview.style.backgroundSize = 'cover';
+                        avatarPreview.style.backgroundPosition = 'center';
+                        avatarPreview.style.backgroundRepeat = 'no-repeat';
+                        console.log('应用字符串类型头像:', avatarData);
+                    } else if (avatarData.type === 'upload' && avatarData.imageData) {
+                        // 上传头像
+                        avatarPreview.style.backgroundImage = `url('${avatarData.imageData}')`;
+                        avatarPreview.style.backgroundSize = 'cover';
+                        avatarPreview.style.backgroundPosition = 'center';
+                        avatarPreview.style.backgroundRepeat = 'no-repeat';
+                        console.log('应用上传头像');
+                    } else if (avatarData.type === 'preset') {
+                        // 预设头像
+                        const gradient = avatarData.gradient || { start: '#199AFF', end: '#0066CC' };
+                        avatarPreview.style.background = `linear-gradient(135deg, ${gradient.start}, ${gradient.end})`;
+                        avatarPreview.innerHTML = `<div style="
+                            color: white;
+                            font-size: 20px;
+                            font-weight: bold;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 100%;
+                            height: 100%;
+                        ">${avatarData.text || '群'}</div>`;
+                        console.log('应用预设头像:', avatarData.text);
+                    } else {
+                        // 尝试使用通用头像更新函数
+                        updateAvatarElement(avatarPreview, avatarData);
+                        console.log('使用通用头像更新函数');
+                    }
+                } else {
+                    // 使用默认头像
+                    avatarPreview.style.background = '#4CAF50';
+                    avatarPreview.innerHTML = `<div style="
+                        color: white;
+                        font-size: 20px;
+                        font-weight: bold;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 100%;
+                        height: 100%;
+                    ">群</div>`;
+                    console.log('应用默认头像');
+                }
+                
+                console.log('群聊头像预览更新完成');
+            }
+            
             // *** 旧的群聊头像上传函数已移除，现在使用统一的 handleAvatarUpload 和 confirmAvatarSelection 逻辑 ***
 
             /**
@@ -39077,39 +39199,22 @@ ${index + 1}. ${space.name}
                 // 清空选中的头像数据
                 window.selectedAvatarData = null;
                 
+                // *** 修复：延迟更新联系人列表和背景，保持与原版一致 ***
+                setTimeout(async () => {
+                    // 重新应用群聊背景
+                    console.log('重新应用群聊背景...');
+                    reapplyGroupChatBackground(currentManagingGroup);
+                    
+                    // 保护性联系人更新 - 关键步骤！
+                    console.log('执行保护性联系人更新...');
+                    await protectedContactListUpdate(currentManagingGroup, oldName);
+                    
+                    console.log('所有界面更新完成');
+                }, 150);
+                
                 console.log(`群聊设置已保存并立即生效: ${oldName} -> ${newName}`);
-                
-                // *** 修复：立即刷新页面以应用所有变更 ***
-                console.log('=== 立即刷新页面以应用所有变更 ===');
-                
-                // 先关闭模态框，避免在刷新时出现状态冲突
-                closeGroupSettings();
-                
-                // 延迟刷新，确保模态框关闭完成
-                setTimeout(() => {
-                    // 保存当前聊天状态，避免刷新后丢失
-                    const currentChatName = currentManagingGroup.name;
-                    const currentChatType = 'group';
-                    
-                    console.log(`准备刷新页面，当前聊天: ${currentChatName}, 类型: ${currentChatType}`);
-                    
-                    // 使用MVU模式的页面重新加载
-                    if (typeof dispatch === 'function') {
-                        dispatch({
-                            type: 'REFRESH_CURRENT_CHAT',
-                            payload: {
-                                chatName: currentChatName,
-                                chatType: currentChatType,
-                                forceReload: true
-                            }
-                        });
-                    } else {
-                        // 备选方案：使用传统的页面刷新
-                        location.reload();
-                    }
-                }, 300);
-                
                 alert('群聊设置已保存');
+                closeGroupSettings();
             }
             
             /**
