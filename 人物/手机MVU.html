@@ -3959,7 +3959,7 @@
                                 gap: 7px;
                             "
                         >
-                            <span>台北</span> <span id="day">7月6日</span>
+                            <span>台北</span> <span id="day">7月7日</span>
                         </div>
                     </div>
                     <div class="app">
@@ -5980,6 +5980,7 @@
                 UPDATE_MODAL_DATA: 'UPDATE_MODAL_DATA',
                 SHOW_GROUP_SETTINGS: 'SHOW_GROUP_SETTINGS',
                 CHARACTER_SPIRIT_CLICK: 'CHARACTER_SPIRIT_CLICK',
+                REFRESH_CURRENT_CHAT: 'REFRESH_CURRENT_CHAT',
                 
                 // 新建群组模态框
                 UPDATE_NEW_GROUP_INPUT: 'UPDATE_NEW_GROUP_INPUT',
@@ -6417,6 +6418,35 @@
                         if (typeof window !== 'undefined' && window.QQ_SystemContext) {
                             window.QQ_SystemContext.currentChatName = chatName;
                             window.QQ_SystemContext.currentChatType = isGroup ? 'group' : 'private';
+                        }
+                        break;
+                        
+                    case MessageTypes.REFRESH_CURRENT_CHAT:
+                        // 刷新当前聊天页面
+                        const refreshChatName = message.payload.chatName;
+                        const refreshChatType = message.payload.chatType;
+                        const forceReload = message.payload.forceReload;
+                        
+                        console.log('🔄 刷新聊天页面:', refreshChatName, refreshChatType);
+                        
+                        if (refreshChatName) {
+                            // 更新聊天状态
+                            newModel.ui.activeChat = refreshChatName;
+                            newModel.ui.activeChatType = refreshChatType;
+                            newModel.ui.currentPage = 'QQ_CHAT';
+                            newModel.ui.showChatPage = true;
+                            newModel.ui.showHomePage = false;
+                            
+                            // 更新系统上下文
+                            if (typeof window !== 'undefined' && window.QQ_SystemContext) {
+                                window.QQ_SystemContext.currentChatName = refreshChatName;
+                                window.QQ_SystemContext.currentChatType = refreshChatType;
+                            }
+                            
+                            // 如果需要强制重新加载
+                            if (forceReload) {
+                                newModel.ui.forceReload = true;
+                            }
                         }
                         break;
                         
@@ -8498,6 +8528,7 @@
             function renderChatPage(model) {
                 const chatName = model.ui.activeChat;
                 const isGroup = model.ui.activeChatType === 'group';
+                const forceReload = model.ui.forceReload;
                 
                 if (!chatName) {
                     console.warn('❌ 无法渲染聊天页面：缺少activeChat');
@@ -8505,13 +8536,47 @@
                 }
                 
                 console.log(`🎨 渲染聊天页面: ${chatName} (${isGroup ? '群聊' : '私聊'})`);
+                if (forceReload) {
+                    console.log('🔄 强制重新加载聊天页面');
+                }
                 
                 // 查找或创建聊天页面容器
                 let $chatPage = $(`.QQ_chat_page[data-name='${chatName}']`);
+                
+                // 如果是强制重新加载，删除现有页面并重新创建
+                if (forceReload && $chatPage.length > 0) {
+                    console.log('📝 强制重新创建聊天页面');
+                    $chatPage.remove();
+                    $chatPage = $();
+                }
+                
                 if ($chatPage.length === 0) {
                     console.log(`📝 创建新的聊天页面: ${chatName}`);
                     $chatPage = createChatPageElement(chatName, isGroup);
                     $('#App_QQ').append($chatPage);
+                }
+                
+                // 如果是群聊且需要强制重新加载，立即更新头部信息
+                if (forceReload && isGroup) {
+                    console.log('🔄 强制更新群聊头部信息');
+                    setTimeout(() => {
+                        const chatHeader = $chatPage.find('#QQ_chat_username')[0];
+                        if (chatHeader) {
+                            // 更新群聊标题
+                            chatHeader.textContent = chatName;
+                            
+                            // 如果有群聊数据，更新头像等信息
+                            if (window.currentManagingGroup && window.currentManagingGroup.name === chatName) {
+                                updateChatPageGroupInfo($chatPage, window.currentManagingGroup);
+                            } else {
+                                // 从QQ_Groups或其他数据源获取群聊信息
+                                const groupData = findGroupData(chatName);
+                                if (groupData) {
+                                    updateChatPageGroupInfo($chatPage, groupData);
+                                }
+                            }
+                        }
+                    }, 100);
                 }
                 
                 // 显示当前聊天页面，隐藏其他页面
@@ -8524,6 +8589,63 @@
                 
                 // 加载聊天消息
                 loadChatMessages($chatPage, chatName, isGroup, model);
+                
+                // 清除forceReload标志
+                if (forceReload) {
+                    model.ui.forceReload = false;
+                }
+            }
+            
+            /**
+             * 更新聊天页面的群聊信息
+             * @param {jQuery} $chatPage - 聊天页面元素
+             * @param {Object} groupData - 群聊数据
+             */
+            function updateChatPageGroupInfo($chatPage, groupData) {
+                if (!$chatPage || !groupData) return;
+                
+                console.log('🔄 更新聊天页面群聊信息:', groupData.name);
+                
+                // 更新页面的data-name属性
+                $chatPage.attr('data-name', groupData.name);
+                
+                // 更新标题
+                const titleElement = $chatPage.find('#QQ_chat_username')[0];
+                if (titleElement) {
+                    titleElement.textContent = groupData.name;
+                }
+                
+                // 如果有头像信息，可以在这里添加头像更新逻辑
+                // 目前聊天页面头部不显示头像，只有标题
+                
+                console.log('✅ 聊天页面群聊信息更新完成');
+            }
+            
+            /**
+             * 查找群聊数据
+             * @param {string} groupName - 群聊名称
+             * @returns {Object|null} 群聊数据
+             */
+            function findGroupData(groupName) {
+                // 从各种数据源查找群聊信息
+                if (window.QQ_msgjson && window.QQ_msgjson.群聊 && window.QQ_msgjson.群聊[groupName]) {
+                    return {
+                        name: groupName,
+                        members: window.QQ_msgjson.群聊[groupName].members || [],
+                        avatar: window.QQ_msgjson.群聊[groupName].avatar
+                    };
+                }
+                
+                // 从QQ_Groups数组查找
+                if (window.QQ_Groups && window.QQ_Groups.includes(groupName)) {
+                    return {
+                        name: groupName,
+                        members: [],
+                        avatar: null
+                    };
+                }
+                
+                return null;
             }
             
             /**
@@ -38567,11 +38689,18 @@ ${index + 1}. ${space.name}
             
             /**
              * 关闭群聊设置模态窗口
+             * 同时支持传统DOM模态框和MVU模式的模态框
              */
             function closeGroupSettings() {
+                // 处理传统DOM模态框
                 const modal = document.getElementById('group_settings_modal');
                 if (modal) {
                     modal.style.display = 'none';
+                }
+                
+                // 处理MVU模式的模态框
+                if (typeof dispatch === 'function') {
+                    dispatch({ type: MessageTypes.HIDE_MODAL });
                 }
             }
             
@@ -38949,8 +39078,38 @@ ${index + 1}. ${space.name}
                 window.selectedAvatarData = null;
                 
                 console.log(`群聊设置已保存并立即生效: ${oldName} -> ${newName}`);
-                alert('群聊设置已保存');
+                
+                // *** 修复：立即刷新页面以应用所有变更 ***
+                console.log('=== 立即刷新页面以应用所有变更 ===');
+                
+                // 先关闭模态框，避免在刷新时出现状态冲突
                 closeGroupSettings();
+                
+                // 延迟刷新，确保模态框关闭完成
+                setTimeout(() => {
+                    // 保存当前聊天状态，避免刷新后丢失
+                    const currentChatName = currentManagingGroup.name;
+                    const currentChatType = 'group';
+                    
+                    console.log(`准备刷新页面，当前聊天: ${currentChatName}, 类型: ${currentChatType}`);
+                    
+                    // 使用MVU模式的页面重新加载
+                    if (typeof dispatch === 'function') {
+                        dispatch({
+                            type: 'REFRESH_CURRENT_CHAT',
+                            payload: {
+                                chatName: currentChatName,
+                                chatType: currentChatType,
+                                forceReload: true
+                            }
+                        });
+                    } else {
+                        // 备选方案：使用传统的页面刷新
+                        location.reload();
+                    }
+                }, 300);
+                
+                alert('群聊设置已保存');
             }
             
             /**
