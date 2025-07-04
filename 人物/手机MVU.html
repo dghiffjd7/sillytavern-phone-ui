@@ -9712,8 +9712,8 @@
                 
                 // 生成成员列表HTML
                 const membersHtml = groupData && groupData.members ? groupData.members.map(memberName => {
-                    // 获取成员头像
-                    const worldbookAvatar = getCharacterAvatarFromWorldbook(memberName);
+                    // 获取成员头像 - 与联系人列表保持一致的逻辑
+                    const memberAvatarData = getCharacterAvatarFromModel(memberName, AppModel);
                     let memberAvatarHtml = `<div style="
                         width: 32px;
                         height: 32px;
@@ -9729,26 +9729,25 @@
                         flex-shrink: 0;
                     ">${memberName.charAt(0)}</div>`;
                     
-                    if (worldbookAvatar && worldbookAvatar.backgroundImage && worldbookAvatar.backgroundImage !== 'none') {
-                        memberAvatarHtml = `<div style="
-                            width: 32px;
-                            height: 32px;
-                            border-radius: 50%;
-                            ${worldbookAvatar.backgroundImage.replace('background-image:', 'background-image:')};
-                            background-size: cover;
-                            background-position: center;
-                            background-repeat: no-repeat;
-                            margin-right: 10px;
-                            flex-shrink: 0;
-                        "></div>`;
-                    } else {
-                        const memberAvatarData = getCharacterAvatar(memberName);
-                        if (memberAvatarData && memberAvatarData.imageData) {
+                    if (memberAvatarData) {
+                        let backgroundImage = '';
+                        
+                        if (typeof memberAvatarData === 'string') {
+                            backgroundImage = `background-image: url('${memberAvatarData}');`;
+                        } else if (memberAvatarData.avatarUrl) {
+                            backgroundImage = `background-image: url('${memberAvatarData.avatarUrl}');`;
+                        } else if (memberAvatarData.backgroundImage && memberAvatarData.backgroundImage !== 'none') {
+                            backgroundImage = memberAvatarData.backgroundImage;
+                        } else if (memberAvatarData.imageData) {
+                            backgroundImage = `background-image: url('${memberAvatarData.imageData}');`;
+                        }
+                        
+                        if (backgroundImage) {
                             memberAvatarHtml = `<div style="
                                 width: 32px;
                                 height: 32px;
                                 border-radius: 50%;
-                                background-image: url('${memberAvatarData.imageData}');
+                                ${backgroundImage}
                                 background-size: cover;
                                 background-position: center;
                                 background-repeat: no-repeat;
@@ -10181,23 +10180,41 @@
                         </div>
                         <div class="group-members-list" style="padding: 8px 0;" id="group_members_display_mvu">
                             ${groupData.members.map(memberName => {
-                                // 获取成员头像
-                                const worldbookAvatar = getCharacterAvatarFromWorldbook(memberName);
+                                // 获取成员头像 - 与联系人列表保持一致的逻辑
+                                const memberAvatarData = getCharacterAvatarFromModel(memberName, AppModel);
                                 let avatarStyle = '';
                                 let avatarContent = memberName.charAt(0);
                                 
-                                if (worldbookAvatar && worldbookAvatar.backgroundImage && worldbookAvatar.backgroundImage !== 'none') {
-                                    avatarStyle = `
-                                        background-image: ${worldbookAvatar.backgroundImage};
-                                        background-size: cover;
-                                        background-position: center;
-                                        background-repeat: no-repeat;
-                                    `;
-                                    avatarContent = '';
-                                } else {
-                                    // 备选方案：使用getCharacterAvatar
-                                    const memberAvatarData = getCharacterAvatar(memberName);
-                                    if (memberAvatarData && memberAvatarData.imageData) {
+                                if (memberAvatarData) {
+                                    if (typeof memberAvatarData === 'string') {
+                                        // 字符串URL格式
+                                        avatarStyle = `
+                                            background-image: url('${memberAvatarData}');
+                                            background-size: cover;
+                                            background-position: center;
+                                            background-repeat: no-repeat;
+                                        `;
+                                        avatarContent = '';
+                                    } else if (memberAvatarData.avatarUrl) {
+                                        // 对象格式，优先使用avatarUrl
+                                        avatarStyle = `
+                                            background-image: url('${memberAvatarData.avatarUrl}');
+                                            background-size: cover;
+                                            background-position: center;
+                                            background-repeat: no-repeat;
+                                        `;
+                                        avatarContent = '';
+                                    } else if (memberAvatarData.backgroundImage && memberAvatarData.backgroundImage !== 'none') {
+                                        // 使用backgroundImage
+                                        avatarStyle = `
+                                            background-image: ${memberAvatarData.backgroundImage};
+                                            background-size: cover;
+                                            background-position: center;
+                                            background-repeat: no-repeat;
+                                        `;
+                                        avatarContent = '';
+                                    } else if (memberAvatarData.imageData) {
+                                        // 使用imageData
                                         avatarStyle = `
                                             background-image: url('${memberAvatarData.imageData}');
                                             background-size: cover;
@@ -10206,8 +10223,12 @@
                                         `;
                                         avatarContent = '';
                                     } else {
+                                        // 备选方案：默认渐变背景
                                         avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
                                     }
+                                } else {
+                                    // 没有找到头像数据，使用默认渐变背景
+                                    avatarStyle = 'background: linear-gradient(135deg, #667eea, #764ba2);';
                                 }
                                 
                                 return `
@@ -35585,10 +35606,40 @@ ${index + 1}. ${space.name}
                     modal.style.display = 'none';
                 }
                 
+                // 检查是否需要重新显示群聊设置弹窗
+                const shouldShowGroupSettings = window.isSelectingGroupAvatar && window.currentAvatarGroup;
+                
                 // 清理群聊头像选择状态
                 if (window.isSelectingGroupAvatar) {
                     window.isSelectingGroupAvatar = false;
                     window.currentAvatarGroup = null;
+                }
+                
+                // *** 修复：关闭头像选择器后重新显示群聊设置弹窗 ***
+                if (shouldShowGroupSettings) {
+                    setTimeout(() => {
+                        // 尝试使用MVU模式显示群聊设置
+                        if (typeof dispatch === 'function') {
+                            console.log('使用MVU模式重新显示群聊设置弹窗');
+                            dispatch({
+                                type: MessageTypes.SHOW_MODAL,
+                                payload: {
+                                    modalName: 'group_settings',
+                                    data: {
+                                        groupName: currentManagingGroup ? currentManagingGroup.name : '',
+                                        groupData: currentManagingGroup
+                                    }
+                                }
+                            });
+                        } else {
+                            // 备选方案：直接显示群聊设置模态框
+                            const groupSettingsModal = document.getElementById('group_settings_modal');
+                            if (groupSettingsModal) {
+                                groupSettingsModal.style.display = 'flex';
+                                console.log('使用DOM方式重新显示群聊设置弹窗');
+                            }
+                        }
+                    }, 100);
                 }
                 
                 // 不要重置头像数据，让用户的选择保持
