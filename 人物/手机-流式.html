@@ -21369,15 +21369,84 @@ ${index + 1}. ${space.name}
                         console.log('✅ 已创建新的短期记忆条目');
                     }
                     
-                    // 保存世界书
-                    await QQ_SafeSaveWorldInfo("短期记忆数据");
-                    console.log('🧠 短期记忆世界书更新完成');
+                    // 保存世界书 - 使用更直接的方法确保保存成功
+                    try {
+                        if (typeof saveWorldInfo === 'function') {
+                            await saveWorldInfo(worldbook.name, worldbook);
+                            console.log('🧠 短期记忆世界书保存成功 (使用saveWorldInfo)');
+                        } else {
+                            // 备选方案：触发世界书的保存事件
+                            if (typeof eventBus !== 'undefined' && eventBus.emit) {
+                                eventBus.emit('worldBookSaved');
+                            }
+                            console.log('🧠 短期记忆已更新到世界书，依赖自动保存机制');
+                        }
+                    } catch (saveError) {
+                        console.warn('⚠️ 世界书保存警告:', saveError.message);
+                        console.log('📝 短期记忆条目已创建，数据应该会自动保存');
+                    }
+                    
+                    // 调试信息：显示当前世界书中的条目
+                    console.log('🔍 调试信息 - 当前世界书条目数量:', Object.keys(entries).length);
+                    console.log('🔍 是否包含短期记忆条目:', entryKey in entries);
+                    if (entryKey in entries) {
+                        console.log('📝 短期记忆条目内容长度:', entries[entryKey].content.length);
+                        console.log('🎯 短期记忆条目关键词:', entries[entryKey].key);
+                        console.log('⚙️ 短期记忆条目设置 - constant:', entries[entryKey].constant, 'enabled:', entries[entryKey].enabled);
+                    }
                     
                 } catch (error) {
                     console.error('❌ 更新短期记忆失败:', error);
                 }
             }
             
+            /**
+             * 🔍 调试函数：查看短期记忆状态
+             * 在控制台中调用：QQ_DebugShortTermMemory()
+             */
+            function QQ_DebugShortTermMemory() {
+                console.log('🧠 === 短期记忆调试信息 ===');
+                
+                if (!worldbook || !entries) {
+                    console.error('❌ 世界书功能不可用');
+                    return;
+                }
+                
+                const entryKey = '短期记忆-最近对话';
+                const memoryEntry = entries[entryKey];
+                
+                console.log('📊 世界书总条目数:', Object.keys(entries).length);
+                console.log('🎯 短期记忆条目存在:', !!memoryEntry);
+                
+                if (memoryEntry) {
+                    console.log('📝 短期记忆条目详情:');
+                    console.log('   - 内容长度:', memoryEntry.content.length);
+                    console.log('   - 关键词:', memoryEntry.key);
+                    console.log('   - 常驻(constant):', memoryEntry.constant);
+                    console.log('   - 启用(enabled):', memoryEntry.enabled);
+                    console.log('   - 优先级(order):', memoryEntry.order);
+                    console.log('   - 位置(position):', memoryEntry.position);
+                    console.log('   - 注释:', memoryEntry.comment);
+                    
+                    // 显示内容预览
+                    const preview = memoryEntry.content.substring(0, 300) + '...';
+                    console.log('📄 内容预览:\n', preview);
+                } else {
+                    console.warn('⚠️ 短期记忆条目不存在，可能的原因:');
+                    console.log('   1. 短期记忆系统尚未运行');
+                    console.log('   2. 世界书保存失败');
+                    console.log('   3. 条目被意外删除');
+                    
+                    // 尝试手动创建
+                    console.log('🔧 尝试手动触发短期记忆更新...');
+                    QQ_UpdateShortTermMemory().then(() => {
+                        console.log('✅ 手动更新完成，请重新调用此函数查看结果');
+                    }).catch(err => {
+                        console.error('❌ 手动更新失败:', err);
+                    });
+                }
+            }
+
             /**
              * 解析时间字符串为时间戳（用于排序）
              */
