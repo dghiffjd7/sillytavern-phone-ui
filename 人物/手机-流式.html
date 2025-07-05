@@ -21211,64 +21211,6 @@ ${index + 1}. ${space.name}
             }
 
             /**
-             * 同步消息到Silly Tavern当前楼层
-             * 参考手机-动态.html的保存机制：更新当前楼层的消息内容而非添加新消息
-             */
-            async function QQ_SyncMessageToSillyTavern() {
-                try {
-                    if (!QQ_msgjson) {
-                        console.warn('⚠️ QQ_msgjson为空，跳过同步');
-                        return;
-                    }
-
-                    // 获取当前消息ID和楼层记录
-                    const CurrentMessageId = getCurrentMessageId();
-                    if (!CurrentMessageId) {
-                        console.warn('⚠️ 无法获取当前消息ID');
-                        return;
-                    }
-
-                    const Messages = await getChatMessages(CurrentMessageId);
-                    if (!Messages || Messages.length === 0) {
-                        console.warn('⚠️ 无法获取当前楼层消息');
-                        return;
-                    }
-
-                    let msg = Messages[0].message;
-                    
-                    // 查找现有的msg_start...msg_end块
-                    const match = msg.match(/msg_start[\s\S]*?msg_end/);
-                    
-                    if (!match) {
-                        console.warn('⚠️ 当前楼层消息中未找到msg_start...msg_end块，无法同步');
-                        return;
-                    }
-
-                    // 将QQ_msgjson转换为文本格式
-                    const newMsgContent = QQ_Json2Text(QQ_msgjson);
-                    
-                    // 替换消息内容
-                    const updatedMsg = msg.replace(
-                        match[0],
-                        `msg_start\n${newMsgContent}\nmsg_end`
-                    );
-
-                    // 保存到SillyTavern当前楼层
-                    if (typeof setChatMessage === 'function') {
-                        setChatMessage({ message: updatedMsg }, CurrentMessageId, {
-                            refresh: "none",
-                        });
-                        console.log('✅ 消息已同步到Silly Tavern当前楼层');
-                    } else {
-                        console.warn('⚠️ setChatMessage函数不可用');
-                    }
-                    
-                } catch (e) {
-                    console.error('❌ 同步消息到酒馆当前楼层失败:', e);
-                }
-            }
-
-            /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
              */
@@ -21404,6 +21346,41 @@ ${index + 1}. ${space.name}
                             }
                             
                             QQ_msgjson.私聊[str].push(msg);
+
+                            // =======================================================
+                            // 【新增的关键步骤】将消息同步到Silly Tavern后台
+                            // =======================================================
+                            try {
+                                const sp = msg.split("--");
+                                const senderName = sp[0];
+                                const messageContent = sp[1];
+                                
+                                // 如果消息发送者是当前用户，则跳过同步，因为用户的消息已经由发送逻辑处理了
+                                if (senderName !== UserName) {
+                                    // 构建符合酒馆API要求的消息对象
+                                    const messageObject = {
+                                        is_user: false, // AI的消息 is_user 为 false
+                                        is_name: true,
+                                        name: senderName,
+                                        send_date: Date.now(),
+                                        msg: messageContent,
+                                    };
+
+                                    // 通过 window.parent 调用酒馆的全局函数来【添加】新消息
+                                    // 我们使用 addMessage 是因为它能按顺序追加多条回复，构建完整的对话流
+                                    if (window.parent && typeof window.parent.addMessage === 'function') {
+                                        await window.parent.addMessage(messageObject, false); // false表示不触发AI回复
+                                        console.log(`✅ 同步AI消息到酒馆历史: ${senderName}`);
+                                    } else {
+                                        // 如果 addMessage 不存在，editLastMessage 作为备选，但效果可能不如 addMessage
+                                        await window.parent.editLastMessage(messageObject);
+                                        console.log(`✅ (备选)同步AI消息到酒馆历史: ${senderName}`);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('同步消息到酒馆失败:', e);
+                            }
+                            // =======================================================
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
                                 if (sp[0] == `${UserName}`) {
@@ -21743,6 +21720,40 @@ ${index + 1}. ${space.name}
                             
                             // 添加到数据记录
                             QQ_msgjson.群聊[name]["msgs"].push(msg);
+                            // =======================================================
+                            // 【新增的关键步骤】将消息同步到Silly Tavern后台
+                            // =======================================================
+                            try {
+                                const sp = msg.split("--");
+                                const senderName = sp[0];
+                                const messageContent = sp[1];
+                                
+                                // 如果消息发送者是当前用户，则跳过同步，因为用户的消息已经由发送逻辑处理了
+                                if (senderName !== UserName) {
+                                    // 构建符合酒馆API要求的消息对象
+                                    const messageObject = {
+                                        is_user: false, // AI的消息 is_user 为 false
+                                        is_name: true,
+                                        name: senderName,
+                                        send_date: Date.now(),
+                                        msg: messageContent,
+                                    };
+
+                                    // 通过 window.parent 调用酒馆的全局函数来【添加】新消息
+                                    // 我们使用 addMessage 是因为它能按顺序追加多条回复，构建完整的对话流
+                                    if (window.parent && typeof window.parent.addMessage === 'function') {
+                                        await window.parent.addMessage(messageObject, false); // false表示不触发AI回复
+                                        console.log(`✅ 同步AI消息到酒馆历史: ${senderName}`);
+                                    } else {
+                                        // 如果 addMessage 不存在，editLastMessage 作为备选，但效果可能不如 addMessage
+                                        await window.parent.editLastMessage(messageObject);
+                                        console.log(`✅ (备选)同步AI消息到酒馆历史: ${senderName}`);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('同步消息到酒馆失败:', e);
+                            }
+                            // =======================================================
                             console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             
                             // *** 修复：使用缓存的群聊元数据保存消息 ***
@@ -21877,10 +21888,6 @@ ${index + 1}. ${space.name}
                 console.log(
                     `User_LastMsgMap:\n${JSON.stringify(User_LastMsgMap)}\nChar_LastMsgMap:\n${JSON.stringify(Char_LastMsgMap)}`,
                 );
-                
-                // 同步消息到Silly Tavern当前楼层
-                await QQ_SyncMessageToSillyTavern();
-                
                 return true;
             }
             function QQ_SetHomeTips(name, count) {
