@@ -21211,6 +21211,199 @@ ${index + 1}. ${space.name}
             }
 
             /**
+             * *** 短期记忆系统 - 世界书记忆分层架构第1层 ***
+             * 更新短期记忆世界书，保存最近80条重要对话记录
+             */
+            async function QQ_UpdateShortTermMemory() {
+                try {
+                    console.log('🧠 开始更新短期记忆世界书...');
+                    
+                    if (!worldbook || !entries) {
+                        console.warn('⚠️ 世界书功能不可用，跳过短期记忆更新');
+                        return;
+                    }
+                    
+                    if (!QQ_msgjson) {
+                        console.warn('⚠️ QQ_msgjson为空，跳过短期记忆更新');
+                        return;
+                    }
+
+                    // 收集所有消息并排序
+                    const allMessages = [];
+                    const now = new Date();
+                    
+                    // 收集私聊消息
+                    for (const chatKey in QQ_msgjson.私聊) {
+                        const messages = QQ_msgjson.私聊[chatKey];
+                        if (Array.isArray(messages)) {
+                            for (const msg of messages) {
+                                const parts = msg.split('--');
+                                if (parts.length >= 2) {
+                                    const senderName = parts[0];
+                                    const content = parts[1];
+                                    const timeStr = parts[2] || now.toLocaleTimeString('zh-CN', { hour12: false });
+                                    
+                                    // 确定聊天对象
+                                    const match = chatKey.match(/(.+?)和(.+?)的聊天/);
+                                    let chatPartner = '';
+                                    if (match) {
+                                        chatPartner = match[1] === UserName ? match[2] : match[1];
+                                    }
+                                    
+                                    allMessages.push({
+                                        type: '私聊',
+                                        sender: senderName,
+                                        content: content,
+                                        time: timeStr,
+                                        chatPartner: chatPartner,
+                                        timestamp: QQ_ParseTime(timeStr)
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 收集群聊消息
+                    for (const groupName in QQ_msgjson.群聊) {
+                        const groupData = QQ_msgjson.群聊[groupName];
+                        if (groupData && Array.isArray(groupData.msgs)) {
+                            for (const msg of groupData.msgs) {
+                                const parts = msg.split('--');
+                                if (parts.length >= 2) {
+                                    const senderName = parts[0];
+                                    const content = parts[1];
+                                    const timeStr = parts[2] || now.toLocaleTimeString('zh-CN', { hour12: false });
+                                    
+                                    allMessages.push({
+                                        type: '群聊',
+                                        sender: senderName,
+                                        content: content,
+                                        time: timeStr,
+                                        groupName: groupName,
+                                        timestamp: QQ_ParseTime(timeStr)
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 收集动态评论
+                    if (typeof QQ_MomentsData !== 'undefined' && Array.isArray(QQ_MomentsData)) {
+                        for (const moment of QQ_MomentsData) {
+                            // 添加动态本身
+                            if (moment.message) {
+                                allMessages.push({
+                                    type: '动态',
+                                    sender: moment.userName || moment.name,
+                                    content: `发布动态: ${moment.message}`,
+                                    time: moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                    timestamp: moment.timestamp ? new Date(moment.timestamp).getTime() : QQ_ParseTime(moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
+                                });
+                            }
+                            
+                            // 添加动态评论
+                            if (moment.comments && Array.isArray(moment.comments)) {
+                                for (const comment of moment.comments) {
+                                    allMessages.push({
+                                        type: '动态评论',
+                                        sender: comment.name || comment.userName,
+                                        content: comment.content || comment.message,
+                                        time: comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                        momentAuthor: moment.userName || moment.name,
+                                        momentContent: moment.message,
+                                        timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 按时间排序，最新的在前
+                    allMessages.sort((a, b) => b.timestamp - a.timestamp);
+                    
+                    // 取最近80条消息
+                    const recentMessages = allMessages.slice(0, 80);
+                    
+                    console.log(`📊 收集到 ${allMessages.length} 条消息，取最近 ${recentMessages.length} 条更新短期记忆`);
+                    
+                    // 格式化为AI友好的格式
+                    let memoryContent = '# 短期记忆 - 最近对话记录\n\n';
+                    memoryContent += `更新时间: ${now.toLocaleString('zh-CN')}\n`;
+                    memoryContent += `记录条数: ${recentMessages.length}/80\n\n`;
+                    
+                    // 按时间倒序显示（最早的在前，符合对话流程）
+                    const sortedMessages = recentMessages.reverse();
+                    
+                    for (const msg of sortedMessages) {
+                        if (msg.type === '私聊') {
+                            memoryContent += `[${msg.time}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
+                        } else if (msg.type === '群聊') {
+                            memoryContent += `[${msg.time}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
+                        } else if (msg.type === '动态') {
+                            memoryContent += `[${msg.time}] ${msg.sender}${msg.content}\n`;
+                        } else if (msg.type === '动态评论') {
+                            memoryContent += `[${msg.time}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
+                        }
+                    }
+                    
+                    // 保存到世界书
+                    const entryKey = '短期记忆-最近对话';
+                    const existingEntry = entries[entryKey];
+                    
+                    if (existingEntry) {
+                        // 更新现有条目
+                        existingEntry.content = memoryContent;
+                        console.log('✅ 已更新现有短期记忆条目');
+                    } else {
+                        // 创建新条目
+                        entries[entryKey] = {
+                            key: [entryKey, '最近对话', '短期记忆', '对话历史', '聊天记录'], // 多个关键词确保触发
+                            content: memoryContent,
+                            comment: '短期记忆系统 - 自动维护最近80条对话记录',
+                            constant: true, // 设为常驻，确保每次都包含
+                            selective: false,
+                            order: 1000, // 高优先级，确保在提示词中出现
+                            enabled: true,
+                            position: 0 // 在提示词开始部分
+                        };
+                        console.log('✅ 已创建新的短期记忆条目');
+                    }
+                    
+                    // 保存世界书
+                    await saveWorldInfo(worldbook.name, worldbook);
+                    console.log('🧠 短期记忆世界书更新完成');
+                    
+                } catch (error) {
+                    console.error('❌ 更新短期记忆失败:', error);
+                }
+            }
+            
+            /**
+             * 解析时间字符串为时间戳（用于排序）
+             */
+            function QQ_ParseTime(timeStr) {
+                try {
+                    // 处理各种时间格式
+                    if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
+                        // HH:MM:SS 格式
+                        const today = new Date();
+                        const [hours, minutes, seconds] = timeStr.split(':').map(Number);
+                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds).getTime();
+                    } else if (/^\d{2}:\d{2}$/.test(timeStr)) {
+                        // HH:MM 格式
+                        const today = new Date();
+                        const [hours, minutes] = timeStr.split(':').map(Number);
+                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes).getTime();
+                    } else {
+                        // 其他格式，使用当前时间
+                        return Date.now();
+                    }
+                } catch {
+                    return Date.now();
+                }
+            }
+
+            /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
              */
@@ -21819,6 +22012,10 @@ ${index + 1}. ${space.name}
                 console.log(
                     `User_LastMsgMap:\n${JSON.stringify(User_LastMsgMap)}\nChar_LastMsgMap:\n${JSON.stringify(Char_LastMsgMap)}`,
                 );
+                
+                // 更新短期记忆世界书
+                await QQ_UpdateShortTermMemory();
+                
                 return true;
             }
             function QQ_SetHomeTips(name, count) {
