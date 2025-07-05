@@ -21233,20 +21233,38 @@ ${index + 1}. ${space.name}
                         is_user: isUserMessage,
                         is_name: true,
                         name: senderName,
-                        send_date: Date.now(),
-                        msg: message
+                        mes: message,  // 注意：根据类型定义，应该是 'mes' 而不是 'msg'
+                        extra: {
+                            gen_id: Date.now()
+                        }
                     };
 
-                    // 通过 window.parent 调用酒馆的全局函数
-                    if (window.parent && typeof window.parent.addMessage === 'function') {
-                        await window.parent.addMessage(messageObject);
+                    // 检查是否可以访问SillyTavern API
+                    let sillyTavernContext = null;
+                    
+                    // 尝试直接访问
+                    if (typeof window.SillyTavern !== 'undefined') {
+                        sillyTavernContext = window.SillyTavern;
+                    }
+                    // 尝试通过parent访问
+                    else if (window.parent && typeof window.parent.SillyTavern !== 'undefined') {
+                        sillyTavernContext = window.parent.SillyTavern;
+                    }
+                    
+                    if (sillyTavernContext && typeof sillyTavernContext.addOneMessage === 'function') {
+                        // 使用addOneMessage函数添加消息
+                        await sillyTavernContext.addOneMessage(messageObject, {});
                         console.log(`✅ 同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
-                    } else if (window.parent && typeof window.parent.editLastMessage === 'function') {
-                        // 如果 addMessage 不存在，editLastMessage 是备选方案
-                        await window.parent.editLastMessage(messageObject);
-                        console.log(`✅ (使用editLastMessage)同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
+                    } else if (sillyTavernContext && typeof sillyTavernContext.saveReply === 'function') {
+                        // 如果 addOneMessage 不存在，尝试 saveReply
+                        await sillyTavernContext.saveReply({ 
+                            mes: message,
+                            name: senderName,
+                            is_user: isUserMessage
+                        });
+                        console.log(`✅ (使用saveReply)同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
                     } else {
-                        console.warn('⚠️ 无法找到酒馆消息同步函数');
+                        console.warn('⚠️ 无法找到酒馆消息同步函数。SillyTavern对象:', sillyTavernContext);
                     }
                 } catch (e) {
                     console.error('同步消息到酒馆失败:', e);
