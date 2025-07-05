@@ -11595,8 +11595,8 @@
                     
                     // *** 简化版：只在函数存在时调用，否则依赖自动保存 ***
                     if (typeof saveWorldInfo === 'function') {
-                    await saveWorldInfo();
-                    console.log(`${operation}已成功保存到世界书`);
+                        await saveWorldInfo();
+                        console.log(`${operation}已成功保存到世界书`);
                     } else {
                         console.log(`${operation}已更新到世界书，依赖自动保存机制`);
                     }
@@ -21346,53 +21346,56 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
-                    // 保存到世界书 - 使用与聊天备份相同的方式
+                    // 保存到世界书 - 使用正确的API函数
                     const entryComment = '手机-短期记忆-最近对话';
                     
-                    // 查找现有条目（使用find方法而不是直接索引）
-                    let memoryEntry = Object.values(entries).find(entry => 
+                    // 查找现有条目
+                    let memoryEntry = entries.find(entry => 
                         entry && entry.comment === entryComment
                     );
                     
                     if (memoryEntry) {
-                        // 更新现有条目
-                        memoryEntry.content = memoryContent;
-                        memoryEntry.key = ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'];
-                        memoryEntry.constant = true;
-                        memoryEntry.selective = false;
-                        memoryEntry.order = 1000;
-                        memoryEntry.enabled = true;
-                        memoryEntry.position = 0;
-                        console.log('✅ 已更新现有短期记忆条目');
+                        // 更新现有条目 - 使用setLorebookEntries API
+                        if (typeof setLorebookEntries === 'function') {
+                            await setLorebookEntries(worldbook, [{
+                                uid: memoryEntry.uid,
+                                content: memoryContent,
+                                keys: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
+                                type: 'constant',
+                                selective: false,
+                                order: 1000,
+                                enabled: true,
+                                position: 'before_character_definition'
+                            }]);
+                            console.log('✅ 已更新现有短期记忆条目');
+                        } else {
+                            console.warn('⚠️ setLorebookEntries函数不可用');
+                        }
                     } else {
-                        // 创建新条目 - 使用唯一的ID
-                        const newEntryId = Date.now().toString() + '_shortterm_memory';
-                        entries[newEntryId] = {
-                            key: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
-                            content: memoryContent,
-                            comment: entryComment,
-                            constant: true,
-                            selective: false,
-                            order: 1000,
-                            enabled: true,
-                            position: 0,
-                            uid: newEntryId // 添加uid确保唯一性
-                        };
-                        console.log('✅ 已创建新的短期记忆条目，ID:', newEntryId);
+                        // 创建新条目 - 使用createLorebookEntry API
+                        if (typeof createLorebookEntry === 'function') {
+                            await createLorebookEntry(worldbook, {
+                                comment: entryComment,
+                                keys: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
+                                content: memoryContent,
+                                position: 'before_character_definition',  // 在角色定义前
+                                type: 'constant',  // 常驻类型
+                                depth: null,
+                                exclude_recursion: true,
+                                order: 1000,  // 高优先级
+                                enabled: true,
+                                selective: false
+                            });
+                            console.log('✅ 已创建新的短期记忆条目');
+                        } else {
+                            console.warn('⚠️ createLorebookEntry函数不可用');
+                        }
                     }
                     
-                    // 保存世界书 - 使用更直接的方法确保保存成功
+                    // 保存世界书 - 使用与其他功能相同的方式
                     try {
-                        if (typeof saveWorldInfo === 'function') {
-                            await saveWorldInfo(worldbook.name, worldbook);
-                            console.log('🧠 短期记忆世界书保存成功 (使用saveWorldInfo)');
-                        } else {
-                            // 备选方案：触发世界书的保存事件
-                            if (typeof eventBus !== 'undefined' && eventBus.emit) {
-                                eventBus.emit('worldBookSaved');
-                            }
-                            console.log('🧠 短期记忆已更新到世界书，依赖自动保存机制');
-                        }
+                        await QQ_SafeSaveWorldInfo('短期记忆');
+                        console.log('🧠 短期记忆已保存到世界书');
                     } catch (saveError) {
                         console.warn('⚠️ 世界书保存警告:', saveError.message);
                         console.log('📝 短期记忆条目已创建，数据应该会自动保存');
