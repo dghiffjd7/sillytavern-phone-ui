@@ -21211,63 +21211,60 @@ ${index + 1}. ${space.name}
             }
 
             /**
-             * 同步消息到Silly Tavern聊天历史
-             * @param {string} messageContent - 完整的消息内容（格式：发送者--内容--时间）
-             * @param {boolean} isPrivateChat - 是否为私聊
-             * @param {string} chatName - 聊天名称
+             * 同步消息到Silly Tavern当前楼层
+             * 参考手机-动态.html的保存机制：更新当前楼层的消息内容而非添加新消息
              */
-            async function QQ_SyncMessageToSillyTavern(messageContent, isPrivateChat, chatName) {
+            async function QQ_SyncMessageToSillyTavern() {
                 try {
-                    const sp = messageContent.split("--");
-                    if (sp.length < 2) {
-                        console.error('消息格式不正确，无法同步');
+                    if (!QQ_msgjson) {
+                        console.warn('⚠️ QQ_msgjson为空，跳过同步');
                         return;
                     }
-                    
-                    const senderName = sp[0];
-                    const message = sp[1];
-                    const isUserMessage = (senderName === UserName);
 
-                    // 构建符合酒馆API要求的消息对象
-                    const messageObject = {
-                        is_user: isUserMessage,
-                        is_name: true,
-                        name: senderName,
-                        mes: message,  // 注意：根据类型定义，应该是 'mes' 而不是 'msg'
-                        extra: {
-                            gen_id: Date.now()
-                        }
-                    };
+                    // 获取当前消息ID和楼层记录
+                    const CurrentMessageId = getCurrentMessageId();
+                    if (!CurrentMessageId) {
+                        console.warn('⚠️ 无法获取当前消息ID');
+                        return;
+                    }
 
-                    // 检查是否可以访问SillyTavern API
-                    let sillyTavernContext = null;
-                    
-                    // 尝试直接访问
-                    if (typeof window.SillyTavern !== 'undefined') {
-                        sillyTavernContext = window.SillyTavern;
+                    const Messages = await getChatMessages(CurrentMessageId);
+                    if (!Messages || Messages.length === 0) {
+                        console.warn('⚠️ 无法获取当前楼层消息');
+                        return;
                     }
-                    // 尝试通过parent访问
-                    else if (window.parent && typeof window.parent.SillyTavern !== 'undefined') {
-                        sillyTavernContext = window.parent.SillyTavern;
-                    }
+
+                    let msg = Messages[0].message;
                     
-                    if (sillyTavernContext && typeof sillyTavernContext.addOneMessage === 'function') {
-                        // 使用addOneMessage函数添加消息
-                        await sillyTavernContext.addOneMessage(messageObject, {});
-                        console.log(`✅ 同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
-                    } else if (sillyTavernContext && typeof sillyTavernContext.saveReply === 'function') {
-                        // 如果 addOneMessage 不存在，尝试 saveReply
-                        await sillyTavernContext.saveReply({ 
-                            mes: message,
-                            name: senderName,
-                            is_user: isUserMessage
+                    // 查找现有的msg_start...msg_end块
+                    const match = msg.match(/msg_start[\s\S]*?msg_end/);
+                    
+                    if (!match) {
+                        console.warn('⚠️ 当前楼层消息中未找到msg_start...msg_end块，无法同步');
+                        return;
+                    }
+
+                    // 将QQ_msgjson转换为文本格式
+                    const newMsgContent = QQ_Json2Text(QQ_msgjson);
+                    
+                    // 替换消息内容
+                    const updatedMsg = msg.replace(
+                        match[0],
+                        `msg_start\n${newMsgContent}\nmsg_end`
+                    );
+
+                    // 保存到SillyTavern当前楼层
+                    if (typeof setChatMessage === 'function') {
+                        setChatMessage({ message: updatedMsg }, CurrentMessageId, {
+                            refresh: "none",
                         });
-                        console.log(`✅ (使用saveReply)同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
+                        console.log('✅ 消息已同步到Silly Tavern当前楼层');
                     } else {
-                        console.warn('⚠️ 无法找到酒馆消息同步函数。SillyTavern对象:', sillyTavernContext);
+                        console.warn('⚠️ setChatMessage函数不可用');
                     }
+                    
                 } catch (e) {
-                    console.error('同步消息到酒馆失败:', e);
+                    console.error('❌ 同步消息到酒馆当前楼层失败:', e);
                 }
             }
 
@@ -21402,8 +21399,6 @@ ${index + 1}. ${space.name}
                             if (isNewMsg) {
                                 newMessages.push(msg);
                                 NewMsgCount++;
-                                // 同步新消息到Silly Tavern
-                                await QQ_SyncMessageToSillyTavern(msg, true, name);
                             } else {
                                 existingMessages.push(msg);
                             }
@@ -21742,8 +21737,6 @@ ${index + 1}. ${space.name}
                             if (isNewMsg) {
                                 newMessages.push(msg);
                                 NewMsgCount++;
-                                // 同步新消息到Silly Tavern
-                                await QQ_SyncMessageToSillyTavern(msg, false, name);
                             } else {
                                 existingMessages.push(msg);
                             }
@@ -21884,6 +21877,10 @@ ${index + 1}. ${space.name}
                 console.log(
                     `User_LastMsgMap:\n${JSON.stringify(User_LastMsgMap)}\nChar_LastMsgMap:\n${JSON.stringify(Char_LastMsgMap)}`,
                 );
+                
+                // 同步消息到Silly Tavern当前楼层
+                await QQ_SyncMessageToSillyTavern();
+                
                 return true;
             }
             function QQ_SetHomeTips(name, count) {
