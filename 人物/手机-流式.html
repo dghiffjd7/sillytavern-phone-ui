@@ -21211,6 +21211,49 @@ ${index + 1}. ${space.name}
             }
 
             /**
+             * 同步消息到Silly Tavern聊天历史
+             * @param {string} messageContent - 完整的消息内容（格式：发送者--内容--时间）
+             * @param {boolean} isPrivateChat - 是否为私聊
+             * @param {string} chatName - 聊天名称
+             */
+            async function QQ_SyncMessageToSillyTavern(messageContent, isPrivateChat, chatName) {
+                try {
+                    const sp = messageContent.split("--");
+                    if (sp.length < 2) {
+                        console.error('消息格式不正确，无法同步');
+                        return;
+                    }
+                    
+                    const senderName = sp[0];
+                    const message = sp[1];
+                    const isUserMessage = (senderName === UserName);
+
+                    // 构建符合酒馆API要求的消息对象
+                    const messageObject = {
+                        is_user: isUserMessage,
+                        is_name: true,
+                        name: senderName,
+                        send_date: Date.now(),
+                        msg: message
+                    };
+
+                    // 通过 window.parent 调用酒馆的全局函数
+                    if (window.parent && typeof window.parent.addMessage === 'function') {
+                        await window.parent.addMessage(messageObject);
+                        console.log(`✅ 同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
+                    } else if (window.parent && typeof window.parent.editLastMessage === 'function') {
+                        // 如果 addMessage 不存在，editLastMessage 是备选方案
+                        await window.parent.editLastMessage(messageObject);
+                        console.log(`✅ (使用editLastMessage)同步${isPrivateChat ? '私聊' : '群聊'}消息到酒馆历史: ${senderName} in ${chatName}`);
+                    } else {
+                        console.warn('⚠️ 无法找到酒馆消息同步函数');
+                    }
+                } catch (e) {
+                    console.error('同步消息到酒馆失败:', e);
+                }
+            }
+
+            /**
              * 初始化时解析聊天消息
              * @param content 聊天消息内容
              */
@@ -21341,6 +21384,8 @@ ${index + 1}. ${space.name}
                             if (isNewMsg) {
                                 newMessages.push(msg);
                                 NewMsgCount++;
+                                // 同步新消息到Silly Tavern
+                                await QQ_SyncMessageToSillyTavern(msg, true, name);
                             } else {
                                 existingMessages.push(msg);
                             }
@@ -21679,6 +21724,8 @@ ${index + 1}. ${space.name}
                             if (isNewMsg) {
                                 newMessages.push(msg);
                                 NewMsgCount++;
+                                // 同步新消息到Silly Tavern
+                                await QQ_SyncMessageToSillyTavern(msg, false, name);
                             } else {
                                 existingMessages.push(msg);
                             }
