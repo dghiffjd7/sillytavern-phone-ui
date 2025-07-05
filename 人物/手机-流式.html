@@ -21366,19 +21366,20 @@ ${index + 1}. ${space.name}
                                         msg: messageContent,
                                     };
 
-                                    // 通过 window.parent 调用酒馆的全局函数来【添加】新消息
-                                    // 我们使用 addMessage 是因为它能按顺序追加多条回复，构建完整的对话流
-                                    if (window.parent && typeof window.parent.addMessage === 'function') {
-                                        await window.parent.addMessage(messageObject, false); // false表示不触发AI回复
-                                        console.log(`✅ 同步AI消息到酒馆历史: ${senderName}`);
+                                    // 使用官方SillyTavern.Chat API添加新消息
+                                    if (typeof SillyTavern !== 'undefined' && SillyTavern.Chat && typeof SillyTavern.Chat.addMessage === 'function') {
+                                        await SillyTavern.Chat.addMessage(messageObject, false); // false表示不触发AI回复
+                                        console.log(`✅ 同步私聊AI消息到酒馆历史: ${senderName}`);
+                                    } else if (typeof SillyTavern !== 'undefined' && SillyTavern.Chat && typeof SillyTavern.Chat.editLastMessage === 'function') {
+                                        // 如果 addMessage 不存在，editLastMessage 作为备选
+                                        await SillyTavern.Chat.editLastMessage(messageObject);
+                                        console.log(`✅ (备选)同步私聊AI消息到酒馆历史: ${senderName}`);
                                     } else {
-                                        // 如果 addMessage 不存在，editLastMessage 作为备选，但效果可能不如 addMessage
-                                        await window.parent.editLastMessage(messageObject);
-                                        console.log(`✅ (备选)同步AI消息到酒馆历史: ${senderName}`);
+                                        console.warn('⚠️ SillyTavern.Chat API不可用，无法同步私聊消息');
                                     }
                                 }
                             } catch (e) {
-                                console.error('同步消息到酒馆失败:', e);
+                                console.error('同步私聊消息到酒馆失败:', e);
                             }
                             // =======================================================
                             let sp = msg.split("--");
@@ -21739,19 +21740,20 @@ ${index + 1}. ${space.name}
                                         msg: messageContent,
                                     };
 
-                                    // 通过 window.parent 调用酒馆的全局函数来【添加】新消息
-                                    // 我们使用 addMessage 是因为它能按顺序追加多条回复，构建完整的对话流
-                                    if (window.parent && typeof window.parent.addMessage === 'function') {
-                                        await window.parent.addMessage(messageObject, false); // false表示不触发AI回复
-                                        console.log(`✅ 同步AI消息到酒馆历史: ${senderName}`);
+                                    // 使用官方SillyTavern.Chat API添加新消息
+                                    if (typeof SillyTavern !== 'undefined' && SillyTavern.Chat && typeof SillyTavern.Chat.addMessage === 'function') {
+                                        await SillyTavern.Chat.addMessage(messageObject, false); // false表示不触发AI回复
+                                        console.log(`✅ 同步群聊AI消息到酒馆历史: ${senderName} in ${name}`);
+                                    } else if (typeof SillyTavern !== 'undefined' && SillyTavern.Chat && typeof SillyTavern.Chat.editLastMessage === 'function') {
+                                        // 如果 addMessage 不存在，editLastMessage 作为备选
+                                        await SillyTavern.Chat.editLastMessage(messageObject);
+                                        console.log(`✅ (备选)同步群聊AI消息到酒馆历史: ${senderName} in ${name}`);
                                     } else {
-                                        // 如果 addMessage 不存在，editLastMessage 作为备选，但效果可能不如 addMessage
-                                        await window.parent.editLastMessage(messageObject);
-                                        console.log(`✅ (备选)同步AI消息到酒馆历史: ${senderName}`);
+                                        console.warn('⚠️ SillyTavern.Chat API不可用，无法同步群聊消息');
                                     }
                                 }
                             } catch (e) {
-                                console.error('同步消息到酒馆失败:', e);
+                                console.error('同步群聊消息到酒馆失败:', e);
                             }
                             // =======================================================
                             console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
@@ -25745,14 +25747,14 @@ ${index + 1}. ${space.name}
                     return;
                 }
                 
-                // *** 使用editLastMessage API修改最后一条消息 ***
+                // *** 使用SillyTavern.Chat.editLastMessage API修改最后一条消息 ***
                 try {
-                    console.log('📤 使用editLastMessage API添加tableEdit内容');
+                    console.log('📤 使用SillyTavern.Chat.editLastMessage API添加tableEdit内容');
                     
-                    if (typeof editLastMessage !== 'undefined') {
+                    if (typeof SillyTavern !== 'undefined' && SillyTavern.Chat && typeof SillyTavern.Chat.editLastMessage === 'function') {
                         // 获取当前最后一条消息内容
                         // editLastMessage会自动获取最后一条消息，我们只需要提供修改函数
-                        const success = await editLastMessage((currentMessage) => {
+                        const success = await SillyTavern.Chat.editLastMessage((currentMessage) => {
                             let currentContent = currentMessage || '';
                             
                             // *** 处理手机JSON结构和表格数据替换 ***
@@ -25777,14 +25779,14 @@ ${index + 1}. ${space.name}
                         if (success) {
                             console.log('🎉 editLastMessage执行成功');
                         } else {
-                            console.warn('⚠️ editLastMessage执行可能失败');
+                            console.warn('⚠️ SillyTavern.Chat.editLastMessage执行可能失败');
                         }
                     } else {
-                        console.warn('⚠️ editLastMessage API不可用，tableEdit内容将保留在原始回复中');
+                        console.warn('⚠️ SillyTavern.Chat.editLastMessage API不可用，tableEdit内容将保留在原始回复中');
                         // 备用策略：让tableEdit保留在原始回复中，由后端处理
                     }
                 } catch (error) {
-                    console.error('❌ 使用editLastMessage处理tableEdit时出错:', error);
+                    console.error('❌ 使用SillyTavern.Chat.editLastMessage处理tableEdit时出错:', error);
                     console.log('📝 回退到保留策略：tableEdit内容将保留在原始回复中');
                 }
                 
