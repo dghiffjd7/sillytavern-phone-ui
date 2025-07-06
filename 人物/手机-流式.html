@@ -21290,14 +21290,23 @@ ${index + 1}. ${space.name}
                                     const content = parts[1];
                                     const timeStr = parts[2] || now.toLocaleTimeString('zh-CN', { hour12: false });
                                     
-                                    allMessages.push({
-                                        type: '群聊',
-                                        sender: senderName,
-                                        content: content,
-                                        time: timeStr,
-                                        groupName: groupName,
-                                        timestamp: QQ_ParseTime(timeStr)
-                                    });
+                                    // 过滤群聊初始化消息（更精确的判断）
+                                    const isInitMessage = senderName === '系统消息' && 
+                                        (content.includes('创建了群聊') || 
+                                         (content.includes('加入了群聊') && content.includes('欢迎')) ||
+                                         content === '群聊已创建' ||
+                                         content.includes('欢迎加入群聊'));
+                                    
+                                    if (!isInitMessage) {
+                                        allMessages.push({
+                                            type: '群聊',
+                                            sender: senderName,
+                                            content: content,
+                                            time: timeStr,
+                                            groupName: groupName,
+                                            timestamp: QQ_ParseTime(timeStr)
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -21512,6 +21521,19 @@ ${index + 1}. ${space.name}
              */
             function QQ_ParseTime(timeStr) {
                 try {
+                    if (!timeStr) return Date.now();
+                    
+                    // 处理时间戳格式（动态常用）
+                    if (timeStr instanceof Date) {
+                        return timeStr.getTime();
+                    }
+                    
+                    // 处理 ISO 格式
+                    if (timeStr.includes('T') || timeStr.includes('-')) {
+                        const parsed = Date.parse(timeStr);
+                        if (!isNaN(parsed)) return parsed;
+                    }
+                    
                     // 处理各种时间格式
                     if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
                         // HH:MM:SS 格式
@@ -21522,12 +21544,18 @@ ${index + 1}. ${space.name}
                         // HH:MM 格式
                         const today = new Date();
                         const [hours, minutes] = timeStr.split(':').map(Number);
-                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes).getTime();
+                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
+                    } else if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                        // H:MM 或 HH:MM 格式
+                        const today = new Date();
+                        const [hours, minutes] = timeStr.split(':').map(Number);
+                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
                     } else {
                         // 其他格式，使用当前时间
                         return Date.now();
                     }
-                } catch {
+                } catch (e) {
+                    console.warn('解析时间失败:', timeStr, e);
                     return Date.now();
                 }
             }
