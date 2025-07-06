@@ -21359,7 +21359,7 @@ ${index + 1}. ${space.name}
 
             /**
              * *** 短期记忆系统 - 世界书记忆分层架构第1层 ***
-             * 更新短期记忆世界书，保存最近80条重要对话记录
+             * 更新短期记忆世界书，保存最近200条重要对话记录（滚动式存储）
              */
             async function QQ_UpdateShortTermMemory() {
                 try {
@@ -21505,13 +21505,31 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
-                    // 按渲染顺序排序（globalIndex），保持界面显示的顺序
-                    allMessages.sort((a, b) => a.globalIndex - b.globalIndex);
+                    console.log(`📊 收集到 ${allMessages.length} 条消息`);
                     
-                    // 取最近200条消息
-                    const recentMessages = allMessages.slice(0, 200);
+                    // 实现滚动式存储：保留最新的200条消息
+                    let recentMessages;
+                    if (allMessages.length <= 200) {
+                        // 消息数量未达到上限，保持渲染顺序
+                        allMessages.sort((a, b) => a.globalIndex - b.globalIndex);
+                        recentMessages = allMessages;
+                        console.log(`📝 消息数量(${allMessages.length})未达到上限，保留所有消息`);
+                    } else {
+                        // 消息数量超过上限，实现滚动式存储
+                        // 首先按时间戳排序，最新的在前
+                        allMessages.sort((a, b) => b.timestamp - a.timestamp);
+                        
+                        // 取最新的200条消息
+                        const latestMessages = allMessages.slice(0, 200);
+                        
+                        // 然后按渲染顺序重新排序用于显示（最早的在前）
+                        latestMessages.sort((a, b) => a.globalIndex - b.globalIndex);
+                        
+                        recentMessages = latestMessages;
+                        console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新200条，删除${allMessages.length - 200}条旧消息`);
+                    }
                     
-                    console.log(`📊 收集到 ${allMessages.length} 条消息，取最近 ${recentMessages.length} 条更新短期记忆`);
+                    console.log(`💾 短期记忆已更新：收集${allMessages.length}条消息，保存${recentMessages.length}条最新消息`);
                     
                     // 格式化为AI友好的格式
                     let memoryContent = `# 【历史对话记录 - 仅供参考，请勿重复】
@@ -21525,7 +21543,8 @@ ${index + 1}. ${space.name}
 
 **记录信息：**
 - 更新时间: ${now.toLocaleString('zh-CN')}
-- 记录条数: ${recentMessages.length}/200 条历史消息
+- 收集消息总数: ${allMessages.length} 条
+- 保存条数: ${recentMessages.length}/200 条历史消息${allMessages.length > 200 ? ` (已删除${allMessages.length - 200}条旧消息)` : ''}
 
 **历史对话内容：**
 
