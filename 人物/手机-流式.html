@@ -21231,15 +21231,17 @@ ${index + 1}. ${space.name}
                     // 调试：确认UserName
                     console.log(`🔍 当前UserName: "${UserName}"`);
 
-                    // 收集所有消息并排序
+                    // 收集所有消息（按渲染顺序）
                     const allMessages = [];
                     const now = new Date();
+                    let messageIndex = 0; // 用于保持渲染顺序
                     
-                    // 收集私聊消息
+                    // 收集私聊消息（按数组顺序）
                     for (const chatKey in QQ_msgjson.私聊) {
                         const messages = QQ_msgjson.私聊[chatKey];
                         if (Array.isArray(messages)) {
-                            for (const msg of messages) {
+                            for (let i = 0; i < messages.length; i++) {
+                                const msg = messages[i];
                                 const parts = msg.split('--');
                                 if (parts.length >= 2) {
                                     const senderName = parts[0];
@@ -21272,7 +21274,10 @@ ${index + 1}. ${space.name}
                                         content: content,
                                         time: timeStr,
                                         chatPartner: chatPartner,
-                                        timestamp: QQ_ParseTime(timeStr)
+                                        chatKey: chatKey,
+                                        arrayIndex: i, // 在该私聊数组中的位置
+                                        globalIndex: messageIndex++, // 全局消息顺序索引
+                                        timestamp: QQ_ParseTime(timeStr) // 时间戳（向后兼容）
                                     });
                                 }
                             }
@@ -21283,7 +21288,8 @@ ${index + 1}. ${space.name}
                     for (const groupName in QQ_msgjson.群聊) {
                         const groupData = QQ_msgjson.群聊[groupName];
                         if (groupData && Array.isArray(groupData.msgs)) {
-                            for (const msg of groupData.msgs) {
+                            for (let i = 0; i < groupData.msgs.length; i++) {
+                                const msg = groupData.msgs[i];
                                 const parts = msg.split('--');
                                 if (parts.length >= 2) {
                                     const senderName = parts[0];
@@ -21304,6 +21310,8 @@ ${index + 1}. ${space.name}
                                             content: content,
                                             time: timeStr,
                                             groupName: groupName,
+                                            arrayIndex: i, // 在该群聊数组中的位置
+                                            globalIndex: messageIndex++, // 全局消息顺序索引
                                             timestamp: QQ_ParseTime(timeStr)
                                         });
                                     }
@@ -21314,7 +21322,8 @@ ${index + 1}. ${space.name}
                     
                     // 收集动态评论
                     if (typeof QQ_MomentsData !== 'undefined' && Array.isArray(QQ_MomentsData)) {
-                        for (const moment of QQ_MomentsData) {
+                        for (let momentIndex = 0; momentIndex < QQ_MomentsData.length; momentIndex++) {
+                            const moment = QQ_MomentsData[momentIndex];
                             // 添加动态本身
                             if (moment.message) {
                                 allMessages.push({
@@ -21322,13 +21331,16 @@ ${index + 1}. ${space.name}
                                     sender: moment.userName || moment.name,
                                     content: `发布动态: ${moment.message}`,
                                     time: moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                    momentIndex: momentIndex, // 在动态数组中的位置
+                                    globalIndex: messageIndex++, // 全局消息顺序索引
                                     timestamp: moment.timestamp ? new Date(moment.timestamp).getTime() : QQ_ParseTime(moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
                                 });
                             }
                             
                             // 添加动态评论
                             if (moment.comments && Array.isArray(moment.comments)) {
-                                for (const comment of moment.comments) {
+                                for (let commentIndex = 0; commentIndex < moment.comments.length; commentIndex++) {
+                                    const comment = moment.comments[commentIndex];
                                     allMessages.push({
                                         type: '动态评论',
                                         sender: comment.name || comment.userName,
@@ -21336,6 +21348,9 @@ ${index + 1}. ${space.name}
                                         time: comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
                                         momentAuthor: moment.userName || moment.name,
                                         momentContent: moment.message,
+                                        momentIndex: momentIndex, // 所属动态的位置
+                                        commentIndex: commentIndex, // 在评论数组中的位置
+                                        globalIndex: messageIndex++, // 全局消息顺序索引
                                         timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
                                     });
                                 }
@@ -21343,8 +21358,8 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
-                    // 按时间排序，最新的在前
-                    allMessages.sort((a, b) => b.timestamp - a.timestamp);
+                    // 按渲染顺序排序（globalIndex），保持界面显示的顺序
+                    allMessages.sort((a, b) => a.globalIndex - b.globalIndex);
                     
                     // 取最近200条消息
                     const recentMessages = allMessages.slice(0, 200);
@@ -21369,8 +21384,8 @@ ${index + 1}. ${space.name}
 
 `;
                     
-                    // 按时间倒序显示（最早的在前，符合对话流程）
-                    const sortedMessages = recentMessages.reverse();
+                    // 使用渲染顺序显示（已按渲染顺序排序，最早渲染的在前）
+                    const sortedMessages = recentMessages;
                     
                     for (const msg of sortedMessages) {
                         // 为用户消息格式化时间（去掉秒数）
