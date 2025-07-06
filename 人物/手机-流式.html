@@ -5045,6 +5045,75 @@
             let QQ_NewMsg = {};
             let QQ_ReadStatus = {}; // 新增：记录已读状态
 
+            // *** 新增：流式传输状态管理 ***
+            let isStreamingDisplayActive = false; // 流式传输锁
+            let streamingMessageQueue = []; // 流式消息队列
+            let currentStreamingProcess = null; // 当前流式传输进程引用
+
+            // *** 新增：流式传输队列管理函数 ***
+            
+            /**
+             * 将消息任务添加到流式传输队列
+             * @param {Object} task - 流式传输任务 
+             * @param {Function} task.handler - 处理函数
+             * @param {Array} task.args - 参数数组
+             * @param {string} task.description - 任务描述
+             */
+            function QQ_EnqueueStreamingTask(task) {
+                streamingMessageQueue.push(task);
+                console.log(`📥 任务已加入队列: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
+                
+                // 如果当前没有流式传输在进行，立即处理队列
+                if (!isStreamingDisplayActive) {
+                    QQ_ProcessStreamingQueue();
+                }
+            }
+
+            /**
+             * 处理流式传输队列中的下一个任务
+             */
+            function QQ_ProcessStreamingQueue() {
+                if (streamingMessageQueue.length === 0 || isStreamingDisplayActive) {
+                    return;
+                }
+                
+                const task = streamingMessageQueue.shift();
+                console.log(`📤 开始处理队列任务: ${task.description}, 剩余队列长度: ${streamingMessageQueue.length}`);
+                
+                // 设置锁
+                isStreamingDisplayActive = true;
+                
+                // 执行任务
+                task.handler(...task.args).then(() => {
+                    // 任务完成后解锁并处理下一个任务
+                    console.log(`✅ 队列任务完成: ${task.description}`);
+                    isStreamingDisplayActive = false;
+                    
+                    // 处理队列中的下一个任务
+                    setTimeout(QQ_ProcessStreamingQueue, 100);
+                }).catch((error) => {
+                    console.error(`❌ 队列任务失败: ${task.description}`, error);
+                    isStreamingDisplayActive = false;
+                    
+                    // 即使失败也要处理下一个任务
+                    setTimeout(QQ_ProcessStreamingQueue, 500);
+                });
+            }
+
+            /**
+             * 取消当前流式传输并清空队列（紧急情况使用）
+             */
+            function QQ_CancelAllStreaming() {
+                console.log('🚫 取消所有流式传输任务');
+                isStreamingDisplayActive = false;
+                streamingMessageQueue.length = 0;
+                
+                if (currentStreamingProcess) {
+                    clearTimeout(currentStreamingProcess);
+                    currentStreamingProcess = null;
+                }
+            }
+
             // *** 新增：已读状态管理功能 ***
             const QQ_READ_STATUS_KEY = "QQ_已读状态备份";
 
@@ -20860,81 +20929,95 @@ ${index + 1}. ${space.name}
             function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
                 console.log(`🌊 开始流式显示 ${fullMessages.length} 条完整消息 - 聊天: ${chatName}`);
                 
-                let currentIndex = 0;
-                let currentTypingIndicator = null;
-                
-                function displayNextMessage() {
-                    // 移除当前的输入指示器
-                    if (currentTypingIndicator) {
-                        QQ_HideTypingIndicator(currentTypingIndicator);
-                        currentTypingIndicator = null;
-                    }
+                return new Promise((resolve, reject) => {
+                    let currentIndex = 0;
+                    let currentTypingIndicator = null;
                     
-                    if (currentIndex >= fullMessages.length) {
-                        console.log(`✅ 流式显示完成 - 共显示 ${fullMessages.length} 条消息`);
-                        
-                        // *** 新增：在AI回复完成后添加时间间隔系统消息 ***
-                        setTimeout(() => {
-                            const now = new Date();
-                            const timeText = now.toLocaleString('zh-CN', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit', 
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: false
-                            });
-                            const timeMessage = `📅 ${timeText}`;
-                            
-                            // 使用正确的系统消息显示函数
-                            if (typeof displaySystemMessage === 'function') {
-                                displaySystemMessage(timeMessage);
+                    function displayNextMessage() {
+                        try {
+                            // 移除当前的输入指示器
+                            if (currentTypingIndicator) {
+                                QQ_HideTypingIndicator(currentTypingIndicator);
+                                currentTypingIndicator = null;
                             }
-                        }, 1000); // 1秒延迟显示时间消息
-                        
-                        // *** 修复：在AI回复完成后清空缓存，确保所有消息都已处理 ***
-                        setTimeout(() => {
-                            QQ_CacheSendMsg = "";
-                        }, 1500);
-                        
-                        return;
+                            
+                            if (currentIndex >= fullMessages.length) {
+                                console.log(`✅ 流式显示完成 - 共显示 ${fullMessages.length} 条消息`);
+                                
+                                // *** 新增：在AI回复完成后添加时间间隔系统消息 ***
+                                setTimeout(() => {
+                                    const now = new Date();
+                                    const timeText = now.toLocaleString('zh-CN', {
+                                        year: 'numeric',
+                                        month: '2-digit',
+                                        day: '2-digit', 
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false
+                                    });
+                                    const timeMessage = `📅 ${timeText}`;
+                                    
+                                    // 使用正确的系统消息显示函数
+                                    if (typeof displaySystemMessage === 'function') {
+                                        displaySystemMessage(timeMessage);
+                                    }
+                                }, 1000); // 1秒延迟显示时间消息
+                                
+                                // *** 修复：在AI回复完成后清空缓存，确保所有消息都已处理 ***
+                                setTimeout(() => {
+                                    QQ_CacheSendMsg = "";
+                                    // Promise resolve 在最后执行
+                                    resolve();
+                                }, 1500);
+                                
+                                return;
+                            }
+                            
+                            const fullMessage = fullMessages[currentIndex];
+                            
+                            // 解析消息格式：发送者--内容--时间
+                            const messageParts = fullMessage.split('--');
+                            const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
+                            
+                            // 显示当前消息
+                            QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount);
+                            console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
+                            
+                            currentIndex++;
+                            
+                            // 如果还有更多消息，显示输入指示器并设置下一次显示
+                            if (currentIndex < fullMessages.length) {
+                                // 获取下一条消息的发送者
+                                const nextMessage = fullMessages[currentIndex];
+                                const nextMessageParts = nextMessage.split('--');
+                                const nextSender = nextMessageParts.length >= 1 ? nextMessageParts[0] : 'Unknown';
+                                
+                                // 短暂延迟后显示输入指示器
+                                setTimeout(() => {
+                                    currentTypingIndicator = QQ_ShowTypingIndicator(chatContainer, nextSender);
+                                }, 200);
+                                
+                                // 使用本福特定律生成延迟时间
+                                const isGroupChat = QQ_Groups.includes(chatName);
+                                const delay = QQ_GenerateBenfordDelay(isGroupChat);
+                                
+                                console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
+                                currentStreamingProcess = setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                            }
+                        } catch (error) {
+                            console.error('🚫 流式显示过程中发生错误:', error);
+                            reject(error);
+                        }
                     }
                     
-                    const fullMessage = fullMessages[currentIndex];
-                    
-                    // 解析消息格式：发送者--内容--时间
-                    const messageParts = fullMessage.split('--');
-                    const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
-                    
-                    // 显示当前消息
-                    QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount);
-                    console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
-                    
-                    currentIndex++;
-                    
-                    // 如果还有更多消息，显示输入指示器并设置下一次显示
-                    if (currentIndex < fullMessages.length) {
-                        // 获取下一条消息的发送者
-                        const nextMessage = fullMessages[currentIndex];
-                        const nextMessageParts = nextMessage.split('--');
-                        const nextSender = nextMessageParts.length >= 1 ? nextMessageParts[0] : 'Unknown';
-                        
-                        // 短暂延迟后显示输入指示器
-                        setTimeout(() => {
-                            currentTypingIndicator = QQ_ShowTypingIndicator(chatContainer, nextSender);
-                        }, 200);
-                        
-                        // 使用本福特定律生成延迟时间
-                        const isGroupChat = QQ_Groups.includes(chatName);
-                        const delay = QQ_GenerateBenfordDelay(isGroupChat);
-                        
-                        console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
-                        setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                    // 开始显示第一条消息
+                    try {
+                        displayNextMessage();
+                    } catch (error) {
+                        console.error('🚫 流式显示启动失败:', error);
+                        reject(error);
                     }
-                }
-                
-                // 开始显示第一条消息
-                displayNextMessage();
+                });
             }
             
             /**
@@ -21855,8 +21938,12 @@ ${index + 1}. ${space.name}
                                 QQ_AddTimeDividerMessage($msgContent[0], name);
                             }
                             
-                            // 使用流式显示新消息（传入完整消息，不需要额外处理）
-                            QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
+                            // 使用队列机制流式显示新消息，避免与其他流式传输冲突
+                            QQ_EnqueueStreamingTask({
+                                handler: QQ_DisplayStreamingMessagesDirectly,
+                                args: [$msgContent[0], newMessages, name, true, false],
+                                description: `私聊${name}流式显示${newMessages.length}条消息`
+                            });
                         } else {
                             // 没有新消息，正常显示所有消息
                             for (let msg of json.私聊[str]) {
@@ -22214,8 +22301,12 @@ ${index + 1}. ${space.name}
                                 QQ_AddTimeDividerMessage($msgContent[0], name);
                             }
                             
-                            // 使用流式显示新消息（传入完整消息，不需要额外处理）
-                            QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
+                            // 使用队列机制流式显示新消息，避免与其他流式传输冲突
+                            QQ_EnqueueStreamingTask({
+                                handler: QQ_DisplayStreamingMessagesDirectly,
+                                args: [$msgContent[0], newMessages, name, true, false],
+                                description: `群聊${name}流式显示${newMessages.length}条消息`
+                            });
                         } else {
                             // 没有新消息，正常显示所有消息
                             for (let msg of json.群聊[name]["msgs"]) {
