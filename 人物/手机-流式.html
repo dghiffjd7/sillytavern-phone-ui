@@ -26143,7 +26143,7 @@ ${index + 1}. ${space.name}
                 );
                 
                 const minIntervalBetweenCharacters = 8000; // 不同角色间最少间隔8秒
-                const minIntervalBetweenMessages = 3000;   // 同一角色多条消息间最少间隔3秒
+                const minIntervalBetweenMessages = 5000;   // 同一角色多条消息间最少间隔5秒
                 
                 for (const [characterName, messages] of queue.entries()) {
                     const pendingMessages = messages.filter(msg => msg.status === 'pending');
@@ -26183,6 +26183,75 @@ ${index + 1}. ${space.name}
              * @param {string} characterName - 角色名
              * @param {Object} messageData - 消息数据
              */
+            /**
+             * 确保消息被添加到聊天界面（用于主动消息）
+             * @param {string} characterName - 角色名
+             * @param {string} content - 消息内容
+             * @param {string} timestamp - 时间戳
+             */
+            async function QQ_EnsureMessageInChatInterface(characterName, content, timestamp) {
+                try {
+                    const chatKey = `${QQ_GetUserName()}和${characterName}的聊天`;
+                    
+                    // 获取或创建私聊页面
+                    let chatPage = document.querySelector(`.QQ_chat_page[data-name="${characterName}"]`);
+                    
+                    if (!chatPage) {
+                        // 如果聊天页面不存在，创建一个（但不显示）
+                        const chatPageHtml = `
+                            <div class="QQ_chat_page" data-name="${characterName}" style="display: none;">
+                                <div class="chat-setting-popup" style="display: none;">
+                                    <!-- 聊天设置内容 -->
+                                </div>
+                                <div class="msgcontent"></div>
+                                <div class="input-container">
+                                    <textarea class="userInput" data-chatname="${characterName}" placeholder="输入消息..."></textarea>
+                                    <button id="QQ_chat_send-btn" class="QQ_send_btn">发送</button>
+                                </div>
+                            </div>
+                        `;
+                        document.querySelector('.QQ_ChatInterface').insertAdjacentHTML('beforeend', chatPageHtml);
+                        chatPage = document.querySelector(`.QQ_chat_page[data-name="${characterName}"]`);
+                    }
+                    
+                    // 获取消息容器
+                    const msgContent = chatPage.querySelector('.msgcontent');
+                    
+                    // 创建消息HTML（流式效果）
+                    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    const messageHtml = `
+                        <div class="QQ_chat_item" id="${messageId}">
+                            <img class="Chat_MyHead" alt="${characterName}" src="${QQ_GetCharacterAvatar(characterName)}" />
+                            <div class="tri"></div>
+                            <span class="QQ_chat_text streaming-text" data-full-text="${content}"></span>
+                        </div>
+                    `;
+                    
+                    msgContent.insertAdjacentHTML('beforeend', messageHtml);
+                    
+                    // 流式显示文字
+                    const textElement = document.querySelector(`#${messageId} .streaming-text`);
+                    const fullText = content;
+                    let currentIndex = 0;
+                    
+                    return new Promise((resolve) => {
+                        const streamInterval = setInterval(() => {
+                            if (currentIndex < fullText.length) {
+                                textElement.textContent = fullText.substring(0, currentIndex + 1);
+                                currentIndex++;
+                            } else {
+                                clearInterval(streamInterval);
+                                textElement.classList.remove('streaming-text');
+                                resolve();
+                            }
+                        }, 30); // 每30ms显示一个字符
+                    });
+                    
+                } catch (error) {
+                    console.error('确保消息在聊天界面中失败:', error);
+                }
+            }
+            
             async function QQ_DeliverProactiveMessage(characterName, messageData) {
                 try {
                     console.log(`📤 开始发送主动消息: ${characterName} - ${messageData.content}`);
@@ -26208,17 +26277,23 @@ ${index + 1}. ${space.name}
                     }
                     QQ_msgjson.私聊[chatKey].push(messageText);
                     
-                    // 如果当前正在查看该角色的聊天，立即显示消息
-                    const currentChatPage = document.querySelector('.QQ_chat_page');
+                    // 首先流式添加消息到聊天界面（无论是否正在查看）
+                    await QQ_EnsureMessageInChatInterface(characterName, messageData.content, timestamp);
+                    
+                    // 添加短暂延迟，确保消息已经完全显示
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    // 如果当前正在查看该角色的聊天，播放通知声音
+                    const currentChatPage = document.querySelector('.QQ_chat_page:not([style*="display: none"])');
                     if (currentChatPage && currentChatPage.dataset.name === characterName) {
-                        // 创建消息HTML
-                        const messageHtml = QQ_CreateChatMessage(characterName, messageData.content, timestamp, false);
-                        const msgContent = currentChatPage.querySelector('.msgcontent');
-                        msgContent.insertAdjacentHTML('beforeend', messageHtml);
-                        msgContent.scrollTop = msgContent.scrollHeight;
-                        
                         // 播放通知声音（如果有）
                         QQ_PlayNotificationSound();
+                        
+                        // 滚动到底部
+                        const msgContent = currentChatPage.querySelector('.msgcontent');
+                        if (msgContent) {
+                            msgContent.scrollTop = msgContent.scrollHeight;
+                        }
                     }
                     
                     // 更新联系人列表的红点提示
@@ -26347,11 +26422,10 @@ ${index + 1}. ${space.name}
                     // 清除该角色的未读计数
                     QQ_ClearUnreadCount(characterName);
                     
-                    // 立即跳转到对应私聊
+                    // 立即跳转到对应私聊（消息已经在聊天界面中）
                     QQ_OpenPrivateChat(characterName);
                     
-                    // 立即显示该角色的主动消息
-                    QQ_DisplayProactiveMessageForCharacter(characterName);
+                    // 不需要再调用QQ_DisplayProactiveMessageForCharacter，因为消息已经通过流式方式添加
                     
                     // 移除通知
                     $(this).fadeOut(200, function() {
