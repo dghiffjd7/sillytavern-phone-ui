@@ -16730,6 +16730,41 @@ ${index + 1}. ${space.name}
                 }
                 let ini = new MyINI();
                 ini.loadText(worldlistraw_namespaceObject);
+                
+                // 特殊处理"手机-角色"条目：检查是否需要默认角色
+                const roleEntry = entries.find(entry => entry.comment === "手机-角色");
+                if (!roleEntry) {
+                    console.log('📱 手机-角色条目不存在，检查是否需要添加默认角色...');
+                    // 条目不存在，使用默认角色内容
+                    console.log('👥 首次创建手机-角色条目，添加默认角色a和角色b');
+                } else {
+                    // 条目存在，检查内容是否为空
+                    const content = roleEntry.content.trim();
+                    if (!content || content.length === 0) {
+                        console.log('📱 手机-角色条目存在但为空，检查是否需要添加默认角色...');
+                        // 如果条目为空，添加默认角色
+                        text["手机-角色"] = text["手机-角色"]; // 保持默认内容
+                        console.log('👥 角色条目为空，将添加默认角色a和角色b');
+                    } else {
+                        // 检查是否有实际的角色定义
+                        const lines = content.split('\n');
+                        const roleLines = lines.filter(line => 
+                            line.trim().startsWith('[') && 
+                            line.trim().endsWith(']') && 
+                            line.trim().length > 2
+                        );
+                        
+                        if (roleLines.length === 0) {
+                            console.log('📱 手机-角色条目存在但无角色定义，将添加默认角色...');
+                            // 保持默认内容以便后续添加
+                        } else {
+                            console.log('🎭 手机-角色条目中已有角色定义，跳过默认角色添加');
+                            // 从要创建的条目中移除手机-角色，避免覆盖用户数据
+                            delete text["手机-角色"];
+                        }
+                    }
+                }
+                
                 for (const section of ini.getAllSections()) {
                     let targetEntry = entries.find(
                         (entry) => entry.comment == section,
@@ -16760,13 +16795,22 @@ ${index + 1}. ${space.name}
                         console.log(`${section}修改完成`);
                     } else {
                         console.log(`${section}不存在,开始创建`);
+                        
+                        let contentToCreate = text[section];
+                        
+                        // 如果内容不存在（被删除），跳过创建
+                        if (contentToCreate === undefined) {
+                            console.log(`${section}内容不存在，跳过创建`);
+                            continue;
+                        }
+                        
                         await createLorebookEntry(worldbook, {
                             comment: section,
                             key: ini
                                 .readValue(section, "关键词")
                                 .split(",")
                                 .map((item) => item.trim()),
-                            content: text[section],
+                            content: contentToCreate,
                             position: "at_depth_as_system",
                             type:
                                 ini.readValue(section, "类型") == "蓝灯"

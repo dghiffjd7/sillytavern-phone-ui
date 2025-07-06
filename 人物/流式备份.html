@@ -10920,20 +10920,35 @@
              * @param {string} content - 消息内容
              * @param {string} time - 时间
              */
+            /**
+             * @deprecated 已废弃，请使用 QQ_EnsureMessageInChatInterface 来保持格式一致性
+             * 添加消息到当前聊天界面
+             * @param {string} sender - 发送者
+             * @param {string} content - 消息内容
+             * @param {string} time - 时间
+             */
             function QQ_AddMessageToCurrentChat(sender, content, time) {
-                const chatMessages = document.getElementById('QQ_chat_messages');
-                if (!chatMessages) return;
+                console.warn('⚠️ 检测到使用已废弃的 QQ_AddMessageToCurrentChat 函数，建议使用 QQ_EnsureMessageInChatInterface');
                 
-                const messageElement = document.createElement('div');
-                messageElement.className = 'QQ_message';
-                messageElement.innerHTML = `
-                    <div class="QQ_message_sender">${sender}</div>
-                    <div class="QQ_message_content">${content}</div>
-                    <div class="QQ_message_time">${time}</div>
-                `;
-                
-                chatMessages.appendChild(messageElement);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                // 为向后兼容，调用新的函数
+                QQ_EnsureMessageInChatInterface(sender, content, time).catch(error => {
+                    console.error('调用 QQ_EnsureMessageInChatInterface 失败:', error);
+                    
+                    // 如果新函数失败，使用原始逻辑作为备用
+                    const chatMessages = document.getElementById('QQ_chat_messages');
+                    if (!chatMessages) return;
+                    
+                    const messageElement = document.createElement('div');
+                    messageElement.className = 'QQ_message';
+                    messageElement.innerHTML = `
+                        <div class="QQ_message_sender">${sender}</div>
+                        <div class="QQ_message_content">${content}</div>
+                        <div class="QQ_message_time">${time}</div>
+                    `;
+                    
+                    chatMessages.appendChild(messageElement);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                });
             }
 
             /**
@@ -20405,8 +20420,13 @@ ${index + 1}. ${space.name}
                         let currentMember = groupMembers[Math.floor(Math.random() * groupMembers.length)];
                         avatar.setAttribute('data-name', currentMember);
                         
-                        // 定时切换头像
+                        // 定时切换头像（只在非生成期间运行）
                         const avatarInterval = setInterval(() => {
+                            // 检查是否正在生成AI回复，避免在等待期间切换状态
+                            if (typeof gening !== 'undefined' && gening) {
+                                console.log('🔄 AI生成中，暂停头像切换');
+                                return;
+                            }
                             currentMember = groupMembers[Math.floor(Math.random() * groupMembers.length)];
                             avatar.setAttribute('data-name', currentMember);
                         }, Math.random() * 2500 + 500); // 0.5-3秒随机间隔
@@ -21231,15 +21251,17 @@ ${index + 1}. ${space.name}
                     // 调试：确认UserName
                     console.log(`🔍 当前UserName: "${UserName}"`);
 
-                    // 收集所有消息并排序
+                    // 收集所有消息（按渲染顺序）
                     const allMessages = [];
                     const now = new Date();
+                    let messageIndex = 0; // 用于保持渲染顺序
                     
-                    // 收集私聊消息
+                    // 收集私聊消息（按数组顺序）
                     for (const chatKey in QQ_msgjson.私聊) {
                         const messages = QQ_msgjson.私聊[chatKey];
                         if (Array.isArray(messages)) {
-                            for (const msg of messages) {
+                            for (let i = 0; i < messages.length; i++) {
+                                const msg = messages[i];
                                 const parts = msg.split('--');
                                 if (parts.length >= 2) {
                                     const senderName = parts[0];
@@ -21272,7 +21294,10 @@ ${index + 1}. ${space.name}
                                         content: content,
                                         time: timeStr,
                                         chatPartner: chatPartner,
-                                        timestamp: QQ_ParseTime(timeStr)
+                                        chatKey: chatKey,
+                                        arrayIndex: i, // 在该私聊数组中的位置
+                                        globalIndex: messageIndex++, // 全局消息顺序索引
+                                        timestamp: QQ_ParseTime(timeStr) // 时间戳（向后兼容）
                                     });
                                 }
                             }
@@ -21283,21 +21308,33 @@ ${index + 1}. ${space.name}
                     for (const groupName in QQ_msgjson.群聊) {
                         const groupData = QQ_msgjson.群聊[groupName];
                         if (groupData && Array.isArray(groupData.msgs)) {
-                            for (const msg of groupData.msgs) {
+                            for (let i = 0; i < groupData.msgs.length; i++) {
+                                const msg = groupData.msgs[i];
                                 const parts = msg.split('--');
                                 if (parts.length >= 2) {
                                     const senderName = parts[0];
                                     const content = parts[1];
                                     const timeStr = parts[2] || now.toLocaleTimeString('zh-CN', { hour12: false });
                                     
-                                    allMessages.push({
-                                        type: '群聊',
-                                        sender: senderName,
-                                        content: content,
-                                        time: timeStr,
-                                        groupName: groupName,
-                                        timestamp: QQ_ParseTime(timeStr)
-                                    });
+                                    // 过滤群聊初始化消息（更精确的判断）
+                                    const isInitMessage = senderName === '系统消息' && 
+                                        (content.includes('创建了群聊') || 
+                                         (content.includes('加入了群聊') && content.includes('欢迎')) ||
+                                         content === '群聊已创建' ||
+                                         content.includes('欢迎加入群聊'));
+                                    
+                                    if (!isInitMessage) {
+                                        allMessages.push({
+                                            type: '群聊',
+                                            sender: senderName,
+                                            content: content,
+                                            time: timeStr,
+                                            groupName: groupName,
+                                            arrayIndex: i, // 在该群聊数组中的位置
+                                            globalIndex: messageIndex++, // 全局消息顺序索引
+                                            timestamp: QQ_ParseTime(timeStr)
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -21305,7 +21342,8 @@ ${index + 1}. ${space.name}
                     
                     // 收集动态评论
                     if (typeof QQ_MomentsData !== 'undefined' && Array.isArray(QQ_MomentsData)) {
-                        for (const moment of QQ_MomentsData) {
+                        for (let momentIndex = 0; momentIndex < QQ_MomentsData.length; momentIndex++) {
+                            const moment = QQ_MomentsData[momentIndex];
                             // 添加动态本身
                             if (moment.message) {
                                 allMessages.push({
@@ -21313,13 +21351,16 @@ ${index + 1}. ${space.name}
                                     sender: moment.userName || moment.name,
                                     content: `发布动态: ${moment.message}`,
                                     time: moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                    momentIndex: momentIndex, // 在动态数组中的位置
+                                    globalIndex: messageIndex++, // 全局消息顺序索引
                                     timestamp: moment.timestamp ? new Date(moment.timestamp).getTime() : QQ_ParseTime(moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
                                 });
                             }
                             
                             // 添加动态评论
                             if (moment.comments && Array.isArray(moment.comments)) {
-                                for (const comment of moment.comments) {
+                                for (let commentIndex = 0; commentIndex < moment.comments.length; commentIndex++) {
+                                    const comment = moment.comments[commentIndex];
                                     allMessages.push({
                                         type: '动态评论',
                                         sender: comment.name || comment.userName,
@@ -21327,6 +21368,9 @@ ${index + 1}. ${space.name}
                                         time: comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
                                         momentAuthor: moment.userName || moment.name,
                                         momentContent: moment.message,
+                                        momentIndex: momentIndex, // 所属动态的位置
+                                        commentIndex: commentIndex, // 在评论数组中的位置
+                                        globalIndex: messageIndex++, // 全局消息顺序索引
                                         timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
                                     });
                                 }
@@ -21334,8 +21378,8 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
-                    // 按时间排序，最新的在前
-                    allMessages.sort((a, b) => b.timestamp - a.timestamp);
+                    // 按渲染顺序排序（globalIndex），保持界面显示的顺序
+                    allMessages.sort((a, b) => a.globalIndex - b.globalIndex);
                     
                     // 取最近200条消息
                     const recentMessages = allMessages.slice(0, 200);
@@ -21360,18 +21404,24 @@ ${index + 1}. ${space.name}
 
 `;
                     
-                    // 按时间倒序显示（最早的在前，符合对话流程）
-                    const sortedMessages = recentMessages.reverse();
+                    // 使用渲染顺序显示（已按渲染顺序排序，最早渲染的在前）
+                    const sortedMessages = recentMessages;
                     
                     for (const msg of sortedMessages) {
+                        // 为用户消息格式化时间（去掉秒数）
+                        let displayTime = msg.time;
+                        if (msg.sender === UserName && msg.time) {
+                            // 如果是用户发送的消息，只显示到分钟
+                            displayTime = QQ_FormatTimeToMinutes(msg.time);
+                        }
                         if (msg.type === '私聊') {
-                            memoryContent += `[${msg.time}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
                         } else if (msg.type === '群聊') {
-                            memoryContent += `[${msg.time}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
                         } else if (msg.type === '动态') {
-                            memoryContent += `[${msg.time}] ${msg.sender}${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}${msg.content}\n`;
                         } else if (msg.type === '动态评论') {
-                            memoryContent += `[${msg.time}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
                         }
                     }
                     
@@ -21512,6 +21562,19 @@ ${index + 1}. ${space.name}
              */
             function QQ_ParseTime(timeStr) {
                 try {
+                    if (!timeStr) return Date.now();
+                    
+                    // 处理时间戳格式（动态常用）
+                    if (timeStr instanceof Date) {
+                        return timeStr.getTime();
+                    }
+                    
+                    // 处理 ISO 格式
+                    if (timeStr.includes('T') || timeStr.includes('-')) {
+                        const parsed = Date.parse(timeStr);
+                        if (!isNaN(parsed)) return parsed;
+                    }
+                    
                     // 处理各种时间格式
                     if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
                         // HH:MM:SS 格式
@@ -21522,13 +21585,58 @@ ${index + 1}. ${space.name}
                         // HH:MM 格式
                         const today = new Date();
                         const [hours, minutes] = timeStr.split(':').map(Number);
-                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes).getTime();
+                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
+                    } else if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                        // H:MM 或 HH:MM 格式
+                        const today = new Date();
+                        const [hours, minutes] = timeStr.split(':').map(Number);
+                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
                     } else {
                         // 其他格式，使用当前时间
                         return Date.now();
                     }
-                } catch {
+                } catch (e) {
+                    console.warn('解析时间失败:', timeStr, e);
                     return Date.now();
+                }
+            }
+
+            /**
+             * 将时间格式化为只显示到分钟（用于用户消息）
+             * @param {string} timeStr - 原始时间字符串
+             * @returns {string} 格式化后的时间字符串
+             */
+            function QQ_FormatTimeToMinutes(timeStr) {
+                try {
+                    if (!timeStr) return '';
+                    
+                    // 如果已经是 HH:MM 格式，直接返回
+                    if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                        return timeStr;
+                    }
+                    
+                    // 如果是 HH:MM:SS 格式，去掉秒数
+                    if (/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) {
+                        return timeStr.substring(0, timeStr.lastIndexOf(':'));
+                    }
+                    
+                    // 如果是其他格式，尝试解析后重新格式化
+                    const parsed = Date.parse(timeStr);
+                    if (!isNaN(parsed)) {
+                        const date = new Date(parsed);
+                        return date.toLocaleTimeString('zh-CN', { 
+                            hour12: false, 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                        });
+                    }
+                    
+                    // 如果都失败了，返回原始字符串
+                    return timeStr;
+                    
+                } catch (e) {
+                    console.warn('格式化时间失败:', timeStr, e);
+                    return timeStr;
                 }
             }
 
@@ -23502,18 +23610,55 @@ ${index + 1}. ${space.name}
                 
                 // 第一阶段：1秒后显示"已送达"
                 setTimeout(() => {
+                    // 检查是否正在生成AI回复，避免在等待期间更新状态
+                    if (typeof gening !== 'undefined' && gening) {
+                        console.log('🔄 AI生成中，延迟已送达状态更新');
+                        // 延迟到AI生成完成后再更新
+                        const checkInterval = setInterval(() => {
+                            if (!gening) {
+                                clearInterval(checkInterval);
+                                QQ_UpdateMessageStatus(statusElement, '已送达', '✓', '#87ceeb');
+                            }
+                        }, 500);
+                        return;
+                    }
                     QQ_UpdateMessageStatus(statusElement, '已送达', '✓', '#87ceeb');
                 }, 1000);
                 
                 // 第二阶段：1-3秒后显示"已送达"（双勾）
                 const deliveredDelay = Math.random() * 2000 + 1000; // 1-3秒
                 setTimeout(() => {
+                    // 检查是否正在生成AI回复，避免在等待期间更新状态
+                    if (typeof gening !== 'undefined' && gening) {
+                        console.log('🔄 AI生成中，延迟消息状态更新');
+                        // 延迟到AI生成完成后再更新
+                        const checkInterval = setInterval(() => {
+                            if (!gening) {
+                                clearInterval(checkInterval);
+                                QQ_UpdateMessageStatus(statusElement, '已送达', '✓✓', '#87ceeb');
+                            }
+                        }, 500);
+                        return;
+                    }
                     QQ_UpdateMessageStatus(statusElement, '已送达', '✓✓', '#87ceeb');
                 }, deliveredDelay + 1000);
                 
                 // 第三阶段：3-60秒后显示"已读"（本福特定律分布）
                 const readDelay = QQ_GenerateReadStatusDelay();
                 setTimeout(() => {
+                    // 检查是否正在生成AI回复，避免在等待期间更新状态
+                    if (typeof gening !== 'undefined' && gening) {
+                        console.log('🔄 AI生成中，延迟已读状态更新');
+                        // 延迟到AI生成完成后再更新
+                        const checkInterval = setInterval(() => {
+                            if (!gening) {
+                                clearInterval(checkInterval);
+                                QQ_UpdateMessageStatus(statusElement, '已读', '✓✓', '#10ac84');
+                                console.log('✅ 消息状态已更新为已读');
+                            }
+                        }, 500);
+                        return;
+                    }
                     QQ_UpdateMessageStatus(statusElement, '已读', '✓✓', '#10ac84');
                     console.log('✅ 消息状态已更新为已读');
                 }, readDelay);
@@ -26115,7 +26260,7 @@ ${index + 1}. ${space.name}
                 );
                 
                 const minIntervalBetweenCharacters = 8000; // 不同角色间最少间隔8秒
-                const minIntervalBetweenMessages = 3000;   // 同一角色多条消息间最少间隔3秒
+                const minIntervalBetweenMessages = 5000;   // 同一角色多条消息间最少间隔5秒
                 
                 for (const [characterName, messages] of queue.entries()) {
                     const pendingMessages = messages.filter(msg => msg.status === 'pending');
@@ -26155,6 +26300,99 @@ ${index + 1}. ${space.name}
              * @param {string} characterName - 角色名
              * @param {Object} messageData - 消息数据
              */
+            /**
+             * 确保消息被添加到聊天界面（用于主动消息）
+             * @param {string} characterName - 角色名
+             * @param {string} content - 消息内容
+             * @param {string} timestamp - 时间戳
+             */
+            async function QQ_EnsureMessageInChatInterface(characterName, content, timestamp) {
+                try {
+                    // 检查是否有正在进行的流式传输
+                    const isStreamingActive = document.querySelector('.streaming-text');
+                    if (isStreamingActive) {
+                        console.log('⚠️ 检测到正在进行的流式传输，等待完成后再发送主动消息');
+                        // 等待流式传输完成
+                        await new Promise(resolve => {
+                            const checkInterval = setInterval(() => {
+                                if (!document.querySelector('.streaming-text')) {
+                                    clearInterval(checkInterval);
+                                    resolve();
+                                }
+                            }, 100);
+                        });
+                        // 流式传输完成后再等待500ms确保界面稳定
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    const chatKey = `${QQ_GetUserName()}和${characterName}的聊天`;
+                    
+                    // 获取或创建私聊页面
+                    let chatPage = document.querySelector(`.QQ_chat_page[data-name="${characterName}"]`);
+                    
+                    if (!chatPage) {
+                        // 如果聊天页面不存在，创建一个（但不显示）
+                        const chatPageHtml = `
+                            <div class="QQ_chat_page" data-name="${characterName}" style="display: none;">
+                                <div class="chat-setting-popup" style="display: none;">
+                                    <!-- 聊天设置内容 -->
+                                </div>
+                                <div class="msgcontent"></div>
+                                <div class="input-container">
+                                    <textarea class="userInput" data-chatname="${characterName}" placeholder="输入消息..."></textarea>
+                                    <button id="QQ_chat_send-btn" class="QQ_send_btn">发送</button>
+                                </div>
+                            </div>
+                        `;
+                        document.querySelector('.QQ_ChatInterface').insertAdjacentHTML('beforeend', chatPageHtml);
+                        chatPage = document.querySelector(`.QQ_chat_page[data-name="${characterName}"]`);
+                    }
+                    
+                    // 获取消息容器
+                    const msgContent = chatPage.querySelector('.msgcontent');
+                    
+                    // 创建消息HTML（流式效果）
+                    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    const messageHtml = `
+                        <div class="QQ_chat_item proactive-message" id="${messageId}">
+                            <img class="Chat_MyHead" alt="${characterName}" src="${QQ_GetCharacterAvatar(characterName)}" />
+                            <div class="tri"></div>
+                            <span class="QQ_chat_text streaming-text" data-full-text="${content}"></span>
+                        </div>
+                    `;
+                    
+                    msgContent.insertAdjacentHTML('beforeend', messageHtml);
+                    
+                    // 滚动到最新消息位置
+                    msgContent.scrollTop = msgContent.scrollHeight;
+                    
+                    // 流式显示文字（主动消息稍微快一些）
+                    const textElement = document.querySelector(`#${messageId} .streaming-text`);
+                    const fullText = content;
+                    let currentIndex = 0;
+                    
+                    return new Promise((resolve) => {
+                        const streamInterval = setInterval(() => {
+                            if (currentIndex < fullText.length) {
+                                textElement.textContent = fullText.substring(0, currentIndex + 1);
+                                currentIndex++;
+                                // 在流式传输过程中保持滚动到底部
+                                msgContent.scrollTop = msgContent.scrollHeight;
+                            } else {
+                                clearInterval(streamInterval);
+                                textElement.classList.remove('streaming-text');
+                                // 最终滚动到底部
+                                msgContent.scrollTop = msgContent.scrollHeight;
+                                resolve();
+                            }
+                        }, 25); // 主动消息比25ms显示一个字符，略快于常规回复
+                    });
+                    
+                } catch (error) {
+                    console.error('确保消息在聊天界面中失败:', error);
+                }
+            }
+            
             async function QQ_DeliverProactiveMessage(characterName, messageData) {
                 try {
                     console.log(`📤 开始发送主动消息: ${characterName} - ${messageData.content}`);
@@ -26180,17 +26418,23 @@ ${index + 1}. ${space.name}
                     }
                     QQ_msgjson.私聊[chatKey].push(messageText);
                     
-                    // 如果当前正在查看该角色的聊天，立即显示消息
-                    const currentChatPage = document.querySelector('.QQ_chat_page');
+                    // 首先流式添加消息到聊天界面（无论是否正在查看）
+                    await QQ_EnsureMessageInChatInterface(characterName, messageData.content, timestamp);
+                    
+                    // 添加短暂延迟，确保消息已经完全显示
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    // 如果当前正在查看该角色的聊天，播放通知声音
+                    const currentChatPage = document.querySelector('.QQ_chat_page:not([style*="display: none"])');
                     if (currentChatPage && currentChatPage.dataset.name === characterName) {
-                        // 创建消息HTML
-                        const messageHtml = QQ_CreateChatMessage(characterName, messageData.content, timestamp, false);
-                        const msgContent = currentChatPage.querySelector('.msgcontent');
-                        msgContent.insertAdjacentHTML('beforeend', messageHtml);
-                        msgContent.scrollTop = msgContent.scrollHeight;
-                        
                         // 播放通知声音（如果有）
                         QQ_PlayNotificationSound();
+                        
+                        // 滚动到底部
+                        const msgContent = currentChatPage.querySelector('.msgcontent');
+                        if (msgContent) {
+                            msgContent.scrollTop = msgContent.scrollHeight;
+                        }
                     }
                     
                     // 更新联系人列表的红点提示
@@ -26319,11 +26563,10 @@ ${index + 1}. ${space.name}
                     // 清除该角色的未读计数
                     QQ_ClearUnreadCount(characterName);
                     
-                    // 立即跳转到对应私聊
+                    // 立即跳转到对应私聊（消息已经在聊天界面中）
                     QQ_OpenPrivateChat(characterName);
                     
-                    // 立即显示该角色的主动消息
-                    QQ_DisplayProactiveMessageForCharacter(characterName);
+                    // 不需要再调用QQ_DisplayProactiveMessageForCharacter，因为消息已经通过流式方式添加
                     
                     // 移除通知
                     $(this).fadeOut(200, function() {
@@ -28605,6 +28848,12 @@ ${index + 1}. ${space.name}
                 
                 // 模拟群成员回复（随机选择1-2个成员回复）
                 setTimeout(() => {
+                    // 检查是否正在生成AI回复，避免在等待期间产生消息洪水
+                    if (typeof gening !== 'undefined' && gening) {
+                        console.log('🔄 AI生成中，暂停群成员回复模拟，避免消息洪水');
+                        return;
+                    }
+                    
                     const replyCount = Math.floor(Math.random() * 2) + 1;
                     const repliedMembers = [];
                     
