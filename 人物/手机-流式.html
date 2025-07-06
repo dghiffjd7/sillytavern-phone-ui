@@ -21373,14 +21373,20 @@ ${index + 1}. ${space.name}
                     const sortedMessages = recentMessages.reverse();
                     
                     for (const msg of sortedMessages) {
+                        // 为用户消息格式化时间（去掉秒数）
+                        let displayTime = msg.time;
+                        if (msg.sender === UserName && msg.time) {
+                            // 如果是用户发送的消息，只显示到分钟
+                            displayTime = QQ_FormatTimeToMinutes(msg.time);
+                        }
                         if (msg.type === '私聊') {
-                            memoryContent += `[${msg.time}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
                         } else if (msg.type === '群聊') {
-                            memoryContent += `[${msg.time}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
                         } else if (msg.type === '动态') {
-                            memoryContent += `[${msg.time}] ${msg.sender}${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}${msg.content}\n`;
                         } else if (msg.type === '动态评论') {
-                            memoryContent += `[${msg.time}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
+                            memoryContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
                         }
                     }
                     
@@ -21557,6 +21563,45 @@ ${index + 1}. ${space.name}
                 } catch (e) {
                     console.warn('解析时间失败:', timeStr, e);
                     return Date.now();
+                }
+            }
+
+            /**
+             * 将时间格式化为只显示到分钟（用于用户消息）
+             * @param {string} timeStr - 原始时间字符串
+             * @returns {string} 格式化后的时间字符串
+             */
+            function QQ_FormatTimeToMinutes(timeStr) {
+                try {
+                    if (!timeStr) return '';
+                    
+                    // 如果已经是 HH:MM 格式，直接返回
+                    if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                        return timeStr;
+                    }
+                    
+                    // 如果是 HH:MM:SS 格式，去掉秒数
+                    if (/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) {
+                        return timeStr.substring(0, timeStr.lastIndexOf(':'));
+                    }
+                    
+                    // 如果是其他格式，尝试解析后重新格式化
+                    const parsed = Date.parse(timeStr);
+                    if (!isNaN(parsed)) {
+                        const date = new Date(parsed);
+                        return date.toLocaleTimeString('zh-CN', { 
+                            hour12: false, 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                        });
+                    }
+                    
+                    // 如果都失败了，返回原始字符串
+                    return timeStr;
+                    
+                } catch (e) {
+                    console.warn('格式化时间失败:', timeStr, e);
+                    return timeStr;
                 }
             }
 
