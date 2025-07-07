@@ -27039,51 +27039,20 @@ ${index + 1}. ${space.name}
                         return;
                     }
                     
-                    // 创建消息HTML（消息级流式显示）
-                    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                    const messageHtml = `
-                        <div class="QQ_chat_item proactive-message" id="${messageId}">
-                            <img class="Chat_MyHead" alt="${characterName}" src="${QQ_GetCharacterAvatar(characterName)}" />
-                            <div class="tri"></div>
-                            <span class="QQ_chat_text">${content}</span>
-                        </div>
-                    `;
+                    // 使用与常规消息相同的流式显示机制
+                    const fullMessage = `${characterName}--${content}--${timestamp}`;
                     
-                    // 先显示输入指示器
-                    const typingIndicatorId = `typing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                    const typingHtml = `
-                        <div class="QQ_chat_item" id="${typingIndicatorId}">
-                            <img class="Chat_MyHead" alt="${characterName}" src="${QQ_GetCharacterAvatar(characterName)}" />
-                            <div class="tri"></div>
-                            <div class="QQ_chat_text" style="display: flex; align-items: center; gap: 5px;">
-                                <div class="typing-dots" style="display: flex; gap: 2px;">
-                                    <div class="liquid-dot" style="width: 4px; height: 4px; background: #999; border-radius: 50%; animation: liquidFlowMerge 2.8s infinite ease-in-out;"></div>
-                                    <div class="liquid-dot" style="width: 4px; height: 4px; background: #999; border-radius: 50%; animation: liquidFlowMerge 2.8s infinite ease-in-out 0.15s;"></div>
-                                    <div class="liquid-dot" style="width: 4px; height: 4px; background: #999; border-radius: 50%; animation: liquidFlowMerge 2.8s infinite ease-in-out 0.3s;"></div>
-                                </div>
-                                <span style="font-size: 12px; color: #666; opacity: 0.8;">正在输入...</span>
-                            </div>
-                        </div>
-                    `;
-                    
-                    msgContent.insertAdjacentHTML('beforeend', typingHtml);
-                    msgContent.scrollTop = msgContent.scrollHeight;
-                    
-                    // 显示"正在输入..."动画一段时间，然后显示实际消息
+                    // 使用队列机制流式显示主动消息，确保与其他消息流式显示一致
                     return new Promise((resolve) => {
-                        setTimeout(() => {
-                            // 移除输入指示器
-                            const typingElement = document.getElementById(typingIndicatorId);
-                            if (typingElement) {
-                                typingElement.remove();
-                            }
-                            
-                            // 显示实际消息
-                            msgContent.insertAdjacentHTML('beforeend', messageHtml);
-                            msgContent.scrollTop = msgContent.scrollHeight;
-                            
-                            resolve();
-                        }, 1000 + Math.random() * 1000); // 1-2秒的输入延迟，模拟真实打字时间
+                        QQ_EnqueueStreamingTask({
+                            handler: async () => {
+                                // 使用与常规消息相同的流式显示函数
+                                await QQ_DisplayStreamingMessagesDirectly(msgContent, [fullMessage], characterName, true, true);
+                                resolve();
+                            },
+                            args: [],
+                            description: `主动消息流式显示: ${characterName}`
+                        });
                     });
                     
                 } catch (error) {
@@ -27615,26 +27584,32 @@ ${index + 1}. ${space.name}
                     return;
                 }
                 
-                // 立即显示所有待发送的主动消息
-                pendingMessages.forEach((messageData, index) => {
-                    setTimeout(() => {
-                        const timestamp = new Date().toLocaleTimeString('zh-CN', {
-                            hour12: false,
-                            hour: '2-digit',
-                            minute: '2-digit'
+                // 使用流式队列显示所有待发送的主动消息
+                const messagesToDisplay = pendingMessages.map(messageData => {
+                    const timestamp = new Date().toLocaleTimeString('zh-CN', {
+                        hour12: false,
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                    
+                    return `${characterName}--${messageData.content}--${timestamp}`;
+                });
+                
+                // 使用队列机制流式显示主动消息
+                QQ_EnqueueStreamingTask({
+                    handler: async () => {
+                        await QQ_DisplayStreamingMessagesDirectly(chatContainer, messagesToDisplay, characterName, true, false);
+                        
+                        // 所有消息显示完成后，标记为已发送
+                        pendingMessages.forEach(messageData => {
+                            messageData.status = 'delivered';
+                            messageData.deliveredAt = Date.now();
                         });
                         
-                        const messageText = `${characterName}--${messageData.content}--${timestamp}`;
-                        
-                        // 添加消息到聊天界面
-                        QQ_Chat_AddMsg(chatContainer, messageText, characterName, true, false);
-                        
-                        // 标记为已发送
-                        messageData.status = 'delivered';
-                        messageData.deliveredAt = Date.now();
-                        
-                        console.log(`✅ 已显示主动消息: ${characterName}: ${messageData.content}`);
-                    }, index * 1000); // 每条消息间隔1秒
+                        console.log(`✅ 已流式显示 ${pendingMessages.length} 条主动消息`);
+                    },
+                    args: [],
+                    description: `批量主动消息流式显示: ${characterName} (${pendingMessages.length}条)`
                 });
                 
                 // 保存更新后的队列状态
