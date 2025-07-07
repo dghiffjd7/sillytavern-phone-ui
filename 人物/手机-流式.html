@@ -5090,7 +5090,7 @@
              * @param {string} messageStr - 消息字符串
              * @return {object} {sequenceId: number, cleanMessage: string}
              */
-            function QQ_ExtractOrGenerateSequenceId(messageStr) {
+            function QQ_ExtractOrGenerateSequenceId(messageStr, shouldGenerate = false) {
                 // 尝试从消息末尾提取序列号（格式：##seq_12345##）
                 const sequenceRegex = /##seq_(\d+)##$/;
                 const match = messageStr.match(sequenceRegex);
@@ -5100,9 +5100,14 @@
                     const cleanMessage = messageStr.replace(sequenceRegex, '');
                     return { sequenceId, cleanMessage };
                 } else {
-                    // 如果没有序列号，生成一个新的
-                    const sequenceId = QQ_GetNextMessageId();
-                    return { sequenceId, cleanMessage: messageStr };
+                    // 只有明确要求时才生成新序列号
+                    if (shouldGenerate) {
+                        const sequenceId = QQ_GetNextMessageId();
+                        return { sequenceId, cleanMessage: messageStr };
+                    } else {
+                        // 没有序列号且不要求生成时，返回一个临时标识
+                        return { sequenceId: 0, cleanMessage: messageStr };
+                    }
                 }
             }
             
@@ -21691,12 +21696,12 @@ ${index + 1}. ${space.name}
                                 const msg = messages[i];
                                 
                                 // *** 检查这条消息的序列号 ***
-                                const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                                const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                 let sequenceId = sequenceInfo.sequenceId;
                                 
                                 // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
                                 // 为了保证新消息总是在最前面，给它分配真正的新序列号
-                                if (sequenceId <= QQ_LastProcessedSequenceId) {
+                                if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
                                     const oldSequenceId = sequenceId;
                                     sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
                                     console.log(`🔄 消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
@@ -21731,11 +21736,11 @@ ${index + 1}. ${space.name}
                                     }
                                     
                                     // *** 修改：从消息中提取序列号 ***
-                                    const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                                    const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                     let sequenceId = sequenceInfo.sequenceId;
                                     
                                     // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
-                                    if (sequenceId <= QQ_LastProcessedSequenceId) {
+                                    if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
                                         const oldSequenceId = sequenceId;
                                         sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
                                         console.log(`🔄 私聊消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
@@ -21779,11 +21784,11 @@ ${index + 1}. ${space.name}
                                     
                                     if (!isInitMessage) {
                                         // *** 修改：从消息中提取序列号 ***
-                                        const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                                        const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                         let sequenceId = sequenceInfo.sequenceId;
                                         
                                         // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
-                                        if (sequenceId <= QQ_LastProcessedSequenceId) {
+                                        if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
                                             const oldSequenceId = sequenceId;
                                             sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
                                             console.log(`🔄 群聊消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${content.substring(0, 30)}...`);
@@ -22296,20 +22301,20 @@ ${index + 1}. ${space.name}
                             }
                             
                             // *** 修改：使用逻辑序列号替代时间排序 ***
-                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, false);
                             const cleanMsg = sequenceInfo.cleanMessage;
                             let sequenceId = sequenceInfo.sequenceId;
                             
-                            // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
-                            if (sequenceId <= QQ_LastProcessedSequenceId) {
+                            // *** 修复：为没有序列号的消息分配序列号，或重新分配过旧的序列号 ***
+                            if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
                                 const oldSequenceId = sequenceId;
                                 sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
-                                console.log(`🔄 流式私聊消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
+                                console.log(`🔄 流式私聊消息序列号${oldSequenceId === 0 ? '缺失' : '过旧'} [${oldSequenceId}→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
                             // 检查是否为新消息（检查清理后的消息）
                             const isNewMsg = !QQ_msgjson.私聊[str].some(existingMsg => {
-                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg).cleanMessage;
+                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg, false).cleanMessage;
                                 return existingClean === cleanMsg;
                             });
                             
@@ -22656,20 +22661,20 @@ ${index + 1}. ${space.name}
                         
                         for (let msg of json.群聊[name]["msgs"]) {
                             // *** 修改：使用逻辑序列号替代时间排序 ***
-                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, false);
                             const cleanMsg = sequenceInfo.cleanMessage;
                             let sequenceId = sequenceInfo.sequenceId;
                             
-                            // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
-                            if (sequenceId <= QQ_LastProcessedSequenceId) {
+                            // *** 修复：为没有序列号的消息分配序列号，或重新分配过旧的序列号 ***
+                            if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
                                 const oldSequenceId = sequenceId;
                                 sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
-                                console.log(`🔄 流式群聊消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
+                                console.log(`🔄 流式群聊消息序列号${oldSequenceId === 0 ? '缺失' : '过旧'} [${oldSequenceId}→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
                             // 检查是否为新消息（检查清理后的消息）
                             const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].some(existingMsg => {
-                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg).cleanMessage;
+                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg, false).cleanMessage;
                                 return existingClean === cleanMsg;
                             });
                             
