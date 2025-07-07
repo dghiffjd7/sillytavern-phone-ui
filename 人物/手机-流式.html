@@ -7549,6 +7549,107 @@
                 }
             }
 
+            /**
+             * 分离式处理模型：优先提取并处理线上格式内容
+             * 解决AI回复中“部分格式 + 大段互动”的混合问题
+             * @param {string} originalResult - 原始 AI 回复
+             * @return {object} {processed: boolean, remainingResult: string, processedCount: number}
+             */
+            async function QQ_ExtractAndProcessOnlineFormatFirst(originalResult) {
+                console.log('🔍 开始分离式处理：优先提取线上格式内容');
+                
+                let result = originalResult;
+                let processed = false;
+                let processedCount = 0;
+                
+                // 定义线上格式正则表达式
+                const formatPatterns = [
+                    {
+                        name: '私聊格式',
+                        pattern: /<(.+?)和(.+?)的私聊>([\s\S]+?)<\/(.+?)和(.+?)的私聊>/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`💬 提取到私聊格式内容`);
+                            // 使用现有的 QQ_Msg_Parse 处理
+                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
+                            await QQ_Msg_Parse(wrappedContent);
+                            return true;
+                        }
+                    },
+                    {
+                        name: '群聊格式',
+                        pattern: /<群聊:(.+?)>([\s\S]+?)<\/群聊:(.+?)>/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`💬 提取到群聊格式内容`);
+                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
+                            await QQ_Msg_Parse(wrappedContent);
+                            return true;
+                        }
+                    },
+                    {
+                        name: '动态格式',
+                        pattern: /moment_start([\s\S]+?)moment_end/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`📱 提取到动态格式内容`);
+                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
+                            await QQ_Moment_Parse(wrappedContent);
+                            return true;
+                        }
+                    },
+                    {
+                        name: 'MiPhone完整格式',
+                        pattern: /MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`📱 提取到MiPhone完整格式内容`);
+                            // 检查内容是否包含线上格式
+                            const content = match[1];
+                            if (content.includes('的私聊>') || content.includes('群聊:') || content.includes('moment_start')) {
+                                await QQ_Msg_Parse(fullMatch);
+                                return true;
+                            }
+                            return false;
+                        }
+                    }
+                ];
+                
+                // 逐个尝试各种格式模式
+                for (const formatDef of formatPatterns) {
+                    const matches = [...result.matchAll(formatDef.pattern)];
+                    
+                    for (const match of matches) {
+                        try {
+                            const fullMatch = match[0];
+                            const shouldProcess = await formatDef.handler(match, fullMatch);
+                            
+                            if (shouldProcess) {
+                                // 从原始结果中移除已处理的内容
+                                result = result.replace(fullMatch, '');
+                                processed = true;
+                                processedCount++;
+                                console.log(`✅ 已处理${formatDef.name}: ${fullMatch.substring(0, 100)}...`);
+                            }
+                        } catch (error) {
+                            console.error(`❌ 处理${formatDef.name}时出错:`, error);
+                        }
+                    }
+                }
+                
+                // 清理剩余的空白和无效标签
+                result = result
+                    .replace(/MiPhone_JSON_START/g, '')
+                    .replace(/MiPhone_JSON_END/g, '')
+                    .replace(/msg_end/g, '')
+                    .replace(/^\s*[\r\n]+/gm, '')
+                    .trim();
+                
+                console.log(`🔍 分离式处理结果: 处理了${processedCount}个线上格式块, 剩余内容长度: ${result.length}`);
+                
+                return {
+                    processed,
+                    remainingResult: result,
+                    processedCount
+                };
+            }
+
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
                 
@@ -7612,6 +7713,32 @@
                 
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
+                
+                // *** 新增：分离式处理 - 优先提取并处理线上格式内容 ***
+                const separateResult = await QQ_ExtractAndProcessOnlineFormatFirst(result);
+                if (separateResult.processed && separateResult.processedCount > 0) {
+                    console.log(`✅ 分离式处理成功: 处理了${separateResult.processedCount}个线上格式块`);
+                    
+                    // 更新相关状态
+                    QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    await QQ_Save_Chat_Backup();
+                    
+                    // 如果还有剩余内容，继续处理为互动内容
+                    if (separateResult.remainingResult && separateResult.remainingResult.trim().length > 0) {
+                        console.log(`🎭 检测到剩余内容，将作为互动内容处理`);
+                        const interactiveResult = QQ_IsInteractiveContent(separateResult.remainingResult, true);
+                        if (interactiveResult) {
+                            await QQ_HandleInteractiveContent(separateResult.remainingResult);
+                            console.log(`✅ 剩余内容已作为互动内容处理完成`);
+                        }
+                    }
+                    
+                    return; // 分离式处理成功，结束流程
+                }
+                
+                // 如果分离式处理没有找到线上格式，继续使用原有逻辑
+                result = separateResult.remainingResult;
                 
                 // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
                 console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
