@@ -7550,6 +7550,48 @@
             }
 
             /**
+             * 改进的时间排序函数，确保24小时制和跨日期的正确排序
+             * @param {Array} messages - 消息数组
+             * @param {boolean} ascending - 是否升序排列（默认false，即降序）
+             * @return {Array} 排序后的消息数组
+             */
+            function QQ_SortMessagesByTime(messages, ascending = false) {
+                return messages.sort((a, b) => {
+                    const timeA = a.timestamp || QQ_ParseTime(a.time);
+                    const timeB = b.timestamp || QQ_ParseTime(b.time);
+                    
+                    // 确保数值比较
+                    const timestampA = typeof timeA === 'number' ? timeA : Date.parse(timeA) || 0;
+                    const timestampB = typeof timeB === 'number' ? timeB : Date.parse(timeB) || 0;
+                    
+                    if (ascending) {
+                        return timestampA - timestampB; // 升序：早的在前
+                    } else {
+                        return timestampB - timestampA; // 降序：新的在前
+                    }
+                });
+            }
+
+            /**
+             * 获取兼容性的时间显示格式（用于界面显示）
+             * @param {string} fullDateTime - 完整的日期时间字符串
+             * @return {string} 简化的时间显示
+             */
+            function QQ_GetDisplayTime(fullDateTime) {
+                if (!fullDateTime) return QQ_GetTime();
+                
+                // 如果是完整日期时间格式，提取时间部分
+                const fullDateTimeRegex = /^\d{4}\/\d{1,2}\/\d{1,2}[,\s]+(\d{1,2}:\d{2})$/;
+                const match = fullDateTime.match(fullDateTimeRegex);
+                if (match) {
+                    return match[1]; // 返回 HH:MM 部分
+                }
+                
+                // 如果已经是简短格式，直接返回
+                return fullDateTime;
+            }
+
+            /**
              * 分离式处理模型：优先提取并处理线上格式内容
              * 解决AI回复中“部分格式 + 大段互动”的混合问题
              * @param {string} originalResult - 原始 AI 回复
@@ -21619,13 +21661,13 @@ ${index + 1}. ${space.name}
                                         type: '动态评论',
                                         sender: comment.name || comment.userName,
                                         content: comment.content || comment.message,
-                                        time: comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                        time: comment.timestamp || QQ_GetTime(),
                                         momentAuthor: moment.userName || moment.name,
                                         momentContent: moment.message,
                                         momentIndex: momentIndex, // 所属动态的位置
                                         commentIndex: commentIndex, // 在评论数组中的位置
                                         globalIndex: messageIndex++, // 全局消息顺序索引
-                                        timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
+                                        timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || QQ_GetTime())
                                     });
                                 }
                             }
@@ -21634,25 +21676,25 @@ ${index + 1}. ${space.name}
                     
                     console.log(`📊 收集到 ${allMessages.length} 条消息`);
                     
+                    // *** 修改：使用改进的排序函数，确保时间排序正确 ***
+                    console.log(`🔄 开始排序 ${allMessages.length} 条消息...`);
+                    
                     // 实现滚动式存储：保留最新的400条消息
                     let recentMessages;
                     if (allMessages.length <= 400) {
-                        // 消息数量未达到上限，保持渲染顺序
-                        allMessages.sort((a, b) => a.globalIndex - b.globalIndex);
-                        recentMessages = allMessages;
-                        console.log(`📝 消息数量(${allMessages.length})未达到上限，保留所有消息`);
+                        // 消息数量未达到上限，按时间升序排列（早的在前）
+                        recentMessages = QQ_SortMessagesByTime(allMessages, true);
+                        console.log(`📝 消息数量(${allMessages.length})未达到上限，按时间升序保留所有消息`);
                     } else {
                         // 消息数量超过上限，实现滚动式存储
-                        // 首先按时间戳排序，最新的在前
-                        allMessages.sort((a, b) => b.timestamp - a.timestamp);
+                        // 首先按时间降序排列，最新的在前
+                        const sortedMessages = QQ_SortMessagesByTime(allMessages, false);
                         
                         // 取最新的400条消息
-                        const latestMessages = allMessages.slice(0, 400);
+                        const latestMessages = sortedMessages.slice(0, 400);
                         
-                        // 然后按渲染顺序重新排序用于显示（最早的在前）
-                        latestMessages.sort((a, b) => a.globalIndex - b.globalIndex);
-                        
-                        recentMessages = latestMessages;
+                        // 然后按时间升序重新排序用于显示（最早的在前）
+                        recentMessages = QQ_SortMessagesByTime(latestMessages, true);
                         console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新400条，删除${allMessages.length - 400}条旧消息`);
                     }
                     
@@ -21842,30 +21884,39 @@ ${index + 1}. ${space.name}
                         return timeStr.getTime();
                     }
                     
+                    // *** 新增：处理完整日期时间格式 (YYYY/MM/DD HH:MM 或 YYYY/MM/DD, HH:MM) ***
+                    const fullDateTimeRegex = /^(\d{4})\/(\d{1,2})\/(\d{1,2})[,\s]+(\d{1,2}):(\d{2})$/;
+                    const fullDateTimeMatch = timeStr.match(fullDateTimeRegex);
+                    if (fullDateTimeMatch) {
+                        const [, year, month, day, hours, minutes] = fullDateTimeMatch.map(Number);
+                        return new Date(year, month - 1, day, hours, minutes, 0).getTime();
+                    }
+                    
                     // 处理 ISO 格式
-                    if (timeStr.includes('T') || timeStr.includes('-')) {
+                    if (timeStr.includes('T') || (timeStr.includes('-') && timeStr.length > 10)) {
                         const parsed = Date.parse(timeStr);
                         if (!isNaN(parsed)) return parsed;
                     }
                     
-                    // 处理各种时间格式
+                    // *** 修改：对于纯时间格式，使用当前日期但警告用户 ***
+                    const today = new Date();
                     if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
                         // HH:MM:SS 格式
-                        const today = new Date();
+                        console.warn(`⚠️ 检测到纯时间格式 '${timeStr}'，使用今日日期。建议使用完整日期时间格式。`);
                         const [hours, minutes, seconds] = timeStr.split(':').map(Number);
                         return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds).getTime();
-                    } else if (/^\d{2}:\d{2}$/.test(timeStr)) {
-                        // HH:MM 格式
-                        const today = new Date();
-                        const [hours, minutes] = timeStr.split(':').map(Number);
-                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
                     } else if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
-                        // H:MM 或 HH:MM 格式
-                        const today = new Date();
+                        // HH:MM 或 H:MM 格式
+                        console.warn(`⚠️ 检测到纯时间格式 '${timeStr}'，使用今日日期。建议使用完整日期时间格式。`);
                         const [hours, minutes] = timeStr.split(':').map(Number);
                         return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
                     } else {
-                        // 其他格式，使用当前时间
+                        // 其他格式，尝试解析
+                        const parsed = Date.parse(timeStr);
+                        if (!isNaN(parsed)) {
+                            return parsed;
+                        }
+                        console.warn(`⚠️ 无法解析时间格式 '${timeStr}'，使用当前时间`);
                         return Date.now();
                     }
                 } catch (e) {
@@ -25834,12 +25885,16 @@ ${index + 1}. ${space.name}
              * @returns {string} 格式化的时间戳 (HH:MM)
              */
             function QQ_GetTime() {
-                // 使用与全局一致的时间戳格式
-                return new Date().toLocaleTimeString('zh-CN', { 
-                    hour12: false, 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                });
+                // *** 修改：使用完整的日期时间格式，解决跨日排序问题 ***
+                const now = new Date();
+                return now.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit', 
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).replace(/\//g, '/');
             }
             
             /**
