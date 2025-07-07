@@ -5049,6 +5049,9 @@
             let isStreamingDisplayActive = false; // 流式传输锁
             let streamingMessageQueue = []; // 流式消息队列
             let currentStreamingProcess = null; // 当前流式传输进程引用
+            
+            // *** 新增：原始回复队列 - 确保流式输出优先级 ***
+            let rawResponseQueue = []; // 存储等待处理的原始AI回复
 
             // *** 新增：流式传输队列管理函数 ***
             
@@ -5089,11 +5092,31 @@
                     console.log(`✅ 队列任务完成: ${task.description}`);
                     isStreamingDisplayActive = false;
                     
+                    // *** 新增：检查并处理原始回复队列 ***
+                    if (streamingMessageQueue.length === 0 && rawResponseQueue.length > 0) {
+                        console.log(`🔄 流式队列已清空，开始处理等待的原始回复队列 (${rawResponseQueue.length}条)`);
+                        const queuedResponse = rawResponseQueue.shift();
+                        console.log(`⏱️ 该回复已等待 ${Date.now() - queuedResponse.timestamp}ms`);
+                        
+                        // 异步处理原始回复，避免阻塞
+                        setTimeout(() => {
+                            ResultHandle(queuedResponse.result, queuedResponse.isRetry);
+                        }, 50);
+                    }
+                    
                     // 处理队列中的下一个任务
                     setTimeout(QQ_ProcessStreamingQueue, 100);
                 }).catch((error) => {
                     console.error(`❌ 队列任务失败: ${task.description}`, error);
                     isStreamingDisplayActive = false;
+                    
+                    // *** 新增：失败时也检查原始回复队列 ***
+                    if (streamingMessageQueue.length === 0 && rawResponseQueue.length > 0) {
+                        const queuedResponse = rawResponseQueue.shift();
+                        setTimeout(() => {
+                            ResultHandle(queuedResponse.result, queuedResponse.isRetry);
+                        }, 50);
+                    }
                     
                     // 即使失败也要处理下一个任务
                     setTimeout(QQ_ProcessStreamingQueue, 500);
@@ -5107,6 +5130,7 @@
                 console.log('🚫 取消所有流式传输任务');
                 isStreamingDisplayActive = false;
                 streamingMessageQueue.length = 0;
+                rawResponseQueue.length = 0; // 清空原始回复队列
                 
                 if (currentStreamingProcess) {
                     clearTimeout(currentStreamingProcess);
@@ -7551,6 +7575,15 @@
 
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
+                
+                // *** 新增：流式输出优先级检查 ***
+                // 如果当前正在进行流式显示或队列中有待处理的流式任务，将新回复加入等待队列
+                if (isStreamingDisplayActive || streamingMessageQueue.length > 0) {
+                    console.log(`⏸️ 检测到流式显示进行中，将回复加入等待队列`);
+                    rawResponseQueue.push({ result, isRetry, timestamp: Date.now() });
+                    console.log(`📦 原始回复队列长度: ${rawResponseQueue.length}`);
+                    return; // 直接返回，等待流式完成后处理
+                }
                 
                 // *** 新增：异常格式预检测 ***
                 if (result && result.length > 0) {
