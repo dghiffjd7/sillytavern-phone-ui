@@ -5075,6 +5075,9 @@
             // *** 新增：短期记忆滚动式更新状态跟踪 ***
             let QQ_LastProcessedSequenceId = 0; // 记录上次处理的最大序列号
             
+            // *** 新增：当前回复消息保护机制 ***
+            let QQ_CurrentReplyMessages = new Set(); // 存储当前AI回复的消息ID，确保不被删除
+            
             /**
              * 为消息获取下一个序列号（用于保证逻辑顺序）
              * @return {number} 严格递增的序列号
@@ -7784,6 +7787,10 @@
 
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
+                
+                // *** 新增：初始化当前回复消息保护 ***
+                QQ_CurrentReplyMessages.clear();
+                console.log(`🛡️ 已清空当前回复消息保护列表，准备保护新回复`);
                 
                 // *** 新增：异常格式预检测 ***
                 if (result && result.length > 0) {
@@ -21896,10 +21903,22 @@ ${index + 1}. ${space.name}
                         
                         // 找出最近分配序列号的消息（很可能是AI新回复）
                         const recentSeqThreshold = QQ_MessageSequence.current() - 100; // 最近100个序列号
-                        const recentlyAssigned = allMessages.filter(msg => msg.sequenceId >= recentSeqThreshold);
-                        const otherMessages = allMessages.filter(msg => msg.sequenceId < recentSeqThreshold);
+                        const recentlyAssigned = allMessages.filter(msg => 
+                            msg.sequenceId >= recentSeqThreshold || QQ_CurrentReplyMessages.has(msg.sequenceId)
+                        );
+                        const otherMessages = allMessages.filter(msg => 
+                            msg.sequenceId < recentSeqThreshold && !QQ_CurrentReplyMessages.has(msg.sequenceId)
+                        );
                         
+                        // 统计保护的消息数量
+                        const protectedMessages = allMessages.filter(msg => QQ_CurrentReplyMessages.has(msg.sequenceId));
                         console.log(`📊 最近分配的消息: ${recentlyAssigned.length}条, 历史消息: ${otherMessages.length}条`);
+                        if (protectedMessages.length > 0) {
+                            console.log(`🛡️ 当前回复保护的消息: ${protectedMessages.length}条`);
+                            protectedMessages.forEach(msg => {
+                                console.log(`   保护消息 [seq:${msg.sequenceId}]: ${msg.sender}: ${msg.content?.substring(0, 30)}...`);
+                            });
+                        }
                         
                         // 优先保存最近分配的消息，然后按序列号排序选择其他消息
                         const sortedOthers = QQ_SortMessagesBySequence(otherMessages, false);
@@ -21929,7 +21948,18 @@ ${index + 1}. ${space.name}
                         }
                         
                         // 然后按逻辑序列号升序重新排序用于显示（最早的在前）
-                        recentMessages = QQ_SortMessagesBySequence(latestMessages, true);
+                        // *** 特殊处理：确保保护的消息永远在最底部 ***
+                        const protectedInFinal = latestMessages.filter(msg => QQ_CurrentReplyMessages.has(msg.sequenceId));
+                        const nonProtectedInFinal = latestMessages.filter(msg => !QQ_CurrentReplyMessages.has(msg.sequenceId));
+                        
+                        // 先排序非保护消息，再添加保护消息到底部
+                        const sortedNonProtected = QQ_SortMessagesBySequence(nonProtectedInFinal, true);
+                        const sortedProtected = QQ_SortMessagesBySequence(protectedInFinal, true);
+                        recentMessages = [...sortedNonProtected, ...sortedProtected];
+                        
+                        if (protectedInFinal.length > 0) {
+                            console.log(`📍 已将${protectedInFinal.length}条保护消息放置在记忆底部`);
+                        }
                         console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新1000条，删除${allMessages.length - 1000}条旧消息`);
                     }
                     
@@ -22354,7 +22384,11 @@ ${index + 1}. ${space.name}
                                 newMessages.push(cleanMsg); // 流式显示使用清理后的消息
                                 NewMsgCount++;
                                 QQ_msgjson.私聊[str].push(msgWithSequence);
+                                
+                                // *** 新增：将当前回复的消息添加到保护列表 ***
+                                QQ_CurrentReplyMessages.add(sequenceId);
                                 console.log(`➕ 私聊新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
+                                console.log(`🛡️ 已保护消息序列号: ${sequenceId}`);
                             } else {
                                 existingMessages.push(cleanMsg);
                                 console.log(`🔄 私聊已存在消息: ${cleanMsg.substring(0, 50)}...`);
