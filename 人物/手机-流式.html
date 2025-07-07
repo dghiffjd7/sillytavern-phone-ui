@@ -21715,56 +21715,65 @@ ${index + 1}. ${space.name}
                                 const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                 let sequenceId = sequenceInfo.sequenceId;
                                 
-                                // *** 修复：只为没有序列号的消息分配序列号 ***
-                                // 已有序列号的消息不重新分配，避免破坏消息一致性
-                                if (sequenceId === 0) {
-                                    sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
-                                    console.log(`🔄 短期记忆分配序列号 [0→${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
+                                // 为了保证新消息总是在最前面，给它分配真正的新序列号
+                                if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
+                                    const oldSequenceId = sequenceId;
+                                    sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
+                                    console.log(`🔄 消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
                                 }
                                 
-                                // *** 只收集真正新的消息（序列号大于上次处理的序列号） ***
-                                if (sequenceId > QQ_LastProcessedSequenceId) {
-                                    console.log(`🆕 发现新消息 [seq:${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                console.log(`🆕 发现新消息 [seq:${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                
+                                const parts = sequenceInfo.cleanMessage.split('--');
+                                if (parts.length >= 2) {
+                                    const senderName = parts[0];
+                                    const content = parts[1];
+                                    const timeStr = parts[2] || QQ_GetTime();
                                     
-                                    const parts = sequenceInfo.cleanMessage.split('--');
-                                    if (parts.length >= 2) {
-                                        const senderName = parts[0];
-                                        const content = parts[1];
-                                        const timeStr = parts[2] || QQ_GetTime();
+                                    // 确定聊天对象（修复：根据发送者确定接收者）
+                                    const match = chatKey.match(/(.+?)和(.+?)的聊天/);
+                                    let chatPartner = '';
+                                    if (match) {
+                                        const person1 = match[1];
+                                        const person2 = match[2];
                                         
-                                        // 确定聊天对象（修复：根据发送者确定接收者）
-                                        const match = chatKey.match(/(.+?)和(.+?)的聊天/);
-                                        let chatPartner = '';
-                                        if (match) {
-                                            const person1 = match[1];
-                                            const person2 = match[2];
-                                            
-                                            // 根据发送者确定接收者
-                                            if (senderName === person1) {
-                                                chatPartner = person2;
-                                            } else if (senderName === person2) {
-                                                chatPartner = person1;
-                                            } else {
-                                                // 发送者不在聊天键名中，可能是用户的昵称问题，使用UserName
-                                                chatPartner = senderName === UserName ? 
-                                                    (person1 === UserName ? person2 : person1) : 
-                                                    UserName;
-                                            }
+                                        // 根据发送者确定接收者
+                                        if (senderName === person1) {
+                                            chatPartner = person2;
+                                        } else if (senderName === person2) {
+                                            chatPartner = person1;
+                                        } else {
+                                            // 发送者不在聊天键名中，可能是用户的昵称问题，使用UserName
+                                            chatPartner = senderName === UserName ? 
+                                                (person1 === UserName ? person2 : person1) : 
+                                                UserName;
                                         }
-                                    
-                                        newMessages.push({
-                                            type: '私聊',
-                                            sender: senderName,
-                                            content: content,
-                                            time: timeStr,
-                                            chatPartner: chatPartner,
-                                            chatKey: chatKey,
-                                            arrayIndex: i,
-                                            globalIndex: messageIndex++,
-                                            sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
-                                            timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
-                                        });
                                     }
+                                    
+                                    // *** 修改：从消息中提取序列号 ***
+                                    const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
+                                    let sequenceId = sequenceInfo.sequenceId;
+                                    
+                                    // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
+                                    if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
+                                        const oldSequenceId = sequenceId;
+                                        sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
+                                        console.log(`🔄 私聊消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                    }
+                                    
+                                    newMessages.push({
+                                        type: '私聊',
+                                        sender: senderName,
+                                        content: content,
+                                        time: timeStr,
+                                        chatPartner: chatPartner,
+                                        chatKey: chatKey,
+                                        arrayIndex: i,
+                                        globalIndex: messageIndex++,
+                                        sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
+                                        timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
+                                    });
                                 }
                             }
                         }
@@ -21794,28 +21803,24 @@ ${index + 1}. ${space.name}
                                         const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                         let sequenceId = sequenceInfo.sequenceId;
                                         
-                                        // *** 修复：只为没有序列号的消息分配序列号 ***
-                                        if (sequenceId === 0) {
-                                            sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
-                                            console.log(`🔄 短期记忆群聊分配序列号 [0→${sequenceId}]: ${content.substring(0, 30)}...`);
+                                        // *** 修复：如果消息的序列号太小，说明这是一条新消息但使用了旧序列号 ***
+                                        if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
+                                            const oldSequenceId = sequenceId;
+                                            sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
+                                            console.log(`🔄 群聊消息序列号过旧 [${oldSequenceId}→${sequenceId}]: ${content.substring(0, 30)}...`);
                                         }
                                         
-                                        // *** 只收集真正新的消息（序列号大于上次处理的序列号） ***
-                                        if (sequenceId > QQ_LastProcessedSequenceId) {
-                                            console.log(`🆕 发现新群聊消息 [seq:${sequenceId}]: ${content.substring(0, 30)}...`);
-                                            
-                                                newMessages.push({
-                                                type: '群聊',
-                                                sender: senderName,
-                                                content: content,
-                                                time: timeStr,
-                                                groupName: groupName,
-                                                arrayIndex: i,
-                                                globalIndex: messageIndex++,
-                                                sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
-                                                timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
-                                            });
-                                        }
+                                        newMessages.push({
+                                            type: '群聊',
+                                            sender: senderName,
+                                            content: content,
+                                            time: timeStr,
+                                            groupName: groupName,
+                                            arrayIndex: i,
+                                            globalIndex: messageIndex++,
+                                            sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
+                                            timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
+                                        });
                                     }
                                 }
                             }
@@ -22316,10 +22321,11 @@ ${index + 1}. ${space.name}
                             const cleanMsg = sequenceInfo.cleanMessage;
                             let sequenceId = sequenceInfo.sequenceId;
                             
-                            // *** 修复：只为没有序列号的消息分配序列号，不重新分配已有序列号 ***
-                            if (sequenceId === 0) {
-                                sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
-                                console.log(`🔄 流式私聊消息分配序列号 [0→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
+                            // *** 修复：为没有序列号的消息分配序列号，或重新分配过旧的序列号 ***
+                            if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
+                                const oldSequenceId = sequenceId;
+                                sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
+                                console.log(`🔄 流式私聊消息序列号${oldSequenceId === 0 ? '缺失' : '过旧'} [${oldSequenceId}→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
                             // 检查是否为新消息（检查清理后的消息）
@@ -22675,10 +22681,11 @@ ${index + 1}. ${space.name}
                             const cleanMsg = sequenceInfo.cleanMessage;
                             let sequenceId = sequenceInfo.sequenceId;
                             
-                            // *** 修复：只为没有序列号的消息分配序列号，不重新分配已有序列号 ***
-                            if (sequenceId === 0) {
-                                sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
-                                console.log(`🔄 流式群聊消息分配序列号 [0→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
+                            // *** 修复：为没有序列号的消息分配序列号，或重新分配过旧的序列号 ***
+                            if (sequenceId === 0 || sequenceId <= QQ_LastProcessedSequenceId) {
+                                const oldSequenceId = sequenceId;
+                                sequenceId = QQ_GetNextMessageId(); // 重新分配新序列号
+                                console.log(`🔄 流式群聊消息序列号${oldSequenceId === 0 ? '缺失' : '过旧'} [${oldSequenceId}→${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
                             // 检查是否为新消息（检查清理后的消息）
