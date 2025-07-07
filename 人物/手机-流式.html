@@ -5050,6 +5050,69 @@
             let streamingMessageQueue = []; // 流式消息队列
             let currentStreamingProcess = null; // 当前流式传输进程引用
 
+            // *** 新增：逻辑时钟系统 - 用序列号替代时间排序 ***
+            const createSequenceIdGenerator = () => {
+                // 使用当前时间戳作为初始值，确保每次会话的ID都不同
+                let counter = Date.now();
+                
+                return {
+                    next: () => {
+                        return counter++;
+                    },
+                    current: () => {
+                        return counter;
+                    },
+                    reset: (newStart) => {
+                        counter = newStart || Date.now();
+                        console.log(`🔄 序列号生成器已重置，新起始值: ${counter}`);
+                    }
+                };
+            };
+            
+            // 创建全局的序列号生成器实例
+            const QQ_MessageSequence = createSequenceIdGenerator();
+            
+            /**
+             * 为消息获取下一个序列号（用于保证逻辑顺序）
+             * @return {number} 严格递增的序列号
+             */
+            function QQ_GetNextMessageId() {
+                const id = QQ_MessageSequence.next();
+                console.log(`🏠 分配消息序列号: ${id}`);
+                return id;
+            }
+            
+            /**
+             * 从消息字符串中提取或生成序列号
+             * @param {string} messageStr - 消息字符串
+             * @return {object} {sequenceId: number, cleanMessage: string}
+             */
+            function QQ_ExtractOrGenerateSequenceId(messageStr) {
+                // 尝试从消息末尾提取序列号（格式：##seq_12345##）
+                const sequenceRegex = /##seq_(\d+)##$/;
+                const match = messageStr.match(sequenceRegex);
+                
+                if (match) {
+                    const sequenceId = parseInt(match[1], 10);
+                    const cleanMessage = messageStr.replace(sequenceRegex, '');
+                    return { sequenceId, cleanMessage };
+                } else {
+                    // 如果没有序列号，生成一个新的
+                    const sequenceId = QQ_GetNextMessageId();
+                    return { sequenceId, cleanMessage: messageStr };
+                }
+            }
+            
+            /**
+             * 为消息字符串添加序列号
+             * @param {string} messageStr - 消息字符串 
+             * @param {number} sequenceId - 序列号
+             * @return {string} 带有序列号的消息字符串
+             */
+            function QQ_AddSequenceIdToMessage(messageStr, sequenceId) {
+                return `${messageStr}##seq_${sequenceId}##`;
+            }
+
             // *** 新增：流式传输队列管理函数 ***
             
             /**
@@ -7568,6 +7631,25 @@
                         return timestampA - timestampB; // 升序：早的在前
                     } else {
                         return timestampB - timestampA; // 降序：新的在前
+                    }
+                });
+            }
+            
+            /**
+             * *** 新增：使用逻辑序列号排序函数（解决时间排序问题） ***
+             * @param {Array} messages - 消息数组
+             * @param {boolean} ascending - 是否升序排列（默认true，即升序）
+             * @return {Array} 排序后的消息数组
+             */
+            function QQ_SortMessagesBySequence(messages, ascending = true) {
+                return messages.sort((a, b) => {
+                    const seqA = a.sequenceId || 0;
+                    const seqB = b.sequenceId || 0;
+                    
+                    if (ascending) {
+                        return seqA - seqB; // 升序：早的在前
+                    } else {
+                        return seqB - seqA; // 降序：新的在前
                     }
                 });
             }
@@ -21584,6 +21666,10 @@ ${index + 1}. ${space.name}
                                         }
                                     }
                                     
+                                    // *** 修改：从消息中提取序列号 ***
+                                    const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                                    const sequenceId = sequenceInfo.sequenceId;
+                                    
                                     allMessages.push({
                                         type: '私聊',
                                         sender: senderName,
@@ -21591,9 +21677,10 @@ ${index + 1}. ${space.name}
                                         time: timeStr,
                                         chatPartner: chatPartner,
                                         chatKey: chatKey,
-                                        arrayIndex: i, // 在该私聊数组中的位置
-                                        globalIndex: messageIndex++, // 全局消息顺序索引
-                                        timestamp: QQ_ParseTime(timeStr) // 时间戳（向后兼容）
+                                        arrayIndex: i,
+                                        globalIndex: messageIndex++,
+                                        sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
+                                        timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
                                     });
                                 }
                             }
@@ -21620,15 +21707,20 @@ ${index + 1}. ${space.name}
                                          content.includes('欢迎加入群聊'));
                                     
                                     if (!isInitMessage) {
+                                        // *** 修改：从消息中提取序列号 ***
+                                        const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                                        const sequenceId = sequenceInfo.sequenceId;
+                                        
                                         allMessages.push({
                                             type: '群聊',
                                             sender: senderName,
                                             content: content,
                                             time: timeStr,
                                             groupName: groupName,
-                                            arrayIndex: i, // 在该群聊数组中的位置
-                                            globalIndex: messageIndex++, // 全局消息顺序索引
-                                            timestamp: QQ_ParseTime(timeStr)
+                                            arrayIndex: i,
+                                            globalIndex: messageIndex++,
+                                            sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
+                                            timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
                                         });
                                     }
                                 }
@@ -21676,25 +21768,25 @@ ${index + 1}. ${space.name}
                     
                     console.log(`📊 收集到 ${allMessages.length} 条消息`);
                     
-                    // *** 修改：使用改进的排序函数，确保时间排序正确 ***
-                    console.log(`🔄 开始排序 ${allMessages.length} 条消息...`);
+                    // *** 修改：使用逻辑序列号排序，解决时间排序问题 ***
+                    console.log(`🏠 开始按逻辑序列号排序 ${allMessages.length} 条消息...`);
                     
                     // 实现滚动式存储：保留最新的400条消息
                     let recentMessages;
                     if (allMessages.length <= 400) {
-                        // 消息数量未达到上限，按时间升序排列（早的在前）
-                        recentMessages = QQ_SortMessagesByTime(allMessages, true);
-                        console.log(`📝 消息数量(${allMessages.length})未达到上限，按时间升序保留所有消息`);
+                        // 消息数量未达到上限，按逻辑序列号升序排列（早的在前）
+                        recentMessages = QQ_SortMessagesBySequence(allMessages, true);
+                        console.log(`📝 消息数量(${allMessages.length})未达到上限，按逻辑顺序保留所有消息`);
                     } else {
                         // 消息数量超过上限，实现滚动式存储
-                        // 首先按时间降序排列，最新的在前
-                        const sortedMessages = QQ_SortMessagesByTime(allMessages, false);
+                        // 首先按逻辑序列号降序排列，最新的在前
+                        const sortedMessages = QQ_SortMessagesBySequence(allMessages, false);
                         
                         // 取最新的400条消息
                         const latestMessages = sortedMessages.slice(0, 400);
                         
-                        // 然后按时间升序重新排序用于显示（最早的在前）
-                        recentMessages = QQ_SortMessagesByTime(latestMessages, true);
+                        // 然后按逻辑序列号升序重新排序用于显示（最早的在前）
+                        recentMessages = QQ_SortMessagesBySequence(latestMessages, true);
                         console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新400条，删除${allMessages.length - 400}条旧消息`);
                     }
                     
@@ -22089,17 +22181,28 @@ ${index + 1}. ${space.name}
                                 }
                             }
                             
-                            // 检查是否为新消息（不在现有消息列表中）
-                            const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
+                            // *** 修改：使用逻辑序列号替代时间排序 ***
+                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                            const cleanMsg = sequenceInfo.cleanMessage;
+                            const sequenceId = sequenceInfo.sequenceId;
+                            
+                            // 检查是否为新消息（检查清理后的消息）
+                            const isNewMsg = !QQ_msgjson.私聊[str].some(existingMsg => {
+                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg).cleanMessage;
+                                return existingClean === cleanMsg;
+                            });
                             
                             if (isNewMsg) {
-                                newMessages.push(msg);
+                                // 存储带有序列号的消息
+                                const msgWithSequence = QQ_AddSequenceIdToMessage(cleanMsg, sequenceId);
+                                newMessages.push(cleanMsg); // 流式显示使用清理后的消息
                                 NewMsgCount++;
+                                QQ_msgjson.私聊[str].push(msgWithSequence);
+                                console.log(`➕ 私聊新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
                             } else {
-                                existingMessages.push(msg);
+                                existingMessages.push(cleanMsg);
+                                console.log(`🔄 私聊已存在消息: ${cleanMsg.substring(0, 50)}...`);
                             }
-                            
-                            QQ_msgjson.私聊[str].push(msg);
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
                                 if (sp[0] == `${UserName}`) {
@@ -22431,18 +22534,28 @@ ${index + 1}. ${space.name}
                         const existingMessages = [];
                         
                         for (let msg of json.群聊[name]["msgs"]) {
-                            // 检查是否为新消息（不在现有消息列表中）
-                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
+                            // *** 修改：使用逻辑序列号替代时间排序 ***
+                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg);
+                            const cleanMsg = sequenceInfo.cleanMessage;
+                            const sequenceId = sequenceInfo.sequenceId;
+                            
+                            // 检查是否为新消息（检查清理后的消息）
+                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].some(existingMsg => {
+                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg).cleanMessage;
+                                return existingClean === cleanMsg;
+                            });
                             
                             if (isNewMsg) {
-                                newMessages.push(msg);
+                                // 存储带有序列号的消息
+                                const msgWithSequence = QQ_AddSequenceIdToMessage(cleanMsg, sequenceId);
+                                newMessages.push(cleanMsg); // 流式显示使用清理后的消息
                                 NewMsgCount++;
+                                QQ_msgjson.群聊[name]["msgs"].push(msgWithSequence);
+                                console.log(`➕ 群聊[${name}]新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
                             } else {
-                                existingMessages.push(msg);
+                                existingMessages.push(cleanMsg);
+                                console.log(`🔄 群聊[${name}]已存在消息: ${cleanMsg.substring(0, 50)}...`);
                             }
-                            
-                            // 添加到数据记录
-                            QQ_msgjson.群聊[name]["msgs"].push(msg);
                             console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             
                             // *** 修复：使用缓存的群聊元数据保存消息 ***
