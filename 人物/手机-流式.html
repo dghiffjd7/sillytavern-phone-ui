@@ -5049,9 +5049,6 @@
             let isStreamingDisplayActive = false; // 流式传输锁
             let streamingMessageQueue = []; // 流式消息队列
             let currentStreamingProcess = null; // 当前流式传输进程引用
-            
-            // *** 新增：原始回复队列 - 确保流式输出优先级 ***
-            let rawResponseQueue = []; // 存储等待处理的原始AI回复
 
             // *** 新增：流式传输队列管理函数 ***
             
@@ -5092,31 +5089,11 @@
                     console.log(`✅ 队列任务完成: ${task.description}`);
                     isStreamingDisplayActive = false;
                     
-                    // *** 新增：检查并处理原始回复队列 ***
-                    if (streamingMessageQueue.length === 0 && rawResponseQueue.length > 0) {
-                        console.log(`🔄 流式队列已清空，开始处理等待的原始回复队列 (${rawResponseQueue.length}条)`);
-                        const queuedResponse = rawResponseQueue.shift();
-                        console.log(`⏱️ 该回复已等待 ${Date.now() - queuedResponse.timestamp}ms`);
-                        
-                        // 异步处理原始回复，避免阻塞
-                        setTimeout(() => {
-                            ResultHandle(queuedResponse.result, queuedResponse.isRetry);
-                        }, 50);
-                    }
-                    
                     // 处理队列中的下一个任务
                     setTimeout(QQ_ProcessStreamingQueue, 100);
                 }).catch((error) => {
                     console.error(`❌ 队列任务失败: ${task.description}`, error);
                     isStreamingDisplayActive = false;
-                    
-                    // *** 新增：失败时也检查原始回复队列 ***
-                    if (streamingMessageQueue.length === 0 && rawResponseQueue.length > 0) {
-                        const queuedResponse = rawResponseQueue.shift();
-                        setTimeout(() => {
-                            ResultHandle(queuedResponse.result, queuedResponse.isRetry);
-                        }, 50);
-                    }
                     
                     // 即使失败也要处理下一个任务
                     setTimeout(QQ_ProcessStreamingQueue, 500);
@@ -5130,7 +5107,6 @@
                 console.log('🚫 取消所有流式传输任务');
                 isStreamingDisplayActive = false;
                 streamingMessageQueue.length = 0;
-                rawResponseQueue.length = 0; // 清空原始回复队列
                 
                 if (currentStreamingProcess) {
                     clearTimeout(currentStreamingProcess);
@@ -5177,7 +5153,7 @@
                     
                     // 查找或创建已读状态条目
                     let readStatusEntry = entries.find(entry => 
-                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(QQ_READ_STATUS_KEY)
+                        entry.keys.includes(QQ_READ_STATUS_KEY)
                     );
                     
                     if (readStatusEntry) {
@@ -5216,7 +5192,7 @@
                     }
                     
                     const readStatusEntry = entries.find(entry => 
-                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(QQ_READ_STATUS_KEY)
+                        entry.keys.includes(QQ_READ_STATUS_KEY)
                     );
                     
                     if (readStatusEntry && readStatusEntry.content) {
@@ -6832,7 +6808,7 @@
                 
                 const groupsKey = `QQ_分组备份_${charId}`;
                 const groupsEntry = entries.find(entry => 
-                    entry.keys && Array.isArray(entry.keys) && entry.keys.includes(groupsKey)
+                    entry.keys.includes(groupsKey)
                 );
                 
                 let worldbookGroups = 0;
@@ -7575,15 +7551,6 @@
 
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
-                
-                // *** 新增：流式输出优先级检查 ***
-                // 如果当前正在进行流式显示或队列中有待处理的流式任务，将新回复加入等待队列
-                if (isStreamingDisplayActive || streamingMessageQueue.length > 0) {
-                    console.log(`⏸️ 检测到流式显示进行中，将回复加入等待队列`);
-                    rawResponseQueue.push({ result, isRetry, timestamp: Date.now() });
-                    console.log(`📦 原始回复队列长度: ${rawResponseQueue.length}`);
-                    return; // 直接返回，等待流式完成后处理
-                }
                 
                 // *** 新增：异常格式预检测 ***
                 if (result && result.length > 0) {
@@ -21950,12 +21917,11 @@ ${index + 1}. ${space.name}
                             if (isNewMsg) {
                                 newMessages.push(msg);
                                 NewMsgCount++;
-                                // 只有新消息才添加到 QQ_msgjson，避免重复
-                                QQ_msgjson.私聊[str].push(msg);
                             } else {
                                 existingMessages.push(msg);
-                                // 已存在的消息不再重复添加
                             }
+                            
+                            QQ_msgjson.私聊[str].push(msg);
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
                                 if (sp[0] == `${UserName}`) {
@@ -22002,10 +21968,6 @@ ${index + 1}. ${space.name}
                             for (let msg of json.私聊[str]) {
                                 const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
                                 QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
-                                // 确保新消息也被添加到 QQ_msgjson
-                                if (isNewMsg) {
-                                    QQ_msgjson.私聊[str].push(msg);
-                                }
                             }
                             
                             // 如果是首次加载且有消息，在最后添加时间分隔线
@@ -22297,12 +22259,12 @@ ${index + 1}. ${space.name}
                             if (isNewMsg) {
                                 newMessages.push(msg);
                                 NewMsgCount++;
-                                // 只有新消息才添加到 QQ_msgjson，避免重复
-                                QQ_msgjson.群聊[name]["msgs"].push(msg);
                             } else {
                                 existingMessages.push(msg);
-                                // 已存在的消息不再重复添加
                             }
+                            
+                            // 添加到数据记录
+                            QQ_msgjson.群聊[name]["msgs"].push(msg);
                             console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             
                             // *** 修复：使用缓存的群聊元数据保存消息 ***
@@ -22369,10 +22331,6 @@ ${index + 1}. ${space.name}
                             for (let msg of json.群聊[name]["msgs"]) {
                                 const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
                                 QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
-                                // 确保新消息也被添加到 QQ_msgjson
-                                if (isNewMsg) {
-                                    QQ_msgjson.群聊[name]["msgs"].push(msg);
-                                }
                             }
                             
                             // 如果是首次加载且有消息，在最后添加时间分隔线
@@ -27186,7 +27144,7 @@ ${index + 1}. ${space.name}
                     
                     // 查找现有条目
                     let queueEntry = entries.find(entry => 
-                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(queueKey)
+                        entry.keys.includes(queueKey)
                     );
                     
                     if (queueEntry) {
@@ -27244,7 +27202,7 @@ ${index + 1}. ${space.name}
                     
                     // 查找队列数据条目
                     const queueEntry = entries.find(entry => 
-                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(queueKey)
+                        entry.keys.includes(queueKey)
                     );
                     
                     if (!queueEntry || !queueEntry.content) {
