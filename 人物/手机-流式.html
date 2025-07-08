@@ -5079,6 +5079,9 @@
             // *** 新增：当前回复消息保护机制 ***
             let QQ_CurrentReplyMessages = new Set(); // 存储当前AI回复的消息ID，确保不被删除
             
+            // *** 新增：会话开始标记，用于区分历史消息和新消息 ***
+            let QQ_SessionStarted = false; // 标记用户是否已经开始发送消息
+            
             /**
              * 为消息获取下一个序列号（用于保证逻辑顺序）
              * @return {number} 严格递增的序列号
@@ -7514,6 +7517,13 @@
                         
                         // *** 修复：立即将用户消息记录到数据结构中，并分配序列号 ***
                         const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                        
+                        // 标记会话开始
+                        if (!QQ_SessionStarted) {
+                            QQ_SessionStarted = true;
+                            console.log('🚀 会话开始，后续消息将分配序列号');
+                        }
+                        
                         const sequenceId = QQ_GetNextMessageId(); // 为用户消息分配序列号
                         const userMessageBase = `${UserName}--${content}--${currentTime}`;
                         const userMessage = QQ_AddSequenceIdToMessage(userMessageBase, sequenceId);
@@ -21944,38 +21954,12 @@ ${index + 1}. ${space.name}
                         // *** 新策略：确保最新分配序列号的消息（AI新回复）优先保存 ***
                         console.log(`🎯 消息超限，使用智能优先级保存...`);
                         
-                        // 找出最近分配序列号的消息（很可能是AI新回复）
-                        const recentSeqThreshold = QQ_MessageSequence.current() - 100; // 最近100个序列号
-                        const recentlyAssigned = allMessages.filter(msg => 
-                            msg.sequenceId >= recentSeqThreshold || QQ_CurrentReplyMessages.has(msg.sequenceId)
-                        );
-                        const otherMessages = allMessages.filter(msg => 
-                            msg.sequenceId < recentSeqThreshold && !QQ_CurrentReplyMessages.has(msg.sequenceId)
-                        );
+                        // 简化：按序列号排序，保留最新的1000条
+                        const sortedBySequence = QQ_SortMessagesBySequence(allMessages, false); // false = 降序，大的在前
+                        const latestMessages = sortedBySequence.slice(0, 1000); // 保留序列号最大的1000条
+                        console.log(`📊 消息总数: ${allMessages.length}条，保留最新1000条`);
                         
-                        // 统计保护的消息数量
-                        const protectedMessages = allMessages.filter(msg => QQ_CurrentReplyMessages.has(msg.sequenceId));
-                        console.log(`📊 最近分配的消息: ${recentlyAssigned.length}条, 历史消息: ${otherMessages.length}条`);
-                        if (protectedMessages.length > 0) {
-                            console.log(`🛡️ 当前回复保护的消息: ${protectedMessages.length}条`);
-                            protectedMessages.forEach(msg => {
-                                console.log(`   保护消息 [seq:${msg.sequenceId}]: ${msg.sender}: ${msg.content?.substring(0, 30)}...`);
-                            });
-                        }
-                        
-                        // 优先保存最近分配的消息，然后按序列号排序选择其他消息
-                        const sortedOthers = QQ_SortMessagesBySequence(otherMessages, false);
-                        const remainingSlots = 1000 - recentlyAssigned.length;
-                        
-                        let finalMessages = [...recentlyAssigned];
-                        if (remainingSlots > 0) {
-                            finalMessages = finalMessages.concat(sortedOthers.slice(0, remainingSlots));
-                        }
-                        
-                        // 按序列号重新排序最终结果，最新的在前
-                        const sortedMessages = QQ_SortMessagesBySequence(finalMessages, false);
-                        const latestMessages = sortedMessages;
-                        const deletedMessages = allMessages.filter(msg => !finalMessages.includes(msg));
+                        const deletedMessages = allMessages.filter(msg => !latestMessages.includes(msg));
                         
                         // *** 调试：显示被删除的消息信息 ***
                         if (deletedMessages.length > 0) {
@@ -21991,9 +21975,9 @@ ${index + 1}. ${space.name}
                         }
                         
                         // 然后按逻辑序列号升序重新排序用于显示（最早的在前，最新的在后）
-                        // *** 简化：所有消息按序列号顺序排列，序号大的在底部 ***
-                        recentMessages = QQ_SortMessagesBySequence(latestMessages, true);
-                        console.log(`📝 消息已按序列号排序，最小序号: ${recentMessages[0]?.sequenceId || 0}, 最大序号: ${recentMessages[recentMessages.length-1]?.sequenceId || 0}`);
+                        // *** 确保：序列号小的在前（顶部），序列号大的在后（底部） ***
+                        recentMessages = QQ_SortMessagesBySequence(latestMessages, true); // true = 升序
+                        console.log(`📝 消息已按序列号升序排列（新消息在底部），最小序号: ${recentMessages[0]?.sequenceId || 0}, 最大序号: ${recentMessages[recentMessages.length-1]?.sequenceId || 0}`);
                         console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新1000条，删除${allMessages.length - 1000}条旧消息`);
                     }
                     
@@ -22406,10 +22390,10 @@ ${index + 1}. ${space.name}
                                 return existingClean === cleanMsg;
                             });
                             
-                            // *** 修复：为所有新消息分配序列号 ***
-                            if (sequenceId === 0 && isNewMsg) {
-                                sequenceId = QQ_GetNextMessageId(); // 为新消息分配序列号
-                                console.log(`🎯 消息分配序列号 [${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
+                            // *** 修复：只为会话开始后的新消息分配序列号 ***
+                            if (sequenceId === 0 && isNewMsg && QQ_SessionStarted && gening) {
+                                sequenceId = QQ_GetNextMessageId(); // 只为当前会话的AI新消息分配序列号
+                                console.log(`🎯 AI消息分配序列号 [${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
                             if (isNewMsg) {
@@ -22422,11 +22406,7 @@ ${index + 1}. ${space.name}
                                 NewMsgCount++;
                                 QQ_msgjson.私聊[str].push(msgToStore);
                                 
-                                // *** 新增：将当前AI回复消息添加到保护列表 ***
-                                if (sequenceId > 0 && gening) {
-                                    QQ_CurrentReplyMessages.add(sequenceId);
-                                    console.log(`🛡️ 已保护当前AI回复消息序列号: ${sequenceId}`);
-                                }
+                                // 不再需要保护列表，因为有序列号的消息自然会被保留
                                 console.log(`➕ 私聊新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
                             } else {
                                 existingMessages.push(cleanMsg);
@@ -22776,10 +22756,10 @@ ${index + 1}. ${space.name}
                                 return existingClean === cleanMsg;
                             });
                             
-                            // *** 修复：为所有新消息分配序列号 ***
-                            if (sequenceId === 0 && isNewMsg) {
-                                sequenceId = QQ_GetNextMessageId(); // 为新消息分配序列号
-                                console.log(`🎯 群聊消息分配序列号 [${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
+                            // *** 修复：只为会话开始后的新消息分配序列号 ***
+                            if (sequenceId === 0 && isNewMsg && QQ_SessionStarted && gening) {
+                                sequenceId = QQ_GetNextMessageId(); // 只为当前会话的AI新消息分配序列号
+                                console.log(`🎯 AI群聊消息分配序列号 [${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
                             if (isNewMsg) {
@@ -22792,11 +22772,7 @@ ${index + 1}. ${space.name}
                                 NewMsgCount++;
                                 QQ_msgjson.群聊[name]["msgs"].push(msgToStore);
                                 
-                                // *** 新增：将当前AI回复消息添加到保护列表 ***
-                                if (sequenceId > 0 && gening) {
-                                    QQ_CurrentReplyMessages.add(sequenceId);
-                                    console.log(`🛡️ 已保护当前AI群聊消息序列号: ${sequenceId}`);
-                                }
+                                // 不再需要保护列表，因为有序列号的消息自然会被保留
                                 console.log(`➕ 群聊[${name}]新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
                             } else {
                                 existingMessages.push(cleanMsg);
