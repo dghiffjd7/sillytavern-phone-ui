@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>78%</span>
+                    <span>79%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -22179,11 +22179,33 @@ ${index + 1}. ${space.name}
                         const endMarkerIndex = memoryContent.lastIndexOf(endMarker);
                         
                         if (endMarkerIndex !== -1) {
-                            // 在结束标识前插入新内容
-                            memoryContent = memoryContent.substring(0, endMarkerIndex) + 
-                                           newContent + '\n' + 
-                                           memoryContent.substring(endMarkerIndex);
-                            console.log(`✅ 已将${sortedMessages.length}条新消息插入到历史记录结束标识前`);
+                            // *** 修复：查找最后一个时间分隔符，确保插入到正确位置 ***
+                            let contentBeforeEnd = memoryContent.substring(0, endMarkerIndex);
+                            const endMarkerContent = memoryContent.substring(endMarkerIndex);
+                            
+                            // 查找最后一个时间分隔符的位置
+                            const timeSeparatorPattern = /📅\s+\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}/g;
+                            let lastTimeSeparatorIndex = -1;
+                            let match;
+                            
+                            // 找到所有时间分隔符的位置，取最后一个
+                            while ((match = timeSeparatorPattern.exec(contentBeforeEnd)) !== null) {
+                                lastTimeSeparatorIndex = match.index + match[0].length;
+                            }
+                            
+                            if (lastTimeSeparatorIndex !== -1) {
+                                // 在最后一个时间分隔符后插入新内容
+                                const beforeLastSeparator = contentBeforeEnd.substring(0, lastTimeSeparatorIndex);
+                                const afterLastSeparator = contentBeforeEnd.substring(lastTimeSeparatorIndex);
+                                
+                                memoryContent = beforeLastSeparator + '\n\n' + newContent + '\n' + 
+                                               afterLastSeparator + endMarkerContent;
+                                console.log(`✅ 已将${sortedMessages.length}条新消息插入到最后一个时间分隔符后`);
+                            } else {
+                                // 如果没有找到时间分隔符，直接在结束标识前插入
+                                memoryContent = contentBeforeEnd + newContent + '\n' + endMarkerContent;
+                                console.log(`✅ 已将${sortedMessages.length}条新消息插入到历史记录结束标识前（未找到时间分隔符）`);
+                            }
                         } else {
                             // 如果没有找到结束标识，直接追加并添加结束标识
                             if (memoryContent && !memoryContent.endsWith('\n')) {
