@@ -21997,8 +21997,8 @@ ${index + 1}. ${space.name}
                     // *** 获取现有记忆内容并解析已存在的消息 ***
                     let existingMessages = [];
                     const entryComment = '手机-短期记忆-最近对话';
-                    const existingEntry = entries.find(entry => 
-                        entry && entry.comment === entryComment
+                    const existingEntry = Object.values(entries).find(entry => 
+                        entry && entry.comment && entry.comment === entryComment
                     );
                     
                     if (existingEntry && existingEntry.content) {
@@ -22172,10 +22172,21 @@ ${index + 1}. ${space.name}
                     memoryContent += `\n---\n**【历史记录结束】** 以上为历史对话记录，请基于此背景自然地进行当前对话，不要重复上述内容。\n`;
                     
                     // 保存到世界书 - 使用正确的API函数
-                    // 查找现有条目
-                    let memoryEntryForSave = entries.find(entry => 
-                        entry && entry.comment === entryComment
+                    console.log(`🔍 查找现有短期记忆条目，目标comment: "${entryComment}"`);
+                    console.log(`📊 当前世界书条目总数: ${Object.keys(entries).length}`);
+                    
+                    // 调试：列出所有条目的comment
+                    const allComments = Object.values(entries)
+                        .filter(entry => entry && entry.comment)
+                        .map(entry => entry.comment);
+                    console.log('📝 现有条目comments:', allComments);
+                    
+                    // 查找现有条目 - 更严格的搜索
+                    let memoryEntryForSave = Object.values(entries).find(entry => 
+                        entry && entry.comment && entry.comment === entryComment
                     );
+                    
+                    console.log(`🎯 查找结果: ${memoryEntryForSave ? '找到现有条目' : '未找到，将创建新条目'}`);
                     
                     if (memoryEntryForSave) {
                         // 更新现有条目 - 使用setLorebookEntries API
@@ -22190,14 +22201,20 @@ ${index + 1}. ${space.name}
                                 enabled: true,
                                 position: 'before_character_definition'
                             }]);
-                            console.log('✅ 已更新现有短期记忆条目');
+                            console.log(`✅ 已更新现有短期记忆条目 (UID: ${memoryEntryForSave.uid})`);
+                            
+                            // *** 修复：立即更新本地entries缓存 ***
+                            if (entries[memoryEntryForSave.uid]) {
+                                entries[memoryEntryForSave.uid].content = memoryContent;
+                                console.log(`🔄 已更新本地entries缓存中的内容`);
+                            }
                         } else {
                             console.warn('⚠️ setLorebookEntries函数不可用');
                         }
                     } else {
                         // 创建新条目 - 使用createLorebookEntry API
                         if (typeof createLorebookEntry === 'function') {
-                            await createLorebookEntry(worldbook, {
+                            const newEntry = await createLorebookEntry(worldbook, {
                                 comment: entryComment,
                                 keys: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
                                 content: memoryContent,
@@ -22210,6 +22227,12 @@ ${index + 1}. ${space.name}
                                 selective: false
                             });
                             console.log('✅ 已创建新的短期记忆条目');
+                            
+                            // *** 修复：立即更新本地entries缓存 ***
+                            if (newEntry && newEntry.uid) {
+                                entries[newEntry.uid] = newEntry;
+                                console.log(`🔄 已更新本地entries缓存，新条目UID: ${newEntry.uid}`);
+                            }
                         } else {
                             console.warn('⚠️ createLorebookEntry函数不可用');
                         }
