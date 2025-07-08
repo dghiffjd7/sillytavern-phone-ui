@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>79%</span>
+                    <span>80%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -21788,26 +21788,16 @@ ${index + 1}. ${space.name}
                     
                     // *** 新策略：增量更新 + 滚动式存储 ***
                     
-                    // 第一步：从世界书获取现有记忆
-                    let existingMemoryMessages = [];
+                    // 第一步：检查是否存在现有记忆（不解析内容，只检查存在性）
                     const memoryKeys = ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'];
                     const memoryEntry = entries.find(entry => 
                         entry.keys && Array.isArray(entry.keys) && entry.keys.some(key => memoryKeys.includes(key))
                     );
                     
                     if (memoryEntry && memoryEntry.content) {
-                        console.log('📚 找到现有短期记忆条目');
-                        // 解析现有记忆中的序列号信息（简化处理）
-                        const lines = memoryEntry.content.split('\n').filter(line => line.trim());
-                        existingMemoryMessages = lines.map((line, index) => ({
-                            type: '记忆',
-                            content: line,
-                            sequenceId: QQ_LastProcessedSequenceId - lines.length + index + 1, // 估算序列号
-                            isFromMemory: true
-                        }));
-                        console.log(`📝 从记忆恢复 ${existingMemoryMessages.length} 条消息`);
+                        console.log('📚 找到现有短期记忆条目，将直接在现有内容基础上追加新消息');
                     } else {
-                        console.log('🆕 未找到现有记忆，从空开始');
+                        console.log('🆕 未找到现有记忆，将创建新记忆');
                     }
                     
                     // 第二步：收集新消息（只收集序列号大于上次处理的）
@@ -22183,13 +22173,18 @@ ${index + 1}. ${space.name}
                     
                     // *** 将新内容插入到结束标识前面 ***
                     if (newContent.trim()) {
-                        // 查找现有的结束标识位置
-                        const endMarker = `---\n**【历史记录结束】** 以上为历史对话记录，请基于此背景自然地进行当前对话，不要重复上述内容。`;
-                        const endMarkerIndex = memoryContent.lastIndexOf(endMarker);
+                        // 使用更健壮的方法查找结束标识
+                        const endMarkerPattern = /---\s*\*\*【历史记录结束】\*\*/;
+                        const endMarkerMatch = memoryContent.match(endMarkerPattern);
                         
-                        if (endMarkerIndex !== -1) {
-                            // *** 修复：完全替换结束标识段落，避免内容被覆盖 ***
+                        console.log(`🔍 查找结束标识结果: ${endMarkerMatch ? '找到' : '未找到'}`);
+                        console.log(`📝 记忆内容长度: ${memoryContent.length}, 新内容长度: ${newContent.length}`);
+                        
+                        if (endMarkerMatch) {
+                            // 找到结束标识，在其前面插入新内容
+                            const endMarkerIndex = endMarkerMatch.index;
                             const contentBeforeEnd = memoryContent.substring(0, endMarkerIndex);
+                            const endMarkerContent = memoryContent.substring(endMarkerIndex);
                             
                             // 确保内容以换行结尾
                             let finalContent = contentBeforeEnd;
@@ -22197,17 +22192,18 @@ ${index + 1}. ${space.name}
                                 finalContent += '\n';
                             }
                             
-                            // 完全替换结束标识段落，添加新内容和新的结束标识
-                            memoryContent = finalContent + newContent + '\n' + endMarker;
-                            console.log(`✅ 已将${sortedMessages.length}条新消息追加到历史记录末尾`);
+                            // 在结束标识前插入新内容
+                            memoryContent = finalContent + newContent + '\n' + endMarkerContent;
+                            console.log(`✅ 已将${sortedMessages.length}条新消息追加到历史记录末尾（保留现有内容）`);
                         } else {
                             // 如果没有找到结束标识，直接追加并添加结束标识
+                            console.log(`⚠️ 未找到结束标识，将在末尾追加新内容`);
                             if (memoryContent && !memoryContent.endsWith('\n')) {
                                 memoryContent += '\n';
                             }
                             memoryContent += newContent;
                             memoryContent += `\n---\n**【历史记录结束】** 以上为历史对话记录，请基于此背景自然地进行当前对话，不要重复上述内容。\n`;
-                            console.log(`✅ 已将${sortedMessages.length}条新消息追加到短期记忆底部（首次创建）`);
+                            console.log(`✅ 已将${sortedMessages.length}条新消息追加到短期记忆底部（首次创建/修复）`);
                         }
                     }
                     
