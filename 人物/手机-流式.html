@@ -21998,32 +21998,10 @@ ${index + 1}. ${space.name}
                     let existingMessages = [];
                     const entryComment = '手机-短期记忆-最近对话';
                     
-                    // *** 使用与保存时相同的搜索策略 ***
-                    const existingEntry = Object.values(entries).find(entry => {
-                        if (!entry) return false;
-                        
-                        // 方式1：通过comment查找
-                        if (entry.comment === entryComment) return true;
-                        
-                        // 方式2：通过keys查找
-                        const keys = entry.keys || entry.key || [];
-                        const keyArray = Array.isArray(keys) ? keys : [keys];
-                        const hasMemoryKeys = keyArray.some(key => 
-                            key && (
-                                key.includes('短期记忆') || 
-                                key.includes('最近对话') || 
-                                key === '短期记忆-最近对话'
-                            )
-                        );
-                        if (hasMemoryKeys) return true;
-                        
-                        // 方式3：通过内容特征查找
-                        if (entry.content && entry.content.includes('【历史对话记录 - 仅供参考，请勿重复】')) return true;
-                        
-                        return false;
-                    });
+                    // *** 使用与聊天备份相同的简单查找方式 ***
+                    const existingEntry = entries.find(entry => entry.comment === entryComment);
                     
-                    console.log(`🔍 初始查找现有记忆条目: ${existingEntry ? `找到 (UID: ${existingEntry.uid}, comment: "${existingEntry.comment}")` : '未找到'}`);
+                    console.log(`🔍 初始查找现有记忆条目: ${existingEntry ? `找到 (UID: ${existingEntry.uid})` : '未找到'}`);
                     
                     if (existingEntry && existingEntry.content) {
                         // 从现有内容中解析消息 (简化版本，只计算消息数量)
@@ -22195,103 +22173,38 @@ ${index + 1}. ${space.name}
                     // 添加历史记录结束标识
                     memoryContent += `\n---\n**【历史记录结束】** 以上为历史对话记录，请基于此背景自然地进行当前对话，不要重复上述内容。\n`;
                     
-                    // 保存到世界书 - 使用正确的API函数
+                    // *** 采用与聊天备份完全相同的成功模式 ***
                     console.log(`🔍 查找现有短期记忆条目，目标comment: "${entryComment}"`);
-                    console.log(`📊 当前世界书条目总数: ${Object.keys(entries).length}`);
                     
-                    // 调试：列出所有条目的comment
-                    const allComments = Object.values(entries)
-                        .filter(entry => entry && entry.comment)
-                        .map(entry => entry.comment);
-                    console.log('📝 现有条目comments:', allComments);
-                    
-                    // *** 改进搜索：通过comment和keys多种方式查找 ***
-                    let memoryEntryForSave = Object.values(entries).find(entry => {
-                        if (!entry) return false;
-                        
-                        // 方式1：通过comment查找
-                        if (entry.comment === entryComment) {
-                            console.log(`✅ 通过comment找到现有条目: ${entry.comment}`);
-                            return true;
-                        }
-                        
-                        // 方式2：通过keys查找包含短期记忆相关关键词的条目
-                        const keys = entry.keys || entry.key || [];
-                        const keyArray = Array.isArray(keys) ? keys : [keys];
-                        const hasMemoryKeys = keyArray.some(key => 
-                            key && (
-                                key.includes('短期记忆') || 
-                                key.includes('最近对话') || 
-                                key === '短期记忆-最近对话'
-                            )
-                        );
-                        
-                        if (hasMemoryKeys) {
-                            console.log(`✅ 通过keys找到疑似短期记忆条目: comment="${entry.comment}", keys=${JSON.stringify(keyArray)}`);
-                            return true;
-                        }
-                        
-                        // 方式3：通过内容特征查找（包含特定标题的条目）
-                        if (entry.content && entry.content.includes('【历史对话记录 - 仅供参考，请勿重复】')) {
-                            console.log(`✅ 通过内容特征找到短期记忆条目: comment="${entry.comment}"`);
-                            return true;
-                        }
-                        
-                        return false;
-                    });
+                    // 使用与聊天备份相同的简单查找方式
+                    let memoryEntryForSave = entries.find(entry => entry.comment === entryComment);
                     
                     console.log(`🎯 查找结果: ${memoryEntryForSave ? `找到现有条目 (UID: ${memoryEntryForSave.uid})` : '未找到，将创建新条目'}`);
                     
                     if (memoryEntryForSave) {
-                        // 更新现有条目 - 使用setLorebookEntries API
-                        if (typeof setLorebookEntries === 'function') {
-                            await setLorebookEntries(worldbook, [{
-                                uid: memoryEntryForSave.uid,
-                                comment: entryComment, // *** 确保comment字段被正确设置 ***
-                                content: memoryContent,
-                                keys: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
-                                type: 'constant',
-                                selective: false,
-                                order: 1000,
-                                enabled: true,
-                                position: 'before_character_definition'
-                            }]);
-                            console.log(`✅ 已更新现有短期记忆条目 (UID: ${memoryEntryForSave.uid})`);
-                            
-                            // *** 修复：立即更新本地entries缓存 ***
-                            if (entries[memoryEntryForSave.uid]) {
-                                entries[memoryEntryForSave.uid].content = memoryContent;
-                                entries[memoryEntryForSave.uid].comment = entryComment; // 同步更新comment
-                                console.log(`🔄 已更新本地entries缓存中的内容和comment`);
-                            }
-                        } else {
-                            console.warn('⚠️ setLorebookEntries函数不可用');
-                        }
+                        // *** 使用与聊天备份相同的更新方式 - 只更新content ***
+                        await setLorebookEntries(worldbook, [{
+                            uid: memoryEntryForSave.uid,
+                            content: memoryContent,
+                        }]);
+                        console.log('短期记忆已更新到现有worldbook条目');
                     } else {
-                        // 创建新条目 - 使用createLorebookEntry API
-                        if (typeof createLorebookEntry === 'function') {
-                            const newEntry = await createLorebookEntry(worldbook, {
-                                comment: entryComment,
-                                keys: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
-                                content: memoryContent,
-                                position: 'before_character_definition',  // 在角色定义前
-                                type: 'constant',  // 常驻类型
-                                depth: null,
-                                exclude_recursion: true,
-                                order: 1000,  // 高优先级
-                                enabled: true,
-                                selective: false
-                            });
-                            console.log('✅ 已创建新的短期记忆条目');
-                            
-                            // *** 修复：立即更新本地entries缓存 ***
-                            if (newEntry && newEntry.uid) {
-                                entries[newEntry.uid] = newEntry;
-                                console.log(`🔄 已更新本地entries缓存，新条目UID: ${newEntry.uid}`);
-                            }
-                        } else {
-                            console.warn('⚠️ createLorebookEntry函数不可用');
-                        }
+                        // *** 使用与聊天备份完全相同的创建方式 ***
+                        await createLorebookEntry(worldbook, {
+                            comment: entryComment,
+                            key: ["短期记忆-最近对话", "最近对话", "短期记忆", "对话历史", "聊天记录"],
+                            content: memoryContent,
+                            position: "before_character_definition", 
+                            type: "constant",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 1000,
+                            enabled: true,
+                        });
+                        console.log('短期记忆已保存到新worldbook条目');
+                        
+                        // *** 关键：使用与聊天备份相同的entries刷新方式 ***
+                        entries = await getLorebookEntries(worldbook);
                     }
                     
                     // 保存世界书 - 使用与其他功能相同的方式
