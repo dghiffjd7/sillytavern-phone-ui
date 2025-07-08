@@ -21486,22 +21486,45 @@ ${index + 1}. ${space.name}
             function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
                 console.log(`🌊 开始流式显示 ${fullMessages.length} 条完整消息 - 聊天: ${chatName}`);
                 
-                // 检查容器是否存在
+                // 检查容器是否存在（修复：支持在隐藏的聊天页面中查找容器）
                 if (!chatContainer || !chatContainer.parentElement) {
                     console.error('❌ 聊天容器不存在或已被移除，无法显示消息');
                     console.log('🔍 尝试查找聊天容器...');
                     
-                    // 尝试重新获取容器
+                    // 尝试重新获取容器（修复：即使在隐藏的聊天页面中也要能找到容器）
                     const selector = QQ_Groups.includes(chatName) 
                         ? `#QQ_chat_${chatName.replace(/[\s:]/g, '_')} .msgcontent`
                         : `#QQ_chat_${chatName} .msgcontent`;
                     chatContainer = document.querySelector(selector);
+                    
+                    // *** 修复：如果直接选择器找不到，尝试在所有聊天页面中查找（包括隐藏的） ***
+                    if (!chatContainer) {
+                        console.log('🔍 直接选择器未找到容器，尝试在所有聊天页面中查找...');
+                        const allChatPages = document.querySelectorAll('.QQ_chat_page');
+                        for (const page of allChatPages) {
+                            const pageName = page.getAttribute('data-name');
+                            if (pageName === chatName) {
+                                chatContainer = page.querySelector('.msgcontent');
+                                if (chatContainer) {
+                                    console.log('✅ 在隐藏的聊天页面中找到容器:', pageName);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     
                     if (!chatContainer) {
                         console.error('❌ 无法找到聊天容器:', selector);
                         return Promise.reject(new Error('聊天容器不存在'));
                     }
                     console.log('✅ 成功重新获取聊天容器');
+                }
+                
+                // *** 修复：对于多私聊场景，如果容器所在页面是隐藏的，我们仍然要显示消息 ***
+                const chatPage = chatContainer.closest('.QQ_chat_page');
+                const isHiddenPage = chatPage && (chatPage.style.display === 'none' || chatPage.getAttribute('style')?.includes('display: none'));
+                if (isHiddenPage) {
+                    console.log(`🔍 检测到隐藏的聊天页面，仍将继续流式显示消息: ${chatName}`);
                 }
                 
                 return new Promise((resolve, reject) => {
