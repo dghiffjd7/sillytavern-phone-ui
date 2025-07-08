@@ -6000,6 +6000,32 @@
                         }
                     }
                     
+                    // *** 新增：移除序列号标识符，避免在worldbook备份中保存 ***
+                    if (cleanedMsgjson.私聊) {
+                        for (const chatKey in cleanedMsgjson.私聊) {
+                            if (Array.isArray(cleanedMsgjson.私聊[chatKey])) {
+                                cleanedMsgjson.私聊[chatKey] = cleanedMsgjson.私聊[chatKey].map(msg => {
+                                    // 移除序列号标识符 ##seq_数字##
+                                    return msg.replace(/##seq_\d+##$/g, '');
+                                });
+                            }
+                        }
+                    }
+                    
+                    if (cleanedMsgjson.群聊) {
+                        for (const groupKey in cleanedMsgjson.群聊) {
+                            const group = cleanedMsgjson.群聊[groupKey];
+                            if (group && Array.isArray(group.msgs)) {
+                                group.msgs = group.msgs.map(msg => {
+                                    // 移除序列号标识符 ##seq_数字##
+                                    return msg.replace(/##seq_\d+##$/g, '');
+                                });
+                            }
+                        }
+                    }
+                    
+                    console.log('✅ 已从备份数据中移除序列号标识符');
+                    
                     // 创建备份数据结构，包含时间戳和完整聊天数据
                     QQ_ChatBackup = {
                         lastUpdated: new Date().toISOString(),
@@ -22005,13 +22031,23 @@ ${index + 1}. ${space.name}
                     // 使用渲染顺序显示（已按渲染顺序排序，最早渲染的在前）
                     const sortedMessages = recentMessages;
                     
-                    for (const msg of sortedMessages) {
+                    // *** 新增：对话回合跟踪和时间分隔符 ***
+                    let lastUserMessageTime = null;
+                    let hasAIReplyAfterUser = false;
+                    let lastRoundTime = null;
+                    
+                    for (let i = 0; i < sortedMessages.length; i++) {
+                        const msg = sortedMessages[i];
+                        const isUserMessage = msg.sender === UserName;
+                        
                         // 为用户消息格式化时间（去掉秒数）
                         let displayTime = msg.time;
-                        if (msg.sender === UserName && msg.time) {
+                        if (isUserMessage && msg.time) {
                             // 如果是用户发送的消息，只显示到分钟
                             displayTime = QQ_FormatTimeToMinutes(msg.time);
                         }
+                        
+                        // 添加消息内容
                         if (msg.type === '私聊') {
                             memoryContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
                         } else if (msg.type === '群聊') {
@@ -22020,6 +22056,48 @@ ${index + 1}. ${space.name}
                             memoryContent += `[${displayTime}] ${msg.sender}${msg.content}\n`;
                         } else if (msg.type === '动态评论') {
                             memoryContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
+                        }
+                        
+                        // *** 对话回合检测逻辑 ***
+                        if (isUserMessage) {
+                            // 记录用户消息时间
+                            lastUserMessageTime = msg.timestamp || Date.now();
+                            hasAIReplyAfterUser = false;
+                        } else {
+                            // 这是AI消息
+                            if (lastUserMessageTime && !hasAIReplyAfterUser) {
+                                hasAIReplyAfterUser = true;
+                            }
+                        }
+                        
+                        // 检查是否需要添加时间分隔符（回合结束）
+                        const nextMsg = sortedMessages[i + 1];
+                        const shouldAddTimeSeparator = 
+                            hasAIReplyAfterUser && // 已有AI回复
+                            lastUserMessageTime && // 有用户消息时间
+                            (!nextMsg || nextMsg.sender === UserName); // 下一条是用户消息或没有下一条
+                        
+                        if (shouldAddTimeSeparator) {
+                            // 使用AI回复的时间作为回合结束时间
+                            const roundEndTime = msg.timestamp || Date.now();
+                            const timeStr = new Date(roundEndTime).toLocaleString('zh-CN', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
+                            
+                            // 避免重复添加相同时间的分隔符
+                            if (lastRoundTime !== timeStr) {
+                                memoryContent += `\n📅 ${timeStr}\n\n`;
+                                lastRoundTime = timeStr;
+                                console.log(`🕒 已添加对话回合时间分隔符: ${timeStr}`);
+                            }
+                            
+                            // 重置状态
+                            lastUserMessageTime = null;
+                            hasAIReplyAfterUser = false;
                         }
                     }
                     
