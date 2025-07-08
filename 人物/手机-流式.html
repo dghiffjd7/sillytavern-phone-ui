@@ -7397,35 +7397,16 @@
                 $(element).val("");
                 
                 // *** 新增：立即将缓存的用户消息保存到数据结构和世界书 ***
-                const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-                const userMessage = `${UserName}--${content}--${currentTime}`;
-                
+                // *** 修复：只缓存消息，不立即保存到数据结构 ***
                 if (QQ_Groups.includes(name)) {
                     QQ_CacheSendMsg += `\n在群聊${name}中发送:${content}`;
-                    
-                    // *** 新增：保存群聊缓存消息到数据结构 ***
-                    if (!QQ_msgjson.群聊[name]) {
-                        QQ_msgjson.群聊[name] = { msgs: [] };
-                    }
-                    if (!QQ_msgjson.群聊[name].msgs.includes(userMessage)) {
-                        QQ_msgjson.群聊[name].msgs.push(userMessage);
-                        console.log(`✅ 群聊缓存消息已保存到数据结构: ${userMessage}`);
-                    }
+                    console.log(`📝 群聊消息已缓存: ${content}`);
                 } else {
                     QQ_CacheSendMsg += `\n给${name}发消息:${content}`;
-                    
-                    // *** 新增：保存私聊缓存消息到数据结构 ***
-                    QQ_SaveUserMessageToPrivateChat(name, userMessage);
-                    console.log(`✅ 私聊缓存消息已保存到数据结构: ${userMessage}`);
+                    console.log(`📝 私聊消息已缓存: ${content}`);
                 }
                 
-                // *** 新增：立即保存缓存消息到世界书 ***
-                try {
-                    await QQ_Save_Chat_Backup();
-                    console.log(`✅ 缓存消息已保存到世界书: ${userMessage}`);
-                } catch (error) {
-                    console.error('❌ 保存缓存消息到世界书失败:', error);
-                }
+                console.log(`📋 当前缓存内容: ${QQ_CacheSendMsg}`);
             }
             /**
              * 重roll消息
@@ -7541,47 +7522,77 @@
                         $container.find(".msgcontent").append(html).scrollTop($container.find(".msgcontent")[0].scrollHeight);
                         input.val("");
                         
-                        // *** 修复：立即将用户消息记录到数据结构中，并分配序列号 ***
-                        const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-                        
+                        // *** 修复：处理所有用户消息（包括缓存的消息） ***
                         // 标记会话开始
                         if (!QQ_SessionStarted) {
                             QQ_SessionStarted = true;
                             console.log('🚀 会话开始，后续消息将分配序列号');
                         }
                         
-                        const sequenceId = QQ_GetNextMessageId(); // 为用户消息分配序列号
-                        const userMessageBase = `${UserName}--${content}--${currentTime}`;
-                        const userMessage = QQ_AddSequenceIdToMessage(userMessageBase, sequenceId);
-                        console.log(`🔢 用户消息分配序列号 [${sequenceId}]: ${content.substring(0, 30)}...`);
+                        // 组合所有消息：缓存消息 + 当前消息
+                        const allUserMessages = [];
+                        const currentTime = new Date().toLocaleTimeString('zh-CN', { hour12: false });
                         
-                        if (QQ_Groups.includes(name)) {
-                            // 群聊消息
-                            if (!QQ_msgjson.群聊[name]) {
-                                QQ_msgjson.群聊[name] = { msgs: [] };
+                        // 处理缓存的消息
+                        if (QQ_CacheSendMsg) {
+                            const namevalue = QQ_GetValueName(QQ_CacheSendMsg);
+                            if (namevalue) {
+                                for (const match of namevalue) {
+                                    allUserMessages.push({
+                                        name: match.name,
+                                        content: match.message,
+                                        time: currentTime,
+                                        isGroup: QQ_Groups.includes(match.name)
+                                    });
+                                }
                             }
-                            if (!QQ_msgjson.群聊[name].msgs.includes(userMessage)) {
-                                QQ_msgjson.群聊[name].msgs.push(userMessage);
-                            }
-                        } else {
-                            // *** 修复：使用更稳定的私聊消息存储机制 ***
-                            QQ_SaveUserMessageToPrivateChat(name, userMessage);
                         }
+                        
+                        // 添加当前输入的消息
+                        if (content) {
+                            allUserMessages.push({
+                                name: name,
+                                content: content,
+                                time: currentTime,
+                                isGroup: QQ_Groups.includes(name)
+                            });
+                        }
+                        
+                        // 为所有消息分配序列号并保存
+                        for (const msgInfo of allUserMessages) {
+                            const sequenceId = QQ_GetNextMessageId();
+                            const userMessageBase = `${UserName}--${msgInfo.content}--${msgInfo.time}`;
+                            const userMessage = QQ_AddSequenceIdToMessage(userMessageBase, sequenceId);
+                            console.log(`🔢 用户消息分配序列号 [${sequenceId}]: ${msgInfo.content.substring(0, 30)}...`);
+                            
+                            if (msgInfo.isGroup) {
+                                // 群聊消息
+                                if (!QQ_msgjson.群聊[msgInfo.name]) {
+                                    QQ_msgjson.群聊[msgInfo.name] = { msgs: [] };
+                                }
+                                if (!QQ_msgjson.群聊[msgInfo.name].msgs.includes(userMessage)) {
+                                    QQ_msgjson.群聊[msgInfo.name].msgs.push(userMessage);
+                                }
+                            } else {
+                                // 私聊消息
+                                QQ_SaveUserMessageToPrivateChat(msgInfo.name, userMessage);
+                            }
+                        }
+                        
+                        // 清空缓存
+                        QQ_CacheSendMsg = "";
+                        console.log(`📝 已清空消息缓存`);
                         
                         // *** 新增：立即保存数据到世界书，确保持久化 ***
                         await QQ_Save_Chat_Backup();
-                        console.log(`✅ 用户消息已记录并保存: ${userMessage}`);
+                        console.log(`✅ 所有用户消息已记录并保存，共 ${allUserMessages.length} 条`);
                     }
-                    // *** 修复：更安全的缓存消息处理 ***
-                    // 保存当前缓存内容，避免过早清空
-                    const currentCache = QQ_CacheSendMsg;
-                    value = currentCache;
+                    // *** 修复：使用处理后的value（缓存已在上面清空） ***
+                    value = QQ_CacheSendMsg; // 这时候缓存已经被清空，使用空字符串
                     if (content) {
-                        const actionText = QQ_Groups.includes(name) ? `\n在群聊"${name}"中发送:${content}` : `\n给${name}发消息:${content}`;
-                        value += actionText;
+                        const actionText = QQ_Groups.includes(name) ? `在群聊"${name}"中发送:${content}` : `给${name}发消息:${content}`;
+                        value = actionText; // 直接使用当前消息的action文本
                     }
-                    // *** 修复：只在确认消息已经处理后才清空缓存 ***
-                    // 不在这里清空，等待AI回复处理完成后再清空
                         } else {
                     name = SendName || "未知用户";
                     content = SendValue;
@@ -21851,6 +21862,10 @@ ${index + 1}. ${space.name}
                                         console.log(`🔄 短期记忆私聊分配序列号 [${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
                                     }
                                     
+                                    // *** 修复：确保时间戳反映序列号顺序 ***
+                                    // 使用序列号作为基础时间戳，确保消息按发送顺序排列
+                                    const baseTimestamp = sequenceId > 0 ? sequenceId : QQ_ParseTime(timeStr);
+                                    
                                     newMessages.push({
                                         type: '私聊',
                                         sender: senderName,
@@ -21861,7 +21876,7 @@ ${index + 1}. ${space.name}
                                         arrayIndex: i,
                                         globalIndex: messageIndex++,
                                         sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
-                                        timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
+                                        timestamp: baseTimestamp // 使用序列号确保正确排序
                                     });
                                 }
                             }
@@ -21898,6 +21913,9 @@ ${index + 1}. ${space.name}
                                             console.log(`🔄 短期记忆群聊分配序列号 [${sequenceId}]: ${content.substring(0, 30)}...`);
                                         }
                                         
+                                        // *** 修复：确保时间戳反映序列号顺序 ***
+                                        const baseTimestamp = sequenceId > 0 ? sequenceId : QQ_ParseTime(timeStr);
+                                        
                                         newMessages.push({
                                             type: '群聊',
                                             sender: senderName,
@@ -21907,7 +21925,7 @@ ${index + 1}. ${space.name}
                                             arrayIndex: i,
                                             globalIndex: messageIndex++,
                                             sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
-                                            timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
+                                            timestamp: baseTimestamp // 使用序列号确保正确排序
                                         });
                                     }
                                 }
