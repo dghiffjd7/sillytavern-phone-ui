@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>82%</span>
+                    <span>83%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -22010,117 +22010,27 @@ ${index + 1}. ${space.name}
                     console.log(`🔍 初始查找现有记忆条目: ${existingEntry ? `找到 (UID: ${existingEntry.uid})` : '未找到'}`);
                     
                     if (existingEntry && existingEntry.content) {
-                        // *** 调试：显示世界书的完整内容 ***
-                        console.log(`🔍 [调试] 世界书条目完整内容 (长度: ${existingEntry.content.length}):`);
-                        console.log(`📄 内容前500字符: "${existingEntry.content.substring(0, 500)}..."`);
-                        
-                        // 从现有内容中解析消息 (简化版本，只计算消息数量)
-                        const contentLines = existingEntry.content.split('\n');
-                        console.log(`📊 [调试] 总行数: ${contentLines.length}`);
-                        
-                        const messageLines = contentLines.filter(line => 
-                            line.includes('] ') && 
-                            (line.includes('说:') || line.includes('评论') || line.includes('发布动态'))
-                        );
-                        console.log(`📖 现有记忆中包含 ${messageLines.length} 条历史消息`);
-                        
-                        // *** 调试：显示找到的所有消息行 ***
-                        console.log(`🔍 [调试] 找到的消息行:`);
-                        messageLines.forEach((line, index) => {
-                            console.log(`  ${index + 1}. ${line.substring(0, 80)}...`);
-                        });
-                        
-                        // 计算总消息数量
-                        const totalMessageCount = messageLines.length + sortedNewMessages.length;
-                        
-                        // 如果超过1000条限制，需要删除旧内容
-                        if (totalMessageCount > 1000) {
-                            const deleteCount = totalMessageCount - 1000;
-                            console.log(`🔄 消息总数(${totalMessageCount})超过上限，将删除最旧的${deleteCount}条消息`);
-                            
-                            // 重新构建内容，跳过最旧的消息
-                            const keepLines = [];
-                            let messageCounter = 0;
-                            let skipCount = deleteCount;
-                            
-                            for (const line of contentLines) {
-                                if (line.includes('] ') && (line.includes('说:') || line.includes('评论') || line.includes('发布动态'))) {
-                                    if (skipCount > 0) {
-                                        skipCount--;
-                                        continue; // 跳过这条旧消息
-                                    }
-                                }
-                                keepLines.push(line);
-                            }
-                            
-                            // 更新现有内容为保留的行
-                            existingEntry.content = keepLines.join('\n');
-                            console.log(`✂️ 已删除${deleteCount}条旧消息，保留${1000 - sortedNewMessages.length}条历史消息`);
-                        }
+                        console.log(`📖 找到现有记忆条目，长度: ${existingEntry.content.length}，使用直接插入方式`);
                     }
                     
-                    // 将新消息作为要处理的消息
-                    let recentMessages = sortedNewMessages;
+                    // *** 采用类似聊天备份的直接插入方式 ***
+                    console.log(`💾 短期记忆滚动更新：将添加${sortedNewMessages.length}条新消息`);
                     
-                    console.log(`💾 短期记忆滚动更新：将添加${recentMessages.length}条新消息`);
-                    
-                    // *** 滚动式内容更新：获取现有内容或创建新内容 ***
-                    let memoryContent = '';
-                    
-                    if (existingEntry && existingEntry.content) {
-                        // 使用现有内容作为基础
-                        memoryContent = existingEntry.content;
-                        
-                        // 更新记录信息部分
-                        const infoRegex = /\*\*记录信息：\*\*[\s\S]*?(?=\*\*历史对话内容：\*\*)/;
-                        const totalMessages = (existingEntry.content.match(/\[.*?\] .*?说:/g) || []).length + recentMessages.length;
-                        const newInfo = `**记录信息：**
-- 更新时间: ${now.toLocaleString('zh-CN')}
-- 保存条数: ${totalMessages}/1000 条历史消息 (滚动式更新)
-
-`;
-                        memoryContent = memoryContent.replace(infoRegex, newInfo);
-                        console.log(`📝 基于现有内容追加${recentMessages.length}条新消息`);
-                    } else {
-                        // 创建新的内容结构
-                        memoryContent = `# 【历史对话记录 - 仅供参考，请勿重复】
-
-**重要说明：**
-- 这是最近的历史对话记录，仅用于了解上下文和角色关系
-- 请不要在回复中重复或复述这些历史内容
-- 请基于这些背景信息自然地继续当前对话
-
----
-
-**记录信息：**
-- 更新时间: ${now.toLocaleString('zh-CN')}
-- 保存条数: ${recentMessages.length}/1000 条历史消息 (新建记忆)
-
-**历史对话内容：**
-
-`;
-                        console.log(`📝 创建新的短期记忆结构`);
-                    }
-                    
-                    // *** 只添加新消息到内容末尾 ***
+                    // *** 格式化新消息内容 ***
                     let newContent = '';
-                    
-                    // *** 只处理新消息：按序列号排序的新消息 ***
-                    const sortedMessages = recentMessages;
                     
                     // *** 对话回合跟踪和时间分隔符 ***
                     let lastUserMessageTime = null;
                     let hasAIReplyAfterUser = false;
                     let lastRoundTime = null;
                     
-                    for (let i = 0; i < sortedMessages.length; i++) {
-                        const msg = sortedMessages[i];
+                    for (let i = 0; i < sortedNewMessages.length; i++) {
+                        const msg = sortedNewMessages[i];
                         const isUserMessage = msg.sender === UserName;
                         
                         // 为用户消息格式化时间（去掉秒数）
                         let displayTime = msg.time;
                         if (isUserMessage && msg.time) {
-                            // 如果是用户发送的消息，只显示到分钟
                             displayTime = QQ_FormatTimeToMinutes(msg.time);
                         }
                         
@@ -22137,25 +22047,24 @@ ${index + 1}. ${space.name}
                         
                         // *** 对话回合检测逻辑 ***
                         if (isUserMessage) {
-                            // 记录用户消息时间
-                            lastUserMessageTime = msg.timestamp || Date.now();
+                            lastUserMessageTime = msg.time;
                             hasAIReplyAfterUser = false;
                         } else {
-                            // 这是AI消息
+                            // AI回复
                             if (lastUserMessageTime && !hasAIReplyAfterUser) {
                                 hasAIReplyAfterUser = true;
                             }
                         }
                         
-                        // 检查是否需要添加时间分隔符（回合结束）
-                        const nextMsg = sortedMessages[i + 1];
-                        const shouldAddTimeSeparator = 
-                            hasAIReplyAfterUser && // 已有AI回复
-                            lastUserMessageTime && // 有用户消息时间
-                            (!nextMsg || nextMsg.sender === UserName); // 下一条是用户消息或没有下一条
+                        // *** 在对话回合结束后添加时间分隔符 ***
+                        const isLastMessage = i === sortedNewMessages.length - 1;
+                        const nextMessage = !isLastMessage ? sortedNewMessages[i + 1] : null;
+                        const nextIsUser = nextMessage ? nextMessage.sender === UserName : false;
+                        
+                        // 在AI回复后，如果下一条是用户消息或者是最后一条消息，则添加时间分隔符
+                        const shouldAddTimeSeparator = !isUserMessage && hasAIReplyAfterUser && (nextIsUser || isLastMessage);
                         
                         if (shouldAddTimeSeparator) {
-                            // *** 修复：使用消息的实际时间而不是timestamp ***
                             const msgTime = msg.time || QQ_GetTime();
                             const now = new Date();
                             
@@ -22185,6 +22094,34 @@ ${index + 1}. ${space.name}
                             lastUserMessageTime = null;
                             hasAIReplyAfterUser = false;
                         }
+                    }
+                    
+                    // *** 直接插入方式：类似聊天备份 ***
+                    let memoryContent = '';
+                    
+                    if (existingEntry && existingEntry.content) {
+                        // 直接使用现有内容，不解析不重构
+                        memoryContent = existingEntry.content;
+                        console.log(`📝 使用现有内容作为基础，准备直接插入新消息`);
+                    } else {
+                        // 创建新的内容结构
+                        memoryContent = `# 【历史对话记录 - 仅供参考，请勿重复】
+
+**重要说明：**
+- 这是最近的历史对话记录，仅用于了解上下文和角色关系
+- 请不要在回复中重复或复述这些历史内容
+- 请基于这些背景信息自然地继续当前对话
+
+---
+
+**记录信息：**
+- 更新时间: ${now.toLocaleString('zh-CN')}
+- 保存条数: ${sortedNewMessages.length}/1000 条历史消息 (新建记忆)
+
+**历史对话内容：**
+
+`;
+                        console.log(`📝 创建新的短期记忆结构`);
                     }
                     
                     // *** 将新内容插入到结束标识前面 ***
