@@ -8787,7 +8787,41 @@
                 const extractedInfo = QQ_ExtractValidInfo(result);
                 if (extractedInfo.hasValidInfo) {
                     console.log("✅ 智能提取成功，转换为标准格式");
-                    console.log(`📊 提取统计: 群聊${extractedInfo.messages.length}条, 私聊${extractedInfo.privateMessages.length}条, 动态${extractedInfo.dynamics.length}条`);
+                    // *** 增强统计信息显示 ***
+                    const privateChatCount = extractedInfo.privateChats ? Object.keys(extractedInfo.privateChats).length : 0;
+                    const legacyPrivateCount = extractedInfo.privateMessages ? extractedInfo.privateMessages.length : 0;
+                    const groupChatCount = extractedInfo.groupChats ? Object.keys(extractedInfo.groupChats).length : 0;
+                    const legacyGroupCount = extractedInfo.messages ? extractedInfo.messages.length : 0;
+                    
+                    // 构建详细的统计信息
+                    let statsMsg = '📊 提取统计: ';
+                    
+                    // 群聊统计
+                    if (groupChatCount > 0) {
+                        statsMsg += `群聊${groupChatCount}个(总${legacyGroupCount}条), `;
+                    } else if (legacyGroupCount > 0) {
+                        statsMsg += `群聊${legacyGroupCount}条, `;
+                    }
+                    
+                    // 私聊统计
+                    if (privateChatCount > 0) {
+                        statsMsg += `私聊${privateChatCount}个(总${legacyPrivateCount}条), `;
+                    } else if (legacyPrivateCount > 0) {
+                        statsMsg += `私聊${legacyPrivateCount}条, `;
+                    }
+                    
+                    // 动态统计
+                    statsMsg += `动态${extractedInfo.dynamics.length}条`;
+                    
+                    console.log(statsMsg);
+                    
+                    // 显示详细列表
+                    if (groupChatCount > 0) {
+                        console.log(`🔍 群聊详情: ${Object.keys(extractedInfo.groupChats).join(', ')}`);
+                    }
+                    if (privateChatCount > 0) {
+                        console.log(`🔍 私聊详情: ${Object.keys(extractedInfo.privateChats).join(', ')}`);
+                    }
                     
                     const convertedResult = QQ_ConvertExtractedToStandard(extractedInfo);
                     if (convertedResult) {
@@ -9392,10 +9426,12 @@
                 
                 const extractedInfo = {
                     hasValidInfo: false,
-                    chatType: null,     // 'group' | 'private'
-                    chatName: null,     // 群聊名或私聊对象
-                    messages: [],       // 提取的消息
-                    privateMessages: [], // 私聊消息
+                    chatType: null,     // 'group' | 'private' | 'mixed'
+                    chatName: null,     // 群聊名或私聊对象（兼容性保留）
+                    messages: [],       // 旧版群聊消息（兼容性保留）
+                    privateMessages: [], // 旧版私聊消息（兼容性保留）
+                    privateChats: {},   // *** 新增：多私聊支持 { chatName: messages[] } ***
+                    groupChats: {},     // *** 新增：多群聊支持 { groupName: { msgs: [], members: [] } } ***
                     dynamics: []        // 动态内容
                 };
                 
@@ -9425,18 +9461,47 @@
                 
                 if (groupMatches.length > 0) {
                     extractedInfo.hasValidInfo = true;
-                    extractedInfo.chatType = 'group';
+                    
+                    // *** 修复：支持多群聊处理 ***
+                    console.log(`🔍 发现 ${groupMatches.length} 个群聊匹配`);
                     
                     for (const match of groupMatches) {
-                        extractedInfo.chatName = match[1];
-                        console.log(`群聊名: ${extractedInfo.chatName}`);
+                        const groupName = match[1];
+                        console.log(`群聊名: ${groupName}`);
                         
                         // 提取群聊中的消息
                         const messages = QQ_ExtractMessagesFromContent(match[2]);
+                        console.log(`从群聊 ${groupName} 提取到 ${messages.length} 条消息`);
+                        
+                        // *** 新逻辑：分别存储每个群聊 ***
+                        extractedInfo.groupChats[groupName] = {
+                            msgs: messages,
+                            members: []  // TODO: 可以从消息中提取成员列表
+                        };
+                        
+                        // *** 兼容性：同时保留旧格式 ***
                         extractedInfo.messages = extractedInfo.messages.concat(messages);
-                        console.log(`从当前群聊提取到 ${messages.length} 条消息`);
+                        
+                        // *** 为兼容性设置chatName（使用第一个群聊） ***
+                        if (!extractedInfo.chatName) {
+                            extractedInfo.chatName = groupName;
+                        }
                     }
-                    console.log(`总共提取到 ${extractedInfo.messages.length} 条群聊消息`);
+                    
+                    // *** 设置正确的chatType ***
+                    const groupChatsCount = Object.keys(extractedInfo.groupChats).length;
+                    const privateChatsCount = Object.keys(extractedInfo.privateChats).length;
+                    
+                    if (groupChatsCount > 0 && privateChatsCount > 0) {
+                        extractedInfo.chatType = 'mixed'; // 混合类型
+                    } else if (groupChatsCount > 1) {
+                        extractedInfo.chatType = 'mixed'; // 多个群聊
+                    } else if (!extractedInfo.chatType) {
+                        extractedInfo.chatType = 'group'; // 单个群聊
+                    }
+                    
+                    console.log(`✅ 处理完成 ${groupChatsCount} 个群聊，总共 ${extractedInfo.messages.length} 条消息`);
+                    console.log(`🔍 群聊列表:`, Object.keys(extractedInfo.groupChats));
                 }
                 
                 // 2. 提取私聊信息 - 增强版：支持多种私聊格式
@@ -9470,18 +9535,40 @@
                 
                 if (privateMatches.length > 0) {
                     extractedInfo.hasValidInfo = true;
-                    if (!extractedInfo.chatType) extractedInfo.chatType = 'private';
+                    
+                    // *** 修复：支持多私聊处理 ***
+                    console.log(`🔍 发现 ${privateMatches.length} 个私聊匹配`);
                     
                     for (const match of privateMatches) {
-                        extractedInfo.chatName = match[1];
-                        console.log(`私聊对象: ${extractedInfo.chatName}`);
+                        const chatName = match[1];
+                        console.log(`私聊对象: ${chatName}`);
                         
                         // 提取私聊中的消息
                         const messages = QQ_ExtractMessagesFromContent(match[2]);
+                        console.log(`从私聊 ${chatName} 提取到 ${messages.length} 条消息`);
+                        
+                        // *** 新逻辑：分别存储每个私聊 ***
+                        extractedInfo.privateChats[chatName] = messages;
+                        
+                        // *** 兼容性：同时保留旧格式 ***
                         extractedInfo.privateMessages = extractedInfo.privateMessages.concat(messages);
-                        console.log(`从当前私聊提取到 ${messages.length} 条消息`);
+                        
+                        // *** 为兼容性设置chatName（使用第一个私聊） ***
+                        if (!extractedInfo.chatName) {
+                            extractedInfo.chatName = chatName;
+                        }
                     }
-                    console.log(`总共提取到 ${extractedInfo.privateMessages.length} 条私聊消息`);
+                    
+                    // *** 设置正确的chatType ***
+                    const privateChatsCount = Object.keys(extractedInfo.privateChats).length;
+                    if (privateChatsCount > 1) {
+                        extractedInfo.chatType = 'mixed'; // 多个私聊
+                    } else if (!extractedInfo.chatType) {
+                        extractedInfo.chatType = 'private'; // 单个私聊
+                    }
+                    
+                    console.log(`✅ 处理完成 ${privateChatsCount} 个私聊，总共 ${extractedInfo.privateMessages.length} 条消息`);
+                    console.log(`🔍 私聊列表:`, Object.keys(extractedInfo.privateChats));
                 }
                 
                 // 3. 提取动态内容（如果存在）
@@ -9621,9 +9708,23 @@
                 
                 const standardData = { 私聊: {}, 群聊: {} };
                 
-                // 根据聊天类型分别处理群聊和私聊消息 - 兼容单一类型和混合类型
-                if (extractedInfo.chatType === 'group' && extractedInfo.messages.length > 0) {
-                // 转换群聊消息
+                // *** 修复：处理多群聊消息 ***
+                // 优先处理新的groupChats结构，支持多个独立群聊
+                if (extractedInfo.groupChats && Object.keys(extractedInfo.groupChats).length > 0) {
+                    console.log(`🔍 处理多群聊结构: ${Object.keys(extractedInfo.groupChats).length} 个群聊`);
+                    
+                    for (const [groupName, groupData] of Object.entries(extractedInfo.groupChats)) {
+                        standardData.群聊[groupName] = {
+                            msgs: groupData.msgs,
+                            members: groupData.members || []
+                        };
+                        console.log(`✅ 转换群聊消息: ${groupName} (${groupData.msgs.length}条)`);
+                    }
+                } 
+                // *** 兼容性：处理旧版messages格式 ***
+                else if (extractedInfo.chatType === 'group' && extractedInfo.messages && extractedInfo.messages.length > 0) {
+                    console.log(`🔍 处理旧版群聊格式: ${extractedInfo.messages.length} 条消息`);
+                    
                     const groupChatKey = extractedInfo.chatName;
                     standardData.群聊[groupChatKey] = {
                         msgs: extractedInfo.messages,
@@ -9632,8 +9733,39 @@
                     console.log(`✅ 转换群聊消息: ${groupChatKey} (${extractedInfo.messages.length}条)`);
                 }
                 
-                // 处理私聊消息（无论主类型是什么，都要检查私聊消息）
-                if (extractedInfo.privateMessages.length > 0) {
+                // *** 修复：处理多私聊消息 ***
+                // 优先处理新的privateChats结构，支持多个独立私聊
+                if (extractedInfo.privateChats && Object.keys(extractedInfo.privateChats).length > 0) {
+                    console.log(`🔍 处理多私聊结构: ${Object.keys(extractedInfo.privateChats).length} 个私聊`);
+                    
+                    for (const [originalChatName, messages] of Object.entries(extractedInfo.privateChats)) {
+                        // 标准化每个私聊的键名
+                        let privateChatKey = originalChatName;
+                        
+                        // 彻底标准化处理：确保所有私聊都统一为"聊天"格式
+                        if (privateChatKey.includes('私聊')) {
+                            // 将"私聊"替换为"聊天"
+                            privateChatKey = privateChatKey.replace(/私聊/g, '聊天');
+                        } else if (!privateChatKey.includes('聊天')) {
+                            // 如果既不包含"私聊"也不包含"聊天"，添加"聊天"
+                            privateChatKey = privateChatKey.includes('的') ? privateChatKey.replace(/的$/g, '的聊天') : privateChatKey + '的聊天';
+                        }
+                        
+                        // 最终确保格式正确：应该是"XX和YY的聊天"
+                        if (!privateChatKey.includes('和') || !privateChatKey.includes('的聊天')) {
+                            console.warn(`⚠️ 私聊键名格式异常: "${privateChatKey}"，使用默认格式`);
+                            privateChatKey = `${originalChatName}的聊天`;
+                        }
+                        
+                        standardData.私聊[privateChatKey] = messages;
+                        console.log(`✅ 转换私聊消息: ${privateChatKey} (${messages.length}条)`);
+                        console.log(`🔧 私聊键名标准化: "${originalChatName}" → "${privateChatKey}"`);
+                    }
+                } 
+                // *** 兼容性：处理旧版privateMessages格式 ***
+                else if (extractedInfo.privateMessages && extractedInfo.privateMessages.length > 0) {
+                    console.log(`🔍 处理旧版私聊格式: ${extractedInfo.privateMessages.length} 条消息`);
+                    
                     // 转换私聊消息 - 统一格式为 "XX和YY的聊天"，彻底避免重复创建群聊
                     let privateChatKey = extractedInfo.chatName;
                     if (extractedInfo.chatType === 'private') {
