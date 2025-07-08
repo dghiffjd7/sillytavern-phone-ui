@@ -4720,7 +4720,7 @@
                     if (tasks.groupChats.length > 0) {
                         const groupName = Object.keys(tasks.groupChats[0])[0];
                         rules.push(`- **群聊**: 在【${groupName}】中进行回应，需有多名角色参与。
-                                    - **私聊**：1-3名相关角色可通过私聊进行进一步的深入讨论。`);
+                                    - **私聊延申**：1-3名相关角色可通过私聊进行进一步的深入讨论。`);
                     }
                     rules.push('- **社交联动**: 根据对话内容，角色之间可能会互相讨论，或有角色发布新的动态。');
                     return rules.join('\n');
@@ -21827,8 +21827,16 @@ ${index + 1}. ${space.name}
                                 const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                 let sequenceId = sequenceInfo.sequenceId;
                                 
-                                // *** 修复：历史消息不分配新序列号，只有AI回复消息才有序列号 ***
-                                // 序列号为0表示这是历史消息或用户消息，不需要序列号
+                                // *** 修复：只收集有序列号的新消息，不重新分配序号 ***
+                                // 跳过没有序列号的历史消息
+                                if (sequenceId === 0) {
+                                    continue; // 跳过没有序列号的历史消息
+                                }
+                                
+                                // 只收集序列号大于上次处理的消息
+                                if (sequenceId <= QQ_LastProcessedSequenceId) {
+                                    continue; // 跳过已处理的消息
+                                }
                                 
                                 console.log(`🆕 发现新消息 [seq:${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
                                 
@@ -21856,16 +21864,6 @@ ${index + 1}. ${space.name}
                                                 (person1 === UserName ? person2 : person1) : 
                                                 UserName;
                                         }
-                                    }
-                                    
-                                    // *** 修改：从消息中提取序列号 ***
-                                    const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
-                                    let sequenceId = sequenceInfo.sequenceId;
-                                    
-                                    // *** 修复：只为没有序列号的消息分配序列号 ***
-                                    if (sequenceId === 0) {
-                                        sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
-                                        console.log(`🔄 短期记忆私聊分配序列号 [${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
                                     }
                                     
                                     // *** 修复：确保时间戳反映序列号顺序 ***
@@ -21909,14 +21907,18 @@ ${index + 1}. ${space.name}
                                          content.includes('欢迎加入群聊'));
                                     
                                     if (!isInitMessage) {
-                                        // *** 修改：从消息中提取序列号 ***
+                                        // *** 修复：从消息中提取序列号，不重新分配 ***
                                         const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
                                         let sequenceId = sequenceInfo.sequenceId;
                                         
-                                        // *** 修复：只为没有序列号的消息分配序列号 ***
+                                        // 跳过没有序列号的历史消息
                                         if (sequenceId === 0) {
-                                            sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
-                                            console.log(`🔄 短期记忆群聊分配序列号 [${sequenceId}]: ${content.substring(0, 30)}...`);
+                                            continue; // 跳过没有序列号的历史消息
+                                        }
+                                        
+                                        // 只收集序列号大于上次处理的消息
+                                        if (sequenceId <= QQ_LastProcessedSequenceId) {
+                                            continue; // 跳过已处理的消息
                                         }
                                         
                                         // *** 修复：确保时间戳反映序列号顺序 ***
@@ -21979,62 +21981,89 @@ ${index + 1}. ${space.name}
                     
                     console.log(`📊 收集到 ${newMessages.length} 条新消息`);
                     
-                    // *** 修改：实现增量更新，只处理新消息 ***
-                    let allMessages = [];
-                    
-                    // 获取现有记忆中的消息（使用之前找到的memoryEntry）
-                    if (memoryEntry && memoryEntry.content) {
-                        // 从现有记忆中提取消息（简化版解析）
-                        console.log('📖 从现有记忆中提取消息...');
-                        // 这里可以实现解析逻辑，但为了简化，我们先合并新消息
+                    // *** 滚动式添加：如果没有新消息，则不更新记忆 ***
+                    if (newMessages.length === 0) {
+                        console.log('📝 没有新消息，跳过短期记忆更新');
+                        return;
                     }
                     
-                    // 合并新消息到总消息列表
-                    allMessages = [...newMessages]; // 暂时只使用新消息，后续可改进为真正的合并
+                    // *** 滚动式添加：只处理新消息，直接追加到现有记忆 ***
+                    console.log(`🎯 滚动式添加 ${newMessages.length} 条新消息到短期记忆底部...`);
                     
-                    console.log(`🏠 开始按逻辑序列号排序 ${allMessages.length} 条消息...`);
+                    // 按序列号排序新消息（确保顺序正确）
+                    const sortedNewMessages = QQ_SortMessagesBySequence(newMessages, true); // 升序：小的在前，大的在后
+                    console.log(`📝 新消息已按序列号排序，最小序号: ${sortedNewMessages[0]?.sequenceId || 0}, 最大序号: ${sortedNewMessages[sortedNewMessages.length-1]?.sequenceId || 0}`);
                     
-                    // *** 改进：智能消息优先级保存策略 ***
-                    let recentMessages;
-                    if (allMessages.length <= 1000) {
-                        // 消息数量未达到上限，按逻辑序列号升序排列（早的在前）
-                        recentMessages = QQ_SortMessagesBySequence(allMessages, true);
-                        console.log(`📝 消息数量(${allMessages.length})未达到上限，按逻辑顺序保留所有消息`);
-                    } else {
-                        // *** 新策略：确保最新分配序列号的消息（AI新回复）优先保存 ***
-                        console.log(`🎯 消息超限，使用智能优先级保存...`);
+                    // *** 获取现有记忆内容并解析已存在的消息 ***
+                    let existingMessages = [];
+                    const entryComment = '手机-短期记忆-最近对话';
+                    const existingEntry = entries.find(entry => 
+                        entry && entry.comment === entryComment
+                    );
+                    
+                    if (existingEntry && existingEntry.content) {
+                        // 从现有内容中解析消息 (简化版本，只计算消息数量)
+                        const contentLines = existingEntry.content.split('\n');
+                        const messageLines = contentLines.filter(line => 
+                            line.includes('] ') && 
+                            (line.includes('说:') || line.includes('评论') || line.includes('发布动态'))
+                        );
+                        console.log(`📖 现有记忆中包含 ${messageLines.length} 条历史消息`);
                         
-                        // 简化：按序列号排序，保留最新的1000条
-                        const sortedBySequence = QQ_SortMessagesBySequence(allMessages, false); // false = 降序，大的在前
-                        const latestMessages = sortedBySequence.slice(0, 1000); // 保留序列号最大的1000条
-                        console.log(`📊 消息总数: ${allMessages.length}条，保留最新1000条`);
+                        // 计算总消息数量
+                        const totalMessageCount = messageLines.length + sortedNewMessages.length;
                         
-                        const deletedMessages = allMessages.filter(msg => !latestMessages.includes(msg));
-                        
-                        // *** 调试：显示被删除的消息信息 ***
-                        if (deletedMessages.length > 0) {
-                            // 重新排序被删除的消息以显示正确的范围
-                            const sortedDeleted = QQ_SortMessagesBySequence(deletedMessages, false);
-                            const deletedMaxSeq = sortedDeleted[0]?.sequenceId || 0;
-                            const deletedMinSeq = sortedDeleted[sortedDeleted.length - 1]?.sequenceId || 0;
-                            console.log(`🗑️ 被删除消息序列号范围: ${deletedMinSeq} - ${deletedMaxSeq}`);
-                            console.log(`🔍 最近5条被删除的消息:`);
-                            sortedDeleted.slice(0, 5).forEach((msg, index) => {
-                                console.log(`   ${index + 1}. [seq:${msg.sequenceId}] ${msg.sender}: ${msg.content?.substring(0, 30)}...`);
-                            });
+                        // 如果超过1000条限制，需要删除旧内容
+                        if (totalMessageCount > 1000) {
+                            const deleteCount = totalMessageCount - 1000;
+                            console.log(`🔄 消息总数(${totalMessageCount})超过上限，将删除最旧的${deleteCount}条消息`);
+                            
+                            // 重新构建内容，跳过最旧的消息
+                            const keepLines = [];
+                            let messageCounter = 0;
+                            let skipCount = deleteCount;
+                            
+                            for (const line of contentLines) {
+                                if (line.includes('] ') && (line.includes('说:') || line.includes('评论') || line.includes('发布动态'))) {
+                                    if (skipCount > 0) {
+                                        skipCount--;
+                                        continue; // 跳过这条旧消息
+                                    }
+                                }
+                                keepLines.push(line);
+                            }
+                            
+                            // 更新现有内容为保留的行
+                            existingEntry.content = keepLines.join('\n');
+                            console.log(`✂️ 已删除${deleteCount}条旧消息，保留${1000 - sortedNewMessages.length}条历史消息`);
                         }
-                        
-                        // 然后按逻辑序列号升序重新排序用于显示（最早的在前，最新的在后）
-                        // *** 确保：序列号小的在前（顶部），序列号大的在后（底部） ***
-                        recentMessages = QQ_SortMessagesBySequence(latestMessages, true); // true = 升序
-                        console.log(`📝 消息已按序列号升序排列（新消息在底部），最小序号: ${recentMessages[0]?.sequenceId || 0}, 最大序号: ${recentMessages[recentMessages.length-1]?.sequenceId || 0}`);
-                        console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新1000条，删除${allMessages.length - 1000}条旧消息`);
                     }
                     
-                    console.log(`💾 短期记忆已更新：收集${allMessages.length}条消息，保存${recentMessages.length}条最新消息`);
+                    // 将新消息作为要处理的消息
+                    let recentMessages = sortedNewMessages;
                     
-                    // 格式化为AI友好的格式
-                    let memoryContent = `# 【历史对话记录 - 仅供参考，请勿重复】
+                    console.log(`💾 短期记忆滚动更新：将添加${recentMessages.length}条新消息`);
+                    
+                    // *** 滚动式内容更新：获取现有内容或创建新内容 ***
+                    let memoryContent = '';
+                    
+                    if (existingEntry && existingEntry.content) {
+                        // 使用现有内容作为基础
+                        memoryContent = existingEntry.content;
+                        
+                        // 更新记录信息部分
+                        const infoRegex = /\*\*记录信息：\*\*[\s\S]*?(?=\*\*历史对话内容：\*\*)/;
+                        const totalMessages = (existingEntry.content.match(/\[.*?\] .*?说:/g) || []).length + recentMessages.length;
+                        const newInfo = `**记录信息：**
+- 更新时间: ${now.toLocaleString('zh-CN')}
+- 保存条数: ${totalMessages}/1000 条历史消息 (滚动式更新)
+
+`;
+                        memoryContent = memoryContent.replace(infoRegex, newInfo);
+                        console.log(`📝 基于现有内容追加${recentMessages.length}条新消息`);
+                    } else {
+                        // 创建新的内容结构
+                        memoryContent = `# 【历史对话记录 - 仅供参考，请勿重复】
 
 **重要说明：**
 - 这是最近的历史对话记录，仅用于了解上下文和角色关系
@@ -22045,17 +22074,21 @@ ${index + 1}. ${space.name}
 
 **记录信息：**
 - 更新时间: ${now.toLocaleString('zh-CN')}
-- 收集消息总数: ${allMessages.length} 条
-- 保存条数: ${recentMessages.length}/1000 条历史消息${allMessages.length > 1000 ? ` (已删除${allMessages.length - 1000}条旧消息)` : ''}
+- 保存条数: ${recentMessages.length}/1000 条历史消息 (新建记忆)
 
 **历史对话内容：**
 
 `;
+                        console.log(`📝 创建新的短期记忆结构`);
+                    }
                     
-                    // 使用渲染顺序显示（已按渲染顺序排序，最早渲染的在前）
+                    // *** 只添加新消息到内容末尾 ***
+                    let newContent = '';
+                    
+                    // *** 只处理新消息：按序列号排序的新消息 ***
                     const sortedMessages = recentMessages;
                     
-                    // *** 新增：对话回合跟踪和时间分隔符 ***
+                    // *** 对话回合跟踪和时间分隔符 ***
                     let lastUserMessageTime = null;
                     let hasAIReplyAfterUser = false;
                     let lastRoundTime = null;
@@ -22071,15 +22104,15 @@ ${index + 1}. ${space.name}
                             displayTime = QQ_FormatTimeToMinutes(msg.time);
                         }
                         
-                        // 添加消息内容
+                        // 添加新消息内容到newContent
                         if (msg.type === '私聊') {
-                            memoryContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
                         } else if (msg.type === '群聊') {
-                            memoryContent += `[${displayTime}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
                         } else if (msg.type === '动态') {
-                            memoryContent += `[${displayTime}] ${msg.sender}${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}${msg.content}\n`;
                         } else if (msg.type === '动态评论') {
-                            memoryContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
                         }
                         
                         // *** 对话回合检测逻辑 ***
@@ -22114,7 +22147,7 @@ ${index + 1}. ${space.name}
                             
                             // 避免重复添加相同时间的分隔符
                             if (lastRoundTime !== timeStr) {
-                                memoryContent += `\n📅 ${timeStr}\n\n`;
+                                newContent += `\n📅 ${timeStr}\n\n`;
                                 lastRoundTime = timeStr;
                                 console.log(`🕒 已添加对话回合时间分隔符: ${timeStr}`);
                             }
@@ -22125,12 +22158,20 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
+                    // *** 将新内容追加到现有内容末尾 ***
+                    if (newContent.trim()) {
+                        // 确保现有内容以换行结尾
+                        if (memoryContent && !memoryContent.endsWith('\n')) {
+                            memoryContent += '\n';
+                        }
+                        memoryContent += newContent;
+                        console.log(`✅ 已将${sortedMessages.length}条新消息追加到短期记忆底部`);
+                    }
+                    
                     // 添加历史记录结束标识
                     memoryContent += `\n---\n**【历史记录结束】** 以上为历史对话记录，请基于此背景自然地进行当前对话，不要重复上述内容。\n`;
                     
                     // 保存到世界书 - 使用正确的API函数
-                    const entryComment = '手机-短期记忆-最近对话';
-                    
                     // 查找现有条目
                     let memoryEntryForSave = entries.find(entry => 
                         entry && entry.comment === entryComment
