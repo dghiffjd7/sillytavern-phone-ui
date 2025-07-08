@@ -4706,9 +4706,10 @@
                 `,
                 momentCommentTask: (authorName, userComment) => `
             ## 任务：回应动态评论
+            **重要**: 这是对现有动态的评论回复，不要创建新的动态内容！
             - **情景**: 用户评论了【${authorName}】的动态，评论内容是：“${userComment}”。
             - **要求**:
-                1.  **动态评论**: 【${authorName}】本人必须回复，同时另有至少2名角色参与评论。
+                1.  **动态评论回复**: 【${authorName}】本人必须回复用户的评论，同时另有至少2名角色参与评论。
                 2.  **私聊延伸**: 至少1-2名角色因该动态与用户发起【私聊】，进行更深入的讨论。
             - **输出格式**: 评论使用 \`moment_start\`, 私聊使用 \`<私聊:角色名>\`。
                 `,
@@ -5154,8 +5155,15 @@
                 if (isStreamingDisplayActive && lastStreamingStartTime && 
                     Date.now() - lastStreamingStartTime > 10000) {
                     console.warn('⚠️ 检测到流式传输可能卡住，强制重置');
+                    console.warn(`🔍 当前队列长度: ${streamingMessageQueue.length}, 卡住时间: ${Date.now() - lastStreamingStartTime}ms`);
                     isStreamingDisplayActive = false;
                     lastStreamingStartTime = null;
+                    
+                    // 强制重置后立即尝试处理队列
+                    setTimeout(() => {
+                        console.warn('🔄 强制重置后重新启动队列处理');
+                        QQ_ProcessStreamingQueue();
+                    }, 100);
                 }
                 
                 // 高优先级任务且队列卡住时，强制立即执行
@@ -5174,7 +5182,13 @@
              * 处理流式传输队列中的下一个任务
              */
             function QQ_ProcessStreamingQueue() {
-                if (streamingMessageQueue.length === 0 || isStreamingDisplayActive) {
+                if (streamingMessageQueue.length === 0) {
+                    console.log(`📋 队列为空，停止处理`);
+                    return;
+                }
+                
+                if (isStreamingDisplayActive) {
+                    console.log(`⏳ 有任务正在执行，等待完成...`);
                     return;
                 }
                 
@@ -5190,12 +5204,14 @@
                     // 任务完成后解锁并处理下一个任务
                     console.log(`✅ 队列任务完成: ${task.description}`);
                     isStreamingDisplayActive = false;
+                    lastStreamingStartTime = null;
                     
                     // 处理队列中的下一个任务
                     setTimeout(QQ_ProcessStreamingQueue, 100);
                 }).catch((error) => {
                     console.error(`❌ 队列任务失败: ${task.description}`, error);
                     isStreamingDisplayActive = false;
+                    lastStreamingStartTime = null;
                     
                     // 即使失败也要处理下一个任务
                     setTimeout(QQ_ProcessStreamingQueue, 500);
