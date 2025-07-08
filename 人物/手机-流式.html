@@ -5049,6 +5049,7 @@
             let isStreamingDisplayActive = false; // 流式传输锁
             let streamingMessageQueue = []; // 流式消息队列
             let currentStreamingProcess = null; // 当前流式传输进程引用
+            let lastStreamingStartTime = null; // 记录上次流式传输开始时间
 
             // *** 新增：逻辑时钟系统 - 用序列号替代时间排序 ***
             const createSequenceIdGenerator = () => {
@@ -5134,8 +5135,31 @@
              * @param {string} task.description - 任务描述
              */
             function QQ_EnqueueStreamingTask(task) {
-                streamingMessageQueue.push(task);
-                console.log(`📥 任务已加入队列: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
+                // 为任务添加时间戳
+                task.timestamp = Date.now();
+                
+                // 高优先级任务（AI回复）插入队列前面
+                if (task.priority === 'high') {
+                    streamingMessageQueue.unshift(task);
+                    console.log(`🚀 高优先级任务已加入队列前端: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
+                } else {
+                    streamingMessageQueue.push(task);
+                    console.log(`📥 任务已加入队列: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
+                }
+                
+                // 检查是否有卡住的任务（超过10秒还在处理）
+                if (isStreamingDisplayActive && lastStreamingStartTime && 
+                    Date.now() - lastStreamingStartTime > 10000) {
+                    console.warn('⚠️ 检测到流式传输可能卡住，强制重置');
+                    isStreamingDisplayActive = false;
+                    lastStreamingStartTime = null;
+                }
+                
+                // 高优先级任务且队列卡住时，强制立即执行
+                if (task.priority === 'high' && isStreamingDisplayActive) {
+                    console.warn('🔥 高优先级AI回复任务，强制立即执行');
+                    isStreamingDisplayActive = false;
+                }
                 
                 // 如果当前没有流式传输在进行，立即处理队列
                 if (!isStreamingDisplayActive) {
@@ -5154,8 +5178,9 @@
                 const task = streamingMessageQueue.shift();
                 console.log(`📤 开始处理队列任务: ${task.description}, 剩余队列长度: ${streamingMessageQueue.length}`);
                 
-                // 设置锁
+                // 设置锁并记录开始时间
                 isStreamingDisplayActive = true;
+                lastStreamingStartTime = Date.now();
                 
                 // 执行任务
                 task.handler(...task.args).then(() => {
@@ -21220,6 +21245,24 @@ ${index + 1}. ${space.name}
             function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
                 console.log(`🌊 开始流式显示 ${fullMessages.length} 条完整消息 - 聊天: ${chatName}`);
                 
+                // 检查容器是否存在
+                if (!chatContainer || !chatContainer.parentElement) {
+                    console.error('❌ 聊天容器不存在或已被移除，无法显示消息');
+                    console.log('🔍 尝试查找聊天容器...');
+                    
+                    // 尝试重新获取容器
+                    const selector = QQ_Groups.includes(chatName) 
+                        ? `#QQ_chat_${chatName.replace(/[\s:]/g, '_')} .msgcontent`
+                        : `#QQ_chat_${chatName} .msgcontent`;
+                    chatContainer = document.querySelector(selector);
+                    
+                    if (!chatContainer) {
+                        console.error('❌ 无法找到聊天容器:', selector);
+                        return Promise.reject(new Error('聊天容器不存在'));
+                    }
+                    console.log('✅ 成功重新获取聊天容器');
+                }
+                
                 return new Promise((resolve, reject) => {
                     let currentIndex = 0;
                     let currentTypingIndicator = null;
@@ -22433,7 +22476,8 @@ ${index + 1}. ${space.name}
                             QQ_EnqueueStreamingTask({
                                 handler: QQ_DisplayStreamingMessagesDirectly,
                                 args: [$msgContent[0], newMessages, name, true, false],
-                                description: `私聊${name}流式显示${newMessages.length}条消息`
+                                description: `私聊${name}流式显示${newMessages.length}条消息`,
+                                priority: gening ? 'high' : 'normal' // AI回复时为高优先级
                             });
                         } else {
                             // 没有新消息，正常显示所有消息

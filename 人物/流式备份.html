@@ -5045,6 +5045,149 @@
             let QQ_NewMsg = {};
             let QQ_ReadStatus = {}; // 新增：记录已读状态
 
+            // *** 新增：流式传输状态管理 ***
+            let isStreamingDisplayActive = false; // 流式传输锁
+            let streamingMessageQueue = []; // 流式消息队列
+            let currentStreamingProcess = null; // 当前流式传输进程引用
+
+            // *** 新增：逻辑时钟系统 - 用序列号替代时间排序 ***
+            const createSequenceIdGenerator = () => {
+                // 使用当前时间戳作为初始值，确保每次会话的ID都不同
+                let counter = Date.now();
+                
+                return {
+                    next: () => {
+                        return counter++;
+                    },
+                    current: () => {
+                        return counter;
+                    },
+                    reset: (newStart) => {
+                        counter = newStart || Date.now();
+                        console.log(`🔄 序列号生成器已重置，新起始值: ${counter}`);
+                    }
+                };
+            };
+            
+            // 创建全局的序列号生成器实例
+            const QQ_MessageSequence = createSequenceIdGenerator();
+            
+            // *** 新增：短期记忆滚动式更新状态跟踪 ***
+            let QQ_LastProcessedSequenceId = 0; // 记录上次处理的最大序列号
+            
+            // *** 新增：当前回复消息保护机制 ***
+            let QQ_CurrentReplyMessages = new Set(); // 存储当前AI回复的消息ID，确保不被删除
+            
+            /**
+             * 为消息获取下一个序列号（用于保证逻辑顺序）
+             * @return {number} 严格递增的序列号
+             */
+            function QQ_GetNextMessageId() {
+                const id = QQ_MessageSequence.next();
+                console.log(`🏠 分配消息序列号: ${id}`);
+                return id;
+            }
+            
+            /**
+             * 从消息字符串中提取或生成序列号
+             * @param {string} messageStr - 消息字符串
+             * @return {object} {sequenceId: number, cleanMessage: string}
+             */
+            function QQ_ExtractOrGenerateSequenceId(messageStr, shouldGenerate = false) {
+                // 尝试从消息末尾提取序列号（格式：##seq_12345##）
+                const sequenceRegex = /##seq_(\d+)##$/;
+                const match = messageStr.match(sequenceRegex);
+                
+                if (match) {
+                    const sequenceId = parseInt(match[1], 10);
+                    const cleanMessage = messageStr.replace(sequenceRegex, '');
+                    return { sequenceId, cleanMessage };
+                } else {
+                    // 只有明确要求时才生成新序列号
+                    if (shouldGenerate) {
+                        const sequenceId = QQ_GetNextMessageId();
+                        return { sequenceId, cleanMessage: messageStr };
+                    } else {
+                        // 没有序列号且不要求生成时，返回一个临时标识
+                        return { sequenceId: 0, cleanMessage: messageStr };
+                    }
+                }
+            }
+            
+            /**
+             * 为消息字符串添加序列号
+             * @param {string} messageStr - 消息字符串 
+             * @param {number} sequenceId - 序列号
+             * @return {string} 带有序列号的消息字符串
+             */
+            function QQ_AddSequenceIdToMessage(messageStr, sequenceId) {
+                return `${messageStr}##seq_${sequenceId}##`;
+            }
+
+            // *** 新增：流式传输队列管理函数 ***
+            
+            /**
+             * 将消息任务添加到流式传输队列
+             * @param {Object} task - 流式传输任务 
+             * @param {Function} task.handler - 处理函数
+             * @param {Array} task.args - 参数数组
+             * @param {string} task.description - 任务描述
+             */
+            function QQ_EnqueueStreamingTask(task) {
+                streamingMessageQueue.push(task);
+                console.log(`📥 任务已加入队列: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
+                
+                // 如果当前没有流式传输在进行，立即处理队列
+                if (!isStreamingDisplayActive) {
+                    QQ_ProcessStreamingQueue();
+                }
+            }
+
+            /**
+             * 处理流式传输队列中的下一个任务
+             */
+            function QQ_ProcessStreamingQueue() {
+                if (streamingMessageQueue.length === 0 || isStreamingDisplayActive) {
+                    return;
+                }
+                
+                const task = streamingMessageQueue.shift();
+                console.log(`📤 开始处理队列任务: ${task.description}, 剩余队列长度: ${streamingMessageQueue.length}`);
+                
+                // 设置锁
+                isStreamingDisplayActive = true;
+                
+                // 执行任务
+                task.handler(...task.args).then(() => {
+                    // 任务完成后解锁并处理下一个任务
+                    console.log(`✅ 队列任务完成: ${task.description}`);
+                    isStreamingDisplayActive = false;
+                    
+                    // 处理队列中的下一个任务
+                    setTimeout(QQ_ProcessStreamingQueue, 100);
+                }).catch((error) => {
+                    console.error(`❌ 队列任务失败: ${task.description}`, error);
+                    isStreamingDisplayActive = false;
+                    
+                    // 即使失败也要处理下一个任务
+                    setTimeout(QQ_ProcessStreamingQueue, 500);
+                });
+            }
+
+            /**
+             * 取消当前流式传输并清空队列（紧急情况使用）
+             */
+            function QQ_CancelAllStreaming() {
+                console.log('🚫 取消所有流式传输任务');
+                isStreamingDisplayActive = false;
+                streamingMessageQueue.length = 0;
+                
+                if (currentStreamingProcess) {
+                    clearTimeout(currentStreamingProcess);
+                    currentStreamingProcess = null;
+                }
+            }
+
             // *** 新增：已读状态管理功能 ***
             const QQ_READ_STATUS_KEY = "QQ_已读状态备份";
 
@@ -5084,7 +5227,7 @@
                     
                     // 查找或创建已读状态条目
                     let readStatusEntry = entries.find(entry => 
-                        entry.keys.includes(QQ_READ_STATUS_KEY)
+                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(QQ_READ_STATUS_KEY)
                     );
                     
                     if (readStatusEntry) {
@@ -5123,7 +5266,7 @@
                     }
                     
                     const readStatusEntry = entries.find(entry => 
-                        entry.keys.includes(QQ_READ_STATUS_KEY)
+                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(QQ_READ_STATUS_KEY)
                     );
                     
                     if (readStatusEntry && readStatusEntry.content) {
@@ -6739,7 +6882,7 @@
                 
                 const groupsKey = `QQ_分组备份_${charId}`;
                 const groupsEntry = entries.find(entry => 
-                    entry.keys.includes(groupsKey)
+                    entry.keys && Array.isArray(entry.keys) && entry.keys.includes(groupsKey)
                 );
                 
                 let worldbookGroups = 0;
@@ -7480,8 +7623,174 @@
                 }
             }
 
+            /**
+             * 改进的时间排序函数，确保24小时制和跨日期的正确排序
+             * @param {Array} messages - 消息数组
+             * @param {boolean} ascending - 是否升序排列（默认false，即降序）
+             * @return {Array} 排序后的消息数组
+             */
+            function QQ_SortMessagesByTime(messages, ascending = false) {
+                return messages.sort((a, b) => {
+                    const timeA = a.timestamp || QQ_ParseTime(a.time);
+                    const timeB = b.timestamp || QQ_ParseTime(b.time);
+                    
+                    // 确保数值比较
+                    const timestampA = typeof timeA === 'number' ? timeA : Date.parse(timeA) || 0;
+                    const timestampB = typeof timeB === 'number' ? timeB : Date.parse(timeB) || 0;
+                    
+                    if (ascending) {
+                        return timestampA - timestampB; // 升序：早的在前
+                    } else {
+                        return timestampB - timestampA; // 降序：新的在前
+                    }
+                });
+            }
+            
+            /**
+             * *** 新增：使用逻辑序列号排序函数（解决时间排序问题） ***
+             * @param {Array} messages - 消息数组
+             * @param {boolean} ascending - 是否升序排列（默认true，即升序）
+             * @return {Array} 排序后的消息数组
+             */
+            function QQ_SortMessagesBySequence(messages, ascending = true) {
+                return messages.sort((a, b) => {
+                    const seqA = a.sequenceId || 0;
+                    const seqB = b.sequenceId || 0;
+                    
+                    if (ascending) {
+                        return seqA - seqB; // 升序：早的在前
+                    } else {
+                        return seqB - seqA; // 降序：新的在前
+                    }
+                });
+            }
+
+            /**
+             * 获取兼容性的时间显示格式（用于界面显示）
+             * @param {string} fullDateTime - 完整的日期时间字符串
+             * @return {string} 简化的时间显示
+             */
+            function QQ_GetDisplayTime(fullDateTime) {
+                if (!fullDateTime) return QQ_GetTime();
+                
+                // 如果是完整日期时间格式，提取时间部分
+                const fullDateTimeRegex = /^\d{4}\/\d{1,2}\/\d{1,2}[,\s]+(\d{1,2}:\d{2})$/;
+                const match = fullDateTime.match(fullDateTimeRegex);
+                if (match) {
+                    return match[1]; // 返回 HH:MM 部分
+                }
+                
+                // 如果已经是简短格式，直接返回
+                return fullDateTime;
+            }
+
+            /**
+             * 分离式处理模型：优先提取并处理线上格式内容
+             * 解决AI回复中“部分格式 + 大段互动”的混合问题
+             * @param {string} originalResult - 原始 AI 回复
+             * @return {object} {processed: boolean, remainingResult: string, processedCount: number}
+             */
+            async function QQ_ExtractAndProcessOnlineFormatFirst(originalResult) {
+                console.log('🔍 开始分离式处理：优先提取线上格式内容');
+                
+                let result = originalResult;
+                let processed = false;
+                let processedCount = 0;
+                
+                // 定义线上格式正则表达式
+                const formatPatterns = [
+                    {
+                        name: '私聊格式',
+                        pattern: /<(.+?)和(.+?)的私聊>([\s\S]+?)<\/(.+?)和(.+?)的私聊>/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`💬 提取到私聊格式内容`);
+                            // 使用现有的 QQ_Msg_Parse 处理
+                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
+                            await QQ_Msg_Parse(wrappedContent);
+                            return true;
+                        }
+                    },
+                    {
+                        name: '群聊格式',
+                        pattern: /<群聊:(.+?)>([\s\S]+?)<\/群聊:(.+?)>/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`💬 提取到群聊格式内容`);
+                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
+                            await QQ_Msg_Parse(wrappedContent);
+                            return true;
+                        }
+                    },
+                    {
+                        name: '动态格式',
+                        pattern: /moment_start([\s\S]+?)moment_end/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`📱 提取到动态格式内容`);
+                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
+                            await QQ_Moment_Parse(wrappedContent);
+                            return true;
+                        }
+                    },
+                    {
+                        name: 'MiPhone完整格式',
+                        pattern: /MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/g,
+                        handler: async (match, fullMatch) => {
+                            console.log(`📱 提取到MiPhone完整格式内容`);
+                            // 检查内容是否包含线上格式
+                            const content = match[1];
+                            if (content.includes('的私聊>') || content.includes('群聊:') || content.includes('moment_start')) {
+                                await QQ_Msg_Parse(fullMatch);
+                                return true;
+                            }
+                            return false;
+                        }
+                    }
+                ];
+                
+                // 逐个尝试各种格式模式
+                for (const formatDef of formatPatterns) {
+                    const matches = [...result.matchAll(formatDef.pattern)];
+                    
+                    for (const match of matches) {
+                        try {
+                            const fullMatch = match[0];
+                            const shouldProcess = await formatDef.handler(match, fullMatch);
+                            
+                            if (shouldProcess) {
+                                // 从原始结果中移除已处理的内容
+                                result = result.replace(fullMatch, '');
+                                processed = true;
+                                processedCount++;
+                                console.log(`✅ 已处理${formatDef.name}: ${fullMatch.substring(0, 100)}...`);
+                            }
+                        } catch (error) {
+                            console.error(`❌ 处理${formatDef.name}时出错:`, error);
+                        }
+                    }
+                }
+                
+                // 清理剩余的空白和无效标签
+                result = result
+                    .replace(/MiPhone_JSON_START/g, '')
+                    .replace(/MiPhone_JSON_END/g, '')
+                    .replace(/msg_end/g, '')
+                    .replace(/^\s*[\r\n]+/gm, '')
+                    .trim();
+                
+                console.log(`🔍 分离式处理结果: 处理了${processedCount}个线上格式块, 剩余内容长度: ${result.length}`);
+                
+                return {
+                    processed,
+                    remainingResult: result,
+                    processedCount
+                };
+            }
+
             async function ResultHandle(result, isRetry = false) {
                 console.log(`🎯 开始AI回复处理 - 严格优先级模式`, { isRetry, retryCount: QQ_RetryCount });
+                
+                // *** 新增：初始化当前回复消息保护 ***
+                QQ_CurrentReplyMessages.clear();
+                console.log(`🛡️ 已清空当前回复消息保护列表，准备保护新回复`);
                 
                 // *** 新增：异常格式预检测 ***
                 if (result && result.length > 0) {
@@ -7543,6 +7852,32 @@
                 
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
+                
+                // *** 新增：分离式处理 - 优先提取并处理线上格式内容 ***
+                const separateResult = await QQ_ExtractAndProcessOnlineFormatFirst(result);
+                if (separateResult.processed && separateResult.processedCount > 0) {
+                    console.log(`✅ 分离式处理成功: 处理了${separateResult.processedCount}个线上格式块`);
+                    
+                    // 更新相关状态
+                    QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    await QQ_Save_Chat_Backup();
+                    
+                    // 如果还有剩余内容，继续处理为互动内容
+                    if (separateResult.remainingResult && separateResult.remainingResult.trim().length > 0) {
+                        console.log(`🎭 检测到剩余内容，将作为互动内容处理`);
+                        const interactiveResult = QQ_IsInteractiveContent(separateResult.remainingResult, true);
+                        if (interactiveResult) {
+                            await QQ_HandleInteractiveContent(separateResult.remainingResult);
+                            console.log(`✅ 剩余内容已作为互动内容处理完成`);
+                        }
+                    }
+                    
+                    return; // 分离式处理成功，结束流程
+                }
+                
+                // 如果分离式处理没有找到线上格式，继续使用原有逻辑
+                result = separateResult.remainingResult;
                 
                 // *** 优先级1（A步骤）：严格匹配完整标签（成功后立即return） ***
                 console.log("🔍 优先级1（A步骤）：开始严格匹配完整标签");
@@ -8524,6 +8859,22 @@
              * @returns {string} 补全标签后的内容
              */
             function QQ_AutoCompleteMsgTagsForMessagePart(content) {
+                // *** 新增：补全缺失的私聊/群聊闭合标签 ***
+                const chatTagPattern = /<([^>]+和[^>]+的(?:聊天|私聊)|群聊:.+?)>/g;
+                const openTags = [...content.matchAll(chatTagPattern)];
+                
+                for (const openTag of openTags) {
+                    const tagName = openTag[1];
+                    const closeTag = `</${tagName}>`;
+                    
+                    // 检查是否有对应的闭合标签
+                    if (!content.includes(closeTag)) {
+                        console.log(`🔧 补全缺失的闭合标签: ${closeTag}`);
+                        // 在内容末尾添加闭合标签
+                        content = content + `\n${closeTag}`;
+                    }
+                }
+                
                 if (content.indexOf("msg_start") < 0) {
                     let start = content.match(/<(群聊:.+?|[^>]+和[^>]+的(?:聊天|私聊))>/);
                     if (start) {
@@ -9491,8 +9842,17 @@
                     }
                     
                     if (hasAnyFormatTag) {
-                        console.log('❌ content中包含聊天标签，应通过格式提取处理，不是互动内容');
-                        return false;
+                        // *** 改进：检查是否包含有效的聊天内容 ***
+                        const hasValidChatContent = 
+                            /<[^>]*聊天[^>]*>[\s\S]*?[^-\s]+--[^-\s]+/.test(contentText) || // 有效的聊天格式
+                            /MiPhone_start[\s\S]*?<[^>]*聊天[^>]*>/.test(contentText);     // 有效的MiPhone格式
+                        
+                        if (hasValidChatContent) {
+                            console.log('❌ content中包含有效聊天内容，应通过格式提取处理，不是互动内容');
+                            return false;
+                        } else {
+                            console.log('⚠️ content中包含聊天标签但无有效内容，忽略标签继续处理互动内容');
+                        }
                     }
                     
                     console.log('🎉 content中没有聊天标签，验证是否为有效互动内容...');
@@ -16730,6 +17090,41 @@ ${index + 1}. ${space.name}
                 }
                 let ini = new MyINI();
                 ini.loadText(worldlistraw_namespaceObject);
+                
+                // 特殊处理"手机-角色"条目：检查是否需要默认角色
+                const roleEntry = entries.find(entry => entry.comment === "手机-角色");
+                if (!roleEntry) {
+                    console.log('📱 手机-角色条目不存在，检查是否需要添加默认角色...');
+                    // 条目不存在，使用默认角色内容
+                    console.log('👥 首次创建手机-角色条目，添加默认角色a和角色b');
+                } else {
+                    // 条目存在，检查内容是否为空
+                    const content = roleEntry.content.trim();
+                    if (!content || content.length === 0) {
+                        console.log('📱 手机-角色条目存在但为空，检查是否需要添加默认角色...');
+                        // 如果条目为空，添加默认角色
+                        text["手机-角色"] = text["手机-角色"]; // 保持默认内容
+                        console.log('👥 角色条目为空，将添加默认角色a和角色b');
+                    } else {
+                        // 检查是否有实际的角色定义
+                        const lines = content.split('\n');
+                        const roleLines = lines.filter(line => 
+                            line.trim().startsWith('[') && 
+                            line.trim().endsWith(']') && 
+                            line.trim().length > 2
+                        );
+                        
+                        if (roleLines.length === 0) {
+                            console.log('📱 手机-角色条目存在但无角色定义，将添加默认角色...');
+                            // 保持默认内容以便后续添加
+                        } else {
+                            console.log('🎭 手机-角色条目中已有角色定义，跳过默认角色添加');
+                            // 从要创建的条目中移除手机-角色，避免覆盖用户数据
+                            delete text["手机-角色"];
+                        }
+                    }
+                }
+                
                 for (const section of ini.getAllSections()) {
                     let targetEntry = entries.find(
                         (entry) => entry.comment == section,
@@ -16760,13 +17155,22 @@ ${index + 1}. ${space.name}
                         console.log(`${section}修改完成`);
                     } else {
                         console.log(`${section}不存在,开始创建`);
+                        
+                        let contentToCreate = text[section];
+                        
+                        // 如果内容不存在（被删除），跳过创建
+                        if (contentToCreate === undefined) {
+                            console.log(`${section}内容不存在，跳过创建`);
+                            continue;
+                        }
+                        
                         await createLorebookEntry(worldbook, {
                             comment: section,
                             key: ini
                                 .readValue(section, "关键词")
                                 .split(",")
                                 .map((item) => item.trim()),
-                            content: text[section],
+                            content: contentToCreate,
                             position: "at_depth_as_system",
                             type:
                                 ini.readValue(section, "类型") == "蓝灯"
@@ -20816,81 +21220,95 @@ ${index + 1}. ${space.name}
             function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
                 console.log(`🌊 开始流式显示 ${fullMessages.length} 条完整消息 - 聊天: ${chatName}`);
                 
-                let currentIndex = 0;
-                let currentTypingIndicator = null;
-                
-                function displayNextMessage() {
-                    // 移除当前的输入指示器
-                    if (currentTypingIndicator) {
-                        QQ_HideTypingIndicator(currentTypingIndicator);
-                        currentTypingIndicator = null;
-                    }
+                return new Promise((resolve, reject) => {
+                    let currentIndex = 0;
+                    let currentTypingIndicator = null;
                     
-                    if (currentIndex >= fullMessages.length) {
-                        console.log(`✅ 流式显示完成 - 共显示 ${fullMessages.length} 条消息`);
-                        
-                        // *** 新增：在AI回复完成后添加时间间隔系统消息 ***
-                        setTimeout(() => {
-                            const now = new Date();
-                            const timeText = now.toLocaleString('zh-CN', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit', 
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: false
-                            });
-                            const timeMessage = `📅 ${timeText}`;
-                            
-                            // 使用正确的系统消息显示函数
-                            if (typeof displaySystemMessage === 'function') {
-                                displaySystemMessage(timeMessage);
+                    function displayNextMessage() {
+                        try {
+                            // 移除当前的输入指示器
+                            if (currentTypingIndicator) {
+                                QQ_HideTypingIndicator(currentTypingIndicator);
+                                currentTypingIndicator = null;
                             }
-                        }, 1000); // 1秒延迟显示时间消息
-                        
-                        // *** 修复：在AI回复完成后清空缓存，确保所有消息都已处理 ***
-                        setTimeout(() => {
-                            QQ_CacheSendMsg = "";
-                        }, 1500);
-                        
-                        return;
+                            
+                            if (currentIndex >= fullMessages.length) {
+                                console.log(`✅ 流式显示完成 - 共显示 ${fullMessages.length} 条消息`);
+                                
+                                // *** 新增：在AI回复完成后添加时间间隔系统消息 ***
+                                setTimeout(() => {
+                                    const now = new Date();
+                                    const timeText = now.toLocaleString('zh-CN', {
+                                        year: 'numeric',
+                                        month: '2-digit',
+                                        day: '2-digit', 
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false
+                                    });
+                                    const timeMessage = `📅 ${timeText}`;
+                                    
+                                    // 使用正确的系统消息显示函数
+                                    if (typeof displaySystemMessage === 'function') {
+                                        displaySystemMessage(timeMessage);
+                                    }
+                                }, 1000); // 1秒延迟显示时间消息
+                                
+                                // *** 修复：在AI回复完成后清空缓存，确保所有消息都已处理 ***
+                                setTimeout(() => {
+                                    QQ_CacheSendMsg = "";
+                                    // Promise resolve 在最后执行
+                                    resolve();
+                                }, 1500);
+                                
+                                return;
+                            }
+                            
+                            const fullMessage = fullMessages[currentIndex];
+                            
+                            // 解析消息格式：发送者--内容--时间
+                            const messageParts = fullMessage.split('--');
+                            const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
+                            
+                            // 显示当前消息
+                            QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount);
+                            console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
+                            
+                            currentIndex++;
+                            
+                            // 如果还有更多消息，显示输入指示器并设置下一次显示
+                            if (currentIndex < fullMessages.length) {
+                                // 获取下一条消息的发送者
+                                const nextMessage = fullMessages[currentIndex];
+                                const nextMessageParts = nextMessage.split('--');
+                                const nextSender = nextMessageParts.length >= 1 ? nextMessageParts[0] : 'Unknown';
+                                
+                                // 短暂延迟后显示输入指示器
+                                setTimeout(() => {
+                                    currentTypingIndicator = QQ_ShowTypingIndicator(chatContainer, nextSender);
+                                }, 200);
+                                
+                                // 使用本福特定律生成延迟时间
+                                const isGroupChat = QQ_Groups.includes(chatName);
+                                const delay = QQ_GenerateBenfordDelay(isGroupChat);
+                                
+                                console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
+                                currentStreamingProcess = setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                            }
+                        } catch (error) {
+                            console.error('🚫 流式显示过程中发生错误:', error);
+                            reject(error);
+                        }
                     }
                     
-                    const fullMessage = fullMessages[currentIndex];
-                    
-                    // 解析消息格式：发送者--内容--时间
-                    const messageParts = fullMessage.split('--');
-                    const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
-                    
-                    // 显示当前消息
-                    QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount);
-                    console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
-                    
-                    currentIndex++;
-                    
-                    // 如果还有更多消息，显示输入指示器并设置下一次显示
-                    if (currentIndex < fullMessages.length) {
-                        // 获取下一条消息的发送者
-                        const nextMessage = fullMessages[currentIndex];
-                        const nextMessageParts = nextMessage.split('--');
-                        const nextSender = nextMessageParts.length >= 1 ? nextMessageParts[0] : 'Unknown';
-                        
-                        // 短暂延迟后显示输入指示器
-                        setTimeout(() => {
-                            currentTypingIndicator = QQ_ShowTypingIndicator(chatContainer, nextSender);
-                        }, 200);
-                        
-                        // 使用本福特定律生成延迟时间
-                        const isGroupChat = QQ_Groups.includes(chatName);
-                        const delay = QQ_GenerateBenfordDelay(isGroupChat);
-                        
-                        console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
-                        setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                    // 开始显示第一条消息
+                    try {
+                        displayNextMessage();
+                    } catch (error) {
+                        console.error('🚫 流式显示启动失败:', error);
+                        reject(error);
                     }
-                }
-                
-                // 开始显示第一条消息
-                displayNextMessage();
+                });
             }
             
             /**
@@ -21232,11 +21650,11 @@ ${index + 1}. ${space.name}
 
             /**
              * *** 短期记忆系统 - 世界书记忆分层架构第1层 ***
-             * 更新短期记忆世界书，保存最近80条重要对话记录
+             * 更新短期记忆世界书，保存最近1000条重要对话记录（真正的滚动式存储）
              */
             async function QQ_UpdateShortTermMemory() {
                 try {
-                    console.log('🧠 开始更新短期记忆世界书...');
+                    console.log('🧠 开始增量更新短期记忆世界书...');
                     
                     if (!worldbook || !entries) {
                         console.warn('⚠️ 世界书功能不可用，跳过短期记忆更新');
@@ -21248,25 +21666,81 @@ ${index + 1}. ${space.name}
                         return;
                     }
                     
-                    // 调试：确认UserName
-                    console.log(`🔍 当前UserName: "${UserName}"`);
-
-                    // 收集所有消息（按渲染顺序）
-                    const allMessages = [];
-                    const now = new Date();
-                    let messageIndex = 0; // 用于保持渲染顺序
+                    // *** 新增：获取当前最大序列号，用于识别新消息 ***
+                    const currentMaxSequenceId = QQ_MessageSequence.current() - 1;
+                    console.log(`🔄 上次处理到序列号: ${QQ_LastProcessedSequenceId}, 当前最大序列号: ${currentMaxSequenceId}`);
                     
-                    // 收集私聊消息（按数组顺序）
+                    // *** 调试：检查QQ_msgjson中的消息 ***
+                    let totalMsgCount = 0;
+                    let messagesWithSequence = 0;
+                    for (const chatKey in QQ_msgjson.私聊) {
+                        const msgs = QQ_msgjson.私聊[chatKey];
+                        if (Array.isArray(msgs)) {
+                            totalMsgCount += msgs.length;
+                            msgs.forEach(msg => {
+                                if (msg.includes('##seq_')) messagesWithSequence++;
+                            });
+                        }
+                    }
+                    console.log(`📊 当前私聊消息总数: ${totalMsgCount}, 带序列号的: ${messagesWithSequence}`);
+                    
+                    // *** 修改：总是执行更新，确保AI新回复被保存 ***
+                    console.log('🔄 开始收集所有消息，优先保存最新回复...');
+                    
+                    // *** 新策略：增量更新 + 滚动式存储 ***
+                    
+                    // 第一步：从世界书获取现有记忆
+                    let existingMemoryMessages = [];
+                    const memoryKeys = ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'];
+                    const memoryEntry = entries.find(entry => 
+                        entry.keys && Array.isArray(entry.keys) && entry.keys.some(key => memoryKeys.includes(key))
+                    );
+                    
+                    if (memoryEntry && memoryEntry.content) {
+                        console.log('📚 找到现有短期记忆条目');
+                        // 解析现有记忆中的序列号信息（简化处理）
+                        const lines = memoryEntry.content.split('\n').filter(line => line.trim());
+                        existingMemoryMessages = lines.map((line, index) => ({
+                            type: '记忆',
+                            content: line,
+                            sequenceId: QQ_LastProcessedSequenceId - lines.length + index + 1, // 估算序列号
+                            isFromMemory: true
+                        }));
+                        console.log(`📝 从记忆恢复 ${existingMemoryMessages.length} 条消息`);
+                    } else {
+                        console.log('🆕 未找到现有记忆，从空开始');
+                    }
+                    
+                    // 第二步：收集新消息（只收集序列号大于上次处理的）
+                    const newMessages = [];
+                    const now = new Date();
+                    let messageIndex = 0;
+                    
+                    // *** 新逻辑：只收集新的私聊消息 ***
+                    console.log(`🔍 开始收集新私聊消息（序列号 > ${QQ_LastProcessedSequenceId}）`);
                     for (const chatKey in QQ_msgjson.私聊) {
                         const messages = QQ_msgjson.私聊[chatKey];
                         if (Array.isArray(messages)) {
                             for (let i = 0; i < messages.length; i++) {
                                 const msg = messages[i];
-                                const parts = msg.split('--');
+                                
+                                // *** 检查这条消息的序列号 ***
+                                const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
+                                let sequenceId = sequenceInfo.sequenceId;
+                                
+                                // *** 修复：只为没有序列号的消息分配序列号 ***
+                                if (sequenceId === 0) {
+                                    sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
+                                    console.log(`🔄 短期记忆分配序列号 [${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                }
+                                
+                                console.log(`🆕 发现新消息 [seq:${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                
+                                const parts = sequenceInfo.cleanMessage.split('--');
                                 if (parts.length >= 2) {
                                     const senderName = parts[0];
                                     const content = parts[1];
-                                    const timeStr = parts[2] || now.toLocaleTimeString('zh-CN', { hour12: false });
+                                    const timeStr = parts[2] || QQ_GetTime();
                                     
                                     // 确定聊天对象（修复：根据发送者确定接收者）
                                     const match = chatKey.match(/(.+?)和(.+?)的聊天/);
@@ -21288,16 +21762,27 @@ ${index + 1}. ${space.name}
                                         }
                                     }
                                     
-                                    allMessages.push({
+                                    // *** 修改：从消息中提取序列号 ***
+                                    const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
+                                    let sequenceId = sequenceInfo.sequenceId;
+                                    
+                                    // *** 修复：只为没有序列号的消息分配序列号 ***
+                                    if (sequenceId === 0) {
+                                        sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
+                                        console.log(`🔄 短期记忆私聊分配序列号 [${sequenceId}]: ${sequenceInfo.cleanMessage.substring(0, 30)}...`);
+                                    }
+                                    
+                                    newMessages.push({
                                         type: '私聊',
                                         sender: senderName,
                                         content: content,
                                         time: timeStr,
                                         chatPartner: chatPartner,
                                         chatKey: chatKey,
-                                        arrayIndex: i, // 在该私聊数组中的位置
-                                        globalIndex: messageIndex++, // 全局消息顺序索引
-                                        timestamp: QQ_ParseTime(timeStr) // 时间戳（向后兼容）
+                                        arrayIndex: i,
+                                        globalIndex: messageIndex++,
+                                        sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
+                                        timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
                                     });
                                 }
                             }
@@ -21324,15 +21809,26 @@ ${index + 1}. ${space.name}
                                          content.includes('欢迎加入群聊'));
                                     
                                     if (!isInitMessage) {
-                                        allMessages.push({
+                                        // *** 修改：从消息中提取序列号 ***
+                                        const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, true);
+                                        let sequenceId = sequenceInfo.sequenceId;
+                                        
+                                        // *** 修复：只为没有序列号的消息分配序列号 ***
+                                        if (sequenceId === 0) {
+                                            sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
+                                            console.log(`🔄 短期记忆群聊分配序列号 [${sequenceId}]: ${content.substring(0, 30)}...`);
+                                        }
+                                        
+                                        newMessages.push({
                                             type: '群聊',
                                             sender: senderName,
                                             content: content,
                                             time: timeStr,
                                             groupName: groupName,
-                                            arrayIndex: i, // 在该群聊数组中的位置
-                                            globalIndex: messageIndex++, // 全局消息顺序索引
-                                            timestamp: QQ_ParseTime(timeStr)
+                                            arrayIndex: i,
+                                            globalIndex: messageIndex++,
+                                            sequenceId: sequenceId, // *** 新增：逻辑序列号 ***
+                                            timestamp: QQ_ParseTime(timeStr) // 保留以便向后兼容
                                         });
                                     }
                                 }
@@ -21346,7 +21842,7 @@ ${index + 1}. ${space.name}
                             const moment = QQ_MomentsData[momentIndex];
                             // 添加动态本身
                             if (moment.message) {
-                                allMessages.push({
+                                newMessages.push({
                                     type: '动态',
                                     sender: moment.userName || moment.name,
                                     content: `发布动态: ${moment.message}`,
@@ -21361,30 +21857,113 @@ ${index + 1}. ${space.name}
                             if (moment.comments && Array.isArray(moment.comments)) {
                                 for (let commentIndex = 0; commentIndex < moment.comments.length; commentIndex++) {
                                     const comment = moment.comments[commentIndex];
-                                    allMessages.push({
+                                    newMessages.push({
                                         type: '动态评论',
                                         sender: comment.name || comment.userName,
                                         content: comment.content || comment.message,
-                                        time: comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                        time: comment.timestamp || QQ_GetTime(),
                                         momentAuthor: moment.userName || moment.name,
                                         momentContent: moment.message,
                                         momentIndex: momentIndex, // 所属动态的位置
                                         commentIndex: commentIndex, // 在评论数组中的位置
                                         globalIndex: messageIndex++, // 全局消息顺序索引
-                                        timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
+                                        timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || QQ_GetTime())
                                     });
                                 }
                             }
                         }
                     }
                     
-                    // 按渲染顺序排序（globalIndex），保持界面显示的顺序
-                    allMessages.sort((a, b) => a.globalIndex - b.globalIndex);
+                    console.log(`📊 收集到 ${newMessages.length} 条新消息`);
                     
-                    // 取最近200条消息
-                    const recentMessages = allMessages.slice(0, 200);
+                    // *** 修改：实现增量更新，只处理新消息 ***
+                    let allMessages = [];
                     
-                    console.log(`📊 收集到 ${allMessages.length} 条消息，取最近 ${recentMessages.length} 条更新短期记忆`);
+                    // 获取现有记忆中的消息（使用之前找到的memoryEntry）
+                    if (memoryEntry && memoryEntry.content) {
+                        // 从现有记忆中提取消息（简化版解析）
+                        console.log('📖 从现有记忆中提取消息...');
+                        // 这里可以实现解析逻辑，但为了简化，我们先合并新消息
+                    }
+                    
+                    // 合并新消息到总消息列表
+                    allMessages = [...newMessages]; // 暂时只使用新消息，后续可改进为真正的合并
+                    
+                    console.log(`🏠 开始按逻辑序列号排序 ${allMessages.length} 条消息...`);
+                    
+                    // *** 改进：智能消息优先级保存策略 ***
+                    let recentMessages;
+                    if (allMessages.length <= 1000) {
+                        // 消息数量未达到上限，按逻辑序列号升序排列（早的在前）
+                        recentMessages = QQ_SortMessagesBySequence(allMessages, true);
+                        console.log(`📝 消息数量(${allMessages.length})未达到上限，按逻辑顺序保留所有消息`);
+                    } else {
+                        // *** 新策略：确保最新分配序列号的消息（AI新回复）优先保存 ***
+                        console.log(`🎯 消息超限，使用智能优先级保存...`);
+                        
+                        // 找出最近分配序列号的消息（很可能是AI新回复）
+                        const recentSeqThreshold = QQ_MessageSequence.current() - 100; // 最近100个序列号
+                        const recentlyAssigned = allMessages.filter(msg => 
+                            msg.sequenceId >= recentSeqThreshold || QQ_CurrentReplyMessages.has(msg.sequenceId)
+                        );
+                        const otherMessages = allMessages.filter(msg => 
+                            msg.sequenceId < recentSeqThreshold && !QQ_CurrentReplyMessages.has(msg.sequenceId)
+                        );
+                        
+                        // 统计保护的消息数量
+                        const protectedMessages = allMessages.filter(msg => QQ_CurrentReplyMessages.has(msg.sequenceId));
+                        console.log(`📊 最近分配的消息: ${recentlyAssigned.length}条, 历史消息: ${otherMessages.length}条`);
+                        if (protectedMessages.length > 0) {
+                            console.log(`🛡️ 当前回复保护的消息: ${protectedMessages.length}条`);
+                            protectedMessages.forEach(msg => {
+                                console.log(`   保护消息 [seq:${msg.sequenceId}]: ${msg.sender}: ${msg.content?.substring(0, 30)}...`);
+                            });
+                        }
+                        
+                        // 优先保存最近分配的消息，然后按序列号排序选择其他消息
+                        const sortedOthers = QQ_SortMessagesBySequence(otherMessages, false);
+                        const remainingSlots = 1000 - recentlyAssigned.length;
+                        
+                        let finalMessages = [...recentlyAssigned];
+                        if (remainingSlots > 0) {
+                            finalMessages = finalMessages.concat(sortedOthers.slice(0, remainingSlots));
+                        }
+                        
+                        // 按序列号重新排序最终结果，最新的在前
+                        const sortedMessages = QQ_SortMessagesBySequence(finalMessages, false);
+                        const latestMessages = sortedMessages;
+                        const deletedMessages = allMessages.filter(msg => !finalMessages.includes(msg));
+                        
+                        // *** 调试：显示被删除的消息信息 ***
+                        if (deletedMessages.length > 0) {
+                            // 重新排序被删除的消息以显示正确的范围
+                            const sortedDeleted = QQ_SortMessagesBySequence(deletedMessages, false);
+                            const deletedMaxSeq = sortedDeleted[0]?.sequenceId || 0;
+                            const deletedMinSeq = sortedDeleted[sortedDeleted.length - 1]?.sequenceId || 0;
+                            console.log(`🗑️ 被删除消息序列号范围: ${deletedMinSeq} - ${deletedMaxSeq}`);
+                            console.log(`🔍 最近5条被删除的消息:`);
+                            sortedDeleted.slice(0, 5).forEach((msg, index) => {
+                                console.log(`   ${index + 1}. [seq:${msg.sequenceId}] ${msg.sender}: ${msg.content?.substring(0, 30)}...`);
+                            });
+                        }
+                        
+                        // 然后按逻辑序列号升序重新排序用于显示（最早的在前）
+                        // *** 特殊处理：确保保护的消息永远在最底部 ***
+                        const protectedInFinal = latestMessages.filter(msg => QQ_CurrentReplyMessages.has(msg.sequenceId));
+                        const nonProtectedInFinal = latestMessages.filter(msg => !QQ_CurrentReplyMessages.has(msg.sequenceId));
+                        
+                        // 先排序非保护消息，再添加保护消息到底部
+                        const sortedNonProtected = QQ_SortMessagesBySequence(nonProtectedInFinal, true);
+                        const sortedProtected = QQ_SortMessagesBySequence(protectedInFinal, true);
+                        recentMessages = [...sortedNonProtected, ...sortedProtected];
+                        
+                        if (protectedInFinal.length > 0) {
+                            console.log(`📍 已将${protectedInFinal.length}条保护消息放置在记忆底部`);
+                        }
+                        console.log(`🔄 消息数量(${allMessages.length})超过上限，保留最新1000条，删除${allMessages.length - 1000}条旧消息`);
+                    }
+                    
+                    console.log(`💾 短期记忆已更新：收集${allMessages.length}条消息，保存${recentMessages.length}条最新消息`);
                     
                     // 格式化为AI友好的格式
                     let memoryContent = `# 【历史对话记录 - 仅供参考，请勿重复】
@@ -21398,7 +21977,8 @@ ${index + 1}. ${space.name}
 
 **记录信息：**
 - 更新时间: ${now.toLocaleString('zh-CN')}
-- 记录条数: ${recentMessages.length}/200 条历史消息
+- 收集消息总数: ${allMessages.length} 条
+- 保存条数: ${recentMessages.length}/1000 条历史消息${allMessages.length > 1000 ? ` (已删除${allMessages.length - 1000}条旧消息)` : ''}
 
 **历史对话内容：**
 
@@ -21432,15 +22012,15 @@ ${index + 1}. ${space.name}
                     const entryComment = '手机-短期记忆-最近对话';
                     
                     // 查找现有条目
-                    let memoryEntry = entries.find(entry => 
+                    let memoryEntryForSave = entries.find(entry => 
                         entry && entry.comment === entryComment
                     );
                     
-                    if (memoryEntry) {
+                    if (memoryEntryForSave) {
                         // 更新现有条目 - 使用setLorebookEntries API
                         if (typeof setLorebookEntries === 'function') {
                             await setLorebookEntries(worldbook, [{
-                                uid: memoryEntry.uid,
+                                uid: memoryEntryForSave.uid,
                                 content: memoryContent,
                                 keys: ['短期记忆-最近对话', '最近对话', '短期记忆', '对话历史', '聊天记录'],
                                 type: 'constant',
@@ -21502,6 +22082,13 @@ ${index + 1}. ${space.name}
                             console.log('ℹ️ 短期记忆条目在本地缓存中暂未同步，但已通过API成功创建');
                         }
                     }, 1000);
+                    
+                    // *** 修改：更新最后处理的序列ID ***
+                    if (newMessages.length > 0) {
+                        const maxSequenceId = Math.max(...newMessages.map(msg => msg.sequenceId || 0));
+                        QQ_LastProcessedSequenceId = maxSequenceId;
+                        console.log(`🔄 已更新最后处理的序列ID: ${QQ_LastProcessedSequenceId}`);
+                    }
                     
                 } catch (error) {
                     console.error('❌ 更新短期记忆失败:', error);
@@ -21569,30 +22156,39 @@ ${index + 1}. ${space.name}
                         return timeStr.getTime();
                     }
                     
+                    // *** 新增：处理完整日期时间格式 (YYYY/MM/DD HH:MM 或 YYYY/MM/DD, HH:MM) ***
+                    const fullDateTimeRegex = /^(\d{4})\/(\d{1,2})\/(\d{1,2})[,\s]+(\d{1,2}):(\d{2})$/;
+                    const fullDateTimeMatch = timeStr.match(fullDateTimeRegex);
+                    if (fullDateTimeMatch) {
+                        const [, year, month, day, hours, minutes] = fullDateTimeMatch.map(Number);
+                        return new Date(year, month - 1, day, hours, minutes, 0).getTime();
+                    }
+                    
                     // 处理 ISO 格式
-                    if (timeStr.includes('T') || timeStr.includes('-')) {
+                    if (timeStr.includes('T') || (timeStr.includes('-') && timeStr.length > 10)) {
                         const parsed = Date.parse(timeStr);
                         if (!isNaN(parsed)) return parsed;
                     }
                     
-                    // 处理各种时间格式
+                    // *** 修改：对于纯时间格式，使用当前日期但警告用户 ***
+                    const today = new Date();
                     if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
                         // HH:MM:SS 格式
-                        const today = new Date();
+                        // console.log(`🕐 使用纯时间格式 '${timeStr}'，配合序列号排序`); // 减少日志噪音
                         const [hours, minutes, seconds] = timeStr.split(':').map(Number);
                         return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds).getTime();
-                    } else if (/^\d{2}:\d{2}$/.test(timeStr)) {
-                        // HH:MM 格式
-                        const today = new Date();
-                        const [hours, minutes] = timeStr.split(':').map(Number);
-                        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
                     } else if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
-                        // H:MM 或 HH:MM 格式
-                        const today = new Date();
+                        // HH:MM 或 H:MM 格式
+                        // console.log(`🕐 使用纯时间格式 '${timeStr}'，配合序列号排序`); // 减少日志噪音
                         const [hours, minutes] = timeStr.split(':').map(Number);
                         return new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, 0).getTime();
                     } else {
-                        // 其他格式，使用当前时间
+                        // 其他格式，尝试解析
+                        const parsed = Date.parse(timeStr);
+                        if (!isNaN(parsed)) {
+                            return parsed;
+                        }
+                        console.warn(`⚠️ 无法解析时间格式 '${timeStr}'，使用当前时间`);
                         return Date.now();
                     }
                 } catch (e) {
@@ -21765,17 +22361,38 @@ ${index + 1}. ${space.name}
                                 }
                             }
                             
-                            // 检查是否为新消息（不在现有消息列表中）
-                            const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
+                            // *** 修改：使用逻辑序列号替代时间排序 ***
+                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, false);
+                            const cleanMsg = sequenceInfo.cleanMessage;
+                            let sequenceId = sequenceInfo.sequenceId;
                             
-                            if (isNewMsg) {
-                                newMessages.push(msg);
-                                NewMsgCount++;
-                            } else {
-                                existingMessages.push(msg);
+                            // *** 修复：只为没有序列号的消息分配序列号 ***
+                            if (sequenceId === 0) {
+                                sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
+                                console.log(`🔄 流式私聊消息分配序列号 [${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
-                            QQ_msgjson.私聊[str].push(msg);
+                            // 检查是否为新消息（检查清理后的消息）
+                            const isNewMsg = !QQ_msgjson.私聊[str].some(existingMsg => {
+                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg, false).cleanMessage;
+                                return existingClean === cleanMsg;
+                            });
+                            
+                            if (isNewMsg) {
+                                // 存储带有序列号的消息
+                                const msgWithSequence = QQ_AddSequenceIdToMessage(cleanMsg, sequenceId);
+                                newMessages.push(cleanMsg); // 流式显示使用清理后的消息
+                                NewMsgCount++;
+                                QQ_msgjson.私聊[str].push(msgWithSequence);
+                                
+                                // *** 新增：将当前回复的消息添加到保护列表 ***
+                                QQ_CurrentReplyMessages.add(sequenceId);
+                                console.log(`➕ 私聊新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
+                                console.log(`🛡️ 已保护消息序列号: ${sequenceId}`);
+                            } else {
+                                existingMessages.push(cleanMsg);
+                                console.log(`🔄 私聊已存在消息: ${cleanMsg.substring(0, 50)}...`);
+                            }
                             let sp = msg.split("--");
                             if (sp.length >= 2) {
                                 if (sp[0] == `${UserName}`) {
@@ -21800,6 +22417,7 @@ ${index + 1}. ${space.name}
                         // *** 阶段一：使用流式显示处理新消息 ***
                         if (newMessages.length > 0) {
                             console.log(`🌊 私聊${name}检测到${newMessages.length}条新消息，启动流式显示`);
+                            console.log(`📋 新消息列表:`, newMessages.map(msg => msg.substring(0, 30) + '...'));
                             
                             // 先显示已有消息（立即显示，无延迟）
                             for (let msg of existingMessages) {
@@ -21811,8 +22429,12 @@ ${index + 1}. ${space.name}
                                 QQ_AddTimeDividerMessage($msgContent[0], name);
                             }
                             
-                            // 使用流式显示新消息（传入完整消息，不需要额外处理）
-                            QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
+                            // 使用队列机制流式显示新消息，避免与其他流式传输冲突
+                            QQ_EnqueueStreamingTask({
+                                handler: QQ_DisplayStreamingMessagesDirectly,
+                                args: [$msgContent[0], newMessages, name, true, false],
+                                description: `私聊${name}流式显示${newMessages.length}条消息`
+                            });
                         } else {
                             // 没有新消息，正常显示所有消息
                             for (let msg of json.私聊[str]) {
@@ -22103,18 +22725,34 @@ ${index + 1}. ${space.name}
                         const existingMessages = [];
                         
                         for (let msg of json.群聊[name]["msgs"]) {
-                            // 检查是否为新消息（不在现有消息列表中）
-                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
+                            // *** 修改：使用逻辑序列号替代时间排序 ***
+                            const sequenceInfo = QQ_ExtractOrGenerateSequenceId(msg, false);
+                            const cleanMsg = sequenceInfo.cleanMessage;
+                            let sequenceId = sequenceInfo.sequenceId;
                             
-                            if (isNewMsg) {
-                                newMessages.push(msg);
-                                NewMsgCount++;
-                            } else {
-                                existingMessages.push(msg);
+                            // *** 修复：只为没有序列号的消息分配序列号 ***
+                            if (sequenceId === 0) {
+                                sequenceId = QQ_GetNextMessageId(); // 为没有序列号的消息分配新序列号
+                                console.log(`🔄 流式群聊消息分配序列号 [${sequenceId}]: ${cleanMsg.substring(0, 30)}...`);
                             }
                             
-                            // 添加到数据记录
-                            QQ_msgjson.群聊[name]["msgs"].push(msg);
+                            // 检查是否为新消息（检查清理后的消息）
+                            const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].some(existingMsg => {
+                                const existingClean = QQ_ExtractOrGenerateSequenceId(existingMsg, false).cleanMessage;
+                                return existingClean === cleanMsg;
+                            });
+                            
+                            if (isNewMsg) {
+                                // 存储带有序列号的消息
+                                const msgWithSequence = QQ_AddSequenceIdToMessage(cleanMsg, sequenceId);
+                                newMessages.push(cleanMsg); // 流式显示使用清理后的消息
+                                NewMsgCount++;
+                                QQ_msgjson.群聊[name]["msgs"].push(msgWithSequence);
+                                console.log(`➕ 群聊[${name}]新消息 [seq:${sequenceId}]: ${cleanMsg.substring(0, 50)}...`);
+                            } else {
+                                existingMessages.push(cleanMsg);
+                                console.log(`🔄 群聊[${name}]已存在消息: ${cleanMsg.substring(0, 50)}...`);
+                            }
                             console.log(`在群聊:${name}中添加消息:${msg} (新消息: ${isNewMsg})`);
                             
                             // *** 修复：使用缓存的群聊元数据保存消息 ***
@@ -22170,8 +22808,12 @@ ${index + 1}. ${space.name}
                                 QQ_AddTimeDividerMessage($msgContent[0], name);
                             }
                             
-                            // 使用流式显示新消息（传入完整消息，不需要额外处理）
-                            QQ_DisplayStreamingMessagesDirectly($msgContent[0], newMessages, name, true, false);
+                            // 使用队列机制流式显示新消息，避免与其他流式传输冲突
+                            QQ_EnqueueStreamingTask({
+                                handler: QQ_DisplayStreamingMessagesDirectly,
+                                args: [$msgContent[0], newMessages, name, true, false],
+                                description: `群聊${name}流式显示${newMessages.length}条消息`
+                            });
                         } else {
                             // 没有新消息，正常显示所有消息
                             for (let msg of json.群聊[name]["msgs"]) {
@@ -25553,12 +26195,16 @@ ${index + 1}. ${space.name}
              * @returns {string} 格式化的时间戳 (HH:MM)
              */
             function QQ_GetTime() {
-                // 使用与全局一致的时间戳格式
-                return new Date().toLocaleTimeString('zh-CN', { 
-                    hour12: false, 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                });
+                // *** 修改：使用完整的日期时间格式，解决跨日排序问题 ***
+                const now = new Date();
+                return now.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit', 
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).replace(/\//g, '/');
             }
             
             /**
@@ -25786,7 +26432,7 @@ ${index + 1}. ${space.name}
              * 上线后的处理逻辑（阶段三：触发主动消息处理）
              */
             async function QQ_ProcessOnlineActions() {
-                console.log('🔄 用户上线，开始处理主动消息队列...');
+                console.log('🔄 用户状态变化，检查主动消息队列...');
                 
                 // 首先尝试从世界书加载队列数据
                 await QQ_LoadProactiveMessageQueue();
@@ -25794,19 +26440,110 @@ ${index + 1}. ${space.name}
                 // 清理过期消息
                 QQ_CleanupProactiveMessageQueue();
                 
-                // 延迟处理，让用户有时间适应界面
-                setTimeout(() => {
-                    QQ_ProcessProactiveMessageQueue();
-                }, 2000);
+                // *** 修改：不立即处理队列，只启动调度器 ***
+                // 避免因状态频繁变化导致消息涌出
                 
-                // 启动定期检查
+                // 启动或重启定期检查（如果尚未运行）
                 QQ_StartProactiveMessageScheduler();
             }
             
             /**
-             * 监听页面可见性变化来检测上线/下线
+             * *** 优化版：基于复合行为的用户在线状态检测 ***
+             * 使用多个指标综合判断用户是否真正在线
              */
             function QQ_InitializeOnlineStatusDetection() {
+                
+                // *** 用户活动状态跟踪 ***
+                let lastUserActivity = Date.now();
+                let lastUserMessage = 0;
+                let isUserTyping = false;
+                let stableOnlineTime = 0;
+                
+                // *** 活动检测配置 ***
+                const ACTIVITY_TIMEOUT = 300000; // 5分钟无活动视为离线
+                const STABLE_ONLINE_THRESHOLD = 30000; // 30秒稳定在线才触发主动消息
+                const MESSAGE_INTERVAL_THRESHOLD = 10000; // 10秒内发消息视为活跃
+                
+                // *** 多重检测指标 ***
+                function updateUserActivity(source) {
+                    const now = Date.now();
+                    lastUserActivity = now;
+                    
+                    if (source === 'message') {
+                        lastUserMessage = now;
+                    }
+                    
+                    console.log(`🟢 用户活动检测: ${source} - ${new Date(now).toLocaleTimeString()}`);
+                }
+                
+                // *** 综合在线状态判断 ***
+                function isUserTrulyOnline() {
+                    const now = Date.now();
+                    const timeSinceActivity = now - lastUserActivity;
+                    const timeSinceMessage = now - lastUserMessage;
+                    
+                    // 条件1：页面可见
+                    const isPageVisible = !document.hidden;
+                    
+                    // 条件2：最近有活动
+                    const hasRecentActivity = timeSinceActivity < ACTIVITY_TIMEOUT;
+                    
+                    // 条件3：不在等待AI回复
+                    const notWaitingForAI = !gening;
+                    
+                    // 条件4：最近有消息交互
+                    const hasRecentMessage = timeSinceMessage < MESSAGE_INTERVAL_THRESHOLD;
+                    
+                    const isOnline = isPageVisible && hasRecentActivity && notWaitingForAI;
+                    
+                    console.log(`📊 在线状态检查:`, {
+                        isPageVisible,
+                        hasRecentActivity: `${Math.round(timeSinceActivity/1000)}s ago`,
+                        notWaitingForAI,
+                        hasRecentMessage: `${Math.round(timeSinceMessage/1000)}s ago`,
+                        finalStatus: isOnline
+                    });
+                    
+                    return isOnline;
+                }
+                
+                // *** 监听用户交互事件 ***
+                // 鼠标移动（限流）
+                let mouseMoveThrottle = 0;
+                document.addEventListener('mousemove', () => {
+                    const now = Date.now();
+                    if (now - mouseMoveThrottle > 5000) { // 5秒限流
+                        mouseMoveThrottle = now;
+                        updateUserActivity('mouse');
+                    }
+                });
+                
+                // 键盘输入
+                document.addEventListener('keydown', () => {
+                    updateUserActivity('keyboard');
+                });
+                
+                // 点击事件
+                document.addEventListener('click', () => {
+                    updateUserActivity('click');
+                });
+                
+                // 滚动事件（限流）
+                let scrollThrottle = 0;
+                document.addEventListener('scroll', () => {
+                    const now = Date.now();
+                    if (now - scrollThrottle > 3000) { // 3秒限流
+                        scrollThrottle = now;
+                        updateUserActivity('scroll');
+                    }
+                });
+                
+                // 监听消息发送
+                document.addEventListener('QQ_MessageSent', () => {
+                    updateUserActivity('message');
+                });
+                
+                // *** 原有的页面可见性检测（作为补充） ***
                 // 页面可见性变化监听
                 document.addEventListener('visibilitychange', () => {
                     if (document.hidden) {
@@ -26247,13 +26984,23 @@ ${index + 1}. ${space.name}
                 const config = window.QQ_ProactiveMessageQueue.config;
                 
                 if (queue.size === 0) {
-                    console.log('📭 主动消息队列为空');
-                    return;
+                    return; // 静默返回，减少日志噪音
                 }
                 
-                console.log(`🚀 开始处理主动消息队列，共${queue.size}个角色有待发送消息`);
+                // *** 只处理pending状态的消息，避免重复调度 ***
+                let totalPendingMessages = 0;
+                for (const [characterName, messages] of queue.entries()) {
+                    const pendingMessages = messages.filter(msg => msg.status === 'pending');
+                    totalPendingMessages += pendingMessages.length;
+                }
                 
-                // *** 新增：全局时间管理，避免消息冲突 ***
+                if (totalPendingMessages === 0) {
+                    return; // 没有待处理的消息，静默返回
+                }
+                
+                console.log(`🚀 发现${totalPendingMessages}条待调度的主动消息`);
+                
+                // *** 全局时间管理，避免消息冲突 ***
                 let globalDelay = QQ_GenerateRandomDelay(
                     config.messageDeliveryDelay.min,
                     config.messageDeliveryDelay.max - config.messageDeliveryDelay.min
@@ -26262,32 +27009,38 @@ ${index + 1}. ${space.name}
                 const minIntervalBetweenCharacters = 8000; // 不同角色间最少间隔8秒
                 const minIntervalBetweenMessages = 5000;   // 同一角色多条消息间最少间隔5秒
                 
+                let scheduledCount = 0;
+                
                 for (const [characterName, messages] of queue.entries()) {
                     const pendingMessages = messages.filter(msg => msg.status === 'pending');
                     
                     if (pendingMessages.length === 0) {
-                        console.log(`⏭️ 角色${characterName}没有待发送的消息`);
                         continue;
                     }
                     
-                    console.log(`📨 角色${characterName}有${pendingMessages.length}条待发送消息`);
+                    console.log(`📨 为角色${characterName}调度${pendingMessages.length}条消息`);
                     
                     for (let i = 0; i < pendingMessages.length; i++) {
                         const message = pendingMessages[i];
                         
-                        // 标记为已调度
+                        // 标记为已调度，避免重复处理
                         message.status = 'scheduled';
                         
                         // 计算发送延迟（确保时间间隔）
-                        const finalDelay = globalDelay + (i * minIntervalBetweenMessages);
+                        const finalDelay = globalDelay + (scheduledCount * minIntervalBetweenMessages);
                         message.deliveryDelay = finalDelay;
+                        message.scheduledAt = Date.now(); // 记录调度时间
                         
                         // 计划发送消息
                         setTimeout(async () => {
-                            await QQ_DeliverProactiveMessage(characterName, message);
+                            // 再次检查消息状态，避免重复发送
+                            if (message.status === 'scheduled') {
+                                await QQ_DeliverProactiveMessage(characterName, message);
+                            }
                         }, finalDelay);
                         
-                        console.log(`⏰ 已调度消息发送: ${characterName} - ${finalDelay}ms后发送`);
+                        console.log(`⏰ 已调度消息: ${characterName} - ${Math.round(finalDelay/1000)}秒后发送`);
+                        scheduledCount++;
                     }
                     
                     // 为下一个角色增加时间间隔
@@ -26349,43 +27102,26 @@ ${index + 1}. ${space.name}
                     }
                     
                     // 获取消息容器
-                    const msgContent = chatPage.querySelector('.msgcontent');
+                    const msgContent = chatPage?.querySelector('.msgcontent');
+                    if (!msgContent) {
+                        console.error('❌ 无法找到消息容器，chatPage:', chatPage);
+                        return;
+                    }
                     
-                    // 创建消息HTML（流式效果）
-                    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                    const messageHtml = `
-                        <div class="QQ_chat_item proactive-message" id="${messageId}">
-                            <img class="Chat_MyHead" alt="${characterName}" src="${QQ_GetCharacterAvatar(characterName)}" />
-                            <div class="tri"></div>
-                            <span class="QQ_chat_text streaming-text" data-full-text="${content}"></span>
-                        </div>
-                    `;
+                    // 使用与常规消息相同的流式显示机制
+                    const fullMessage = `${characterName}--${content}--${timestamp}`;
                     
-                    msgContent.insertAdjacentHTML('beforeend', messageHtml);
-                    
-                    // 滚动到最新消息位置
-                    msgContent.scrollTop = msgContent.scrollHeight;
-                    
-                    // 流式显示文字（主动消息稍微快一些）
-                    const textElement = document.querySelector(`#${messageId} .streaming-text`);
-                    const fullText = content;
-                    let currentIndex = 0;
-                    
+                    // 使用队列机制流式显示主动消息，确保与其他消息流式显示一致
                     return new Promise((resolve) => {
-                        const streamInterval = setInterval(() => {
-                            if (currentIndex < fullText.length) {
-                                textElement.textContent = fullText.substring(0, currentIndex + 1);
-                                currentIndex++;
-                                // 在流式传输过程中保持滚动到底部
-                                msgContent.scrollTop = msgContent.scrollHeight;
-                            } else {
-                                clearInterval(streamInterval);
-                                textElement.classList.remove('streaming-text');
-                                // 最终滚动到底部
-                                msgContent.scrollTop = msgContent.scrollHeight;
+                        QQ_EnqueueStreamingTask({
+                            handler: async () => {
+                                // 使用与常规消息相同的流式显示函数
+                                await QQ_DisplayStreamingMessagesDirectly(msgContent, [fullMessage], characterName, true, true);
                                 resolve();
-                            }
-                        }, 25); // 主动消息比25ms显示一个字符，略快于常规回复
+                            },
+                            args: [],
+                            description: `主动消息流式显示: ${characterName}`
+                        });
                     });
                     
                 } catch (error) {
@@ -26490,6 +27226,12 @@ ${index + 1}. ${space.name}
                 
                 // 启动新的调度器
                 window.QQ_ProactiveMessageQueue.scheduler = setInterval(() => {
+                    // *** 使用新的在线状态检测 ***
+                    if (typeof isUserTrulyOnline === 'function' && !isUserTrulyOnline()) {
+                        console.log('🔄 用户不在线，跳过主动消息处理');
+                        return;
+                    }
+                    
                     console.log('🔄 定期检查主动消息队列...');
                     QQ_ProcessProactiveMessageQueue();
                 }, config.queueProcessInterval);
@@ -26911,26 +27653,32 @@ ${index + 1}. ${space.name}
                     return;
                 }
                 
-                // 立即显示所有待发送的主动消息
-                pendingMessages.forEach((messageData, index) => {
-                    setTimeout(() => {
-                        const timestamp = new Date().toLocaleTimeString('zh-CN', {
-                            hour12: false,
-                            hour: '2-digit',
-                            minute: '2-digit'
+                // 使用流式队列显示所有待发送的主动消息
+                const messagesToDisplay = pendingMessages.map(messageData => {
+                    const timestamp = new Date().toLocaleTimeString('zh-CN', {
+                        hour12: false,
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                    
+                    return `${characterName}--${messageData.content}--${timestamp}`;
+                });
+                
+                // 使用队列机制流式显示主动消息
+                QQ_EnqueueStreamingTask({
+                    handler: async () => {
+                        await QQ_DisplayStreamingMessagesDirectly(chatContainer, messagesToDisplay, characterName, true, false);
+                        
+                        // 所有消息显示完成后，标记为已发送
+                        pendingMessages.forEach(messageData => {
+                            messageData.status = 'delivered';
+                            messageData.deliveredAt = Date.now();
                         });
                         
-                        const messageText = `${characterName}--${messageData.content}--${timestamp}`;
-                        
-                        // 添加消息到聊天界面
-                        QQ_Chat_AddMsg(chatContainer, messageText, characterName, true, false);
-                        
-                        // 标记为已发送
-                        messageData.status = 'delivered';
-                        messageData.deliveredAt = Date.now();
-                        
-                        console.log(`✅ 已显示主动消息: ${characterName}: ${messageData.content}`);
-                    }, index * 1000); // 每条消息间隔1秒
+                        console.log(`✅ 已流式显示 ${pendingMessages.length} 条主动消息`);
+                    },
+                    args: [],
+                    description: `批量主动消息流式显示: ${characterName} (${pendingMessages.length}条)`
                 });
                 
                 // 保存更新后的队列状态
@@ -26990,7 +27738,7 @@ ${index + 1}. ${space.name}
                     
                     // 查找现有条目
                     let queueEntry = entries.find(entry => 
-                        entry.keys.includes(queueKey)
+                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(queueKey)
                     );
                     
                     if (queueEntry) {
@@ -27048,7 +27796,7 @@ ${index + 1}. ${space.name}
                     
                     // 查找队列数据条目
                     const queueEntry = entries.find(entry => 
-                        entry.keys.includes(queueKey)
+                        entry.keys && Array.isArray(entry.keys) && entry.keys.includes(queueKey)
                     );
                     
                     if (!queueEntry || !queueEntry.content) {
@@ -34428,11 +35176,16 @@ ${index + 1}. ${space.name}
                             enabled: true,
                             uid: Date.now() + Math.random()
                         };
+                        
+                        // *** 修复：同步更新两个数组以防止不一致 ***
                         // 添加到worldbook.entries（如果存在）
                         if (worldbook.entries) {
                             worldbook.entries.push(entry);
                         }
-                        console.log(`创建新世界书条目: ${key}`);
+                        // 同时添加到本地entries数组，保持同步
+                        entries.push(entry);
+                        
+                        console.log(`创建新世界书条目: ${key} (已同步到本地数组)`);
                     } else {
                         // 更新现有条目
                         entry.content = JSON.stringify(entryData);
