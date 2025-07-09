@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>90%</span>
+                    <span>91%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -5058,7 +5058,8 @@
                     streamingChatStates.set(chatName, {
                         isActive: false,
                         startTime: null,
-                        queue: []
+                        queue: [],
+                        currentProcess: null  // 添加独立的流式传输进程引用
                     });
                 }
                 return streamingChatStates.get(chatName);
@@ -5182,6 +5183,22 @@
                     console.log(`📥 任务已加入${chatName}的队列: ${task.description}, 队列长度: ${chatState.queue.length}`);
                 }
                 
+                // 增强调试：输出当前聊天状态
+                console.log(`🔍 ${chatName}聊天状态: isActive=${chatState.isActive}, 队列长度=${chatState.queue.length}, 开始时间=${chatState.startTime}`);
+                
+                // 增强调试：输出所有活跃的流式传输状态
+                const activeChats = [];
+                for (const [name, state] of streamingChatStates) {
+                    if (state.isActive) {
+                        activeChats.push(name);
+                    }
+                }
+                if (activeChats.length > 0) {
+                    console.log(`🎯 当前活跃的流式传输聊天: ${activeChats.join(', ')}`);
+                } else {
+                    console.log(`✅ 当前没有活跃的流式传输聊天`);
+                }
+                
                 // 检查该聊天是否有卡住的任务（超过10秒还在处理）
                 if (chatState.isActive && chatState.startTime && 
                     Date.now() - chatState.startTime > 10000) {
@@ -5201,6 +5218,7 @@
                 if (task.priority === 'high' && chatState.isActive) {
                     console.warn(`🔥 ${chatName}的高优先级AI回复任务，强制立即执行`);
                     chatState.isActive = false;
+                    chatState.startTime = null;  // 确保状态一致性
                 }
                 
                 // 如果该聊天当前没有流式传输在进行，立即处理其队列
@@ -5229,23 +5247,39 @@
                 const task = chatState.queue.shift();
                 console.log(`📤 开始处理${chatName}的队列任务: ${task.description}, 剩余队列长度: ${chatState.queue.length}`);
                 
+                // 增强调试：输出任务处理前的状态
+                console.log(`🔧 处理前${chatName}状态: isActive=${chatState.isActive}, 开始时间=${chatState.startTime}, 任务类型=${task.priority || 'normal'}`);
+                
                 // 设置锁并记录开始时间
                 chatState.isActive = true;
                 chatState.startTime = Date.now();
+                
+                // 增强调试：输出任务处理开始的状态
+                console.log(`🚀 ${chatName}开始处理流式任务，设置锁定状态: isActive=${chatState.isActive}, 开始时间=${chatState.startTime}`);
                 
                 // 执行任务
                 task.handler(...task.args).then(() => {
                     // 任务完成后解锁并处理下一个任务
                     console.log(`✅ ${chatName}的队列任务完成: ${task.description}`);
+                    console.log(`🔓 ${chatName}解锁状态: isActive=${chatState.isActive} -> false, 开始时间=${chatState.startTime} -> null`);
+                    
                     chatState.isActive = false;
                     chatState.startTime = null;
+                    
+                    // 增强调试：输出当前队列状态
+                    console.log(`📊 ${chatName}任务完成后状态: 队列长度=${chatState.queue.length}, 下一个任务将在100ms后处理`);
                     
                     // 处理该聊天队列中的下一个任务
                     setTimeout(() => QQ_ProcessStreamingQueueForChat(chatName), 100);
                 }).catch((error) => {
                     console.error(`❌ ${chatName}的队列任务失败: ${task.description}`, error);
+                    console.log(`🔓 ${chatName}失败后解锁状态: isActive=${chatState.isActive} -> false, 开始时间=${chatState.startTime} -> null`);
+                    
                     chatState.isActive = false;
                     chatState.startTime = null;
+                    
+                    // 增强调试：输出失败后的队列状态
+                    console.log(`📊 ${chatName}任务失败后状态: 队列长度=${chatState.queue.length}, 下一个任务将在500ms后处理`);
                     
                     // 即使失败也要处理下一个任务
                     setTimeout(() => QQ_ProcessStreamingQueueForChat(chatName), 500);
@@ -5275,12 +5309,20 @@
                     chatState.isActive = false;
                     chatState.startTime = null;
                     chatState.queue.length = 0;
+                    
+                    // 清空该聊天的独立流式传输进程
+                    if (chatState.currentProcess) {
+                        clearTimeout(chatState.currentProcess);
+                        chatState.currentProcess = null;
+                    }
+                    
                     console.log(`🧹 已清空${chatName}的流式传输队列`);
                 }
                 
                 // 清空全局队列（向后兼容）
                 streamingMessageQueue.length = 0;
                 
+                // 清空全局流式传输进程（向后兼容）
                 if (currentStreamingProcess) {
                     clearTimeout(currentStreamingProcess);
                     currentStreamingProcess = null;
@@ -5298,6 +5340,12 @@
                 chatState.isActive = false;
                 chatState.startTime = null;
                 chatState.queue.length = 0;
+                
+                // 清空该聊天的独立流式传输进程
+                if (chatState.currentProcess) {
+                    clearTimeout(chatState.currentProcess);
+                    chatState.currentProcess = null;
+                }
             }
 
             // *** 新增：已读状态管理功能 ***
@@ -21668,7 +21716,13 @@ ${index + 1}. ${space.name}
                                 const delay = QQ_GenerateBenfordDelay(isGroupChat);
                                 
                                 console.log(`⏱️ 下一条消息（${nextSender}）将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
-                                currentStreamingProcess = setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                                
+                                // 使用每个聊天的独立流式传输进程，支持并行处理
+                                const chatState = getStreamingState(chatName);
+                                if (chatState.currentProcess) {
+                                    clearTimeout(chatState.currentProcess);
+                                }
+                                chatState.currentProcess = setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
                             }
                         } catch (error) {
                             console.error('🚫 流式显示过程中发生错误:', error);
@@ -27507,14 +27561,22 @@ ${index + 1}. ${space.name}
              */
             async function QQ_EnsureMessageInChatInterface(characterName, content, timestamp) {
                 try {
-                    // 检查是否有正在进行的流式传输
-                    const isStreamingActive = document.querySelector('.streaming-text');
-                    if (isStreamingActive) {
+                    // 检查是否有任何聊天正在进行流式传输（使用新的并行队列系统）
+                    const hasActiveStreaming = () => {
+                        for (const [chatName, chatState] of streamingChatStates) {
+                            if (chatState.isActive) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    };
+                    
+                    if (hasActiveStreaming()) {
                         console.log('⚠️ 检测到正在进行的流式传输，等待完成后再发送主动消息');
                         // 等待流式传输完成
                         await new Promise(resolve => {
                             const checkInterval = setInterval(() => {
-                                if (!document.querySelector('.streaming-text')) {
+                                if (!hasActiveStreaming()) {
                                     clearInterval(checkInterval);
                                     resolve();
                                 }
