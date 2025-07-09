@@ -5047,10 +5047,22 @@
             let QQ_ReadStatus = {}; // 新增：记录已读状态
 
             // *** 新增：流式传输状态管理 ***
-            let isStreamingDisplayActive = false; // 流式传输锁
+            // 改进：使用Map来管理每个聊天的独立流式显示状态，支持并行处理
+            let streamingChatStates = new Map(); // 每个聊天的流式显示状态
             let streamingMessageQueue = []; // 流式消息队列
             let currentStreamingProcess = null; // 当前流式传输进程引用
-            let lastStreamingStartTime = null; // 记录上次流式传输开始时间
+            
+            // 获取或创建聊天的流式显示状态
+            function getStreamingState(chatName) {
+                if (!streamingChatStates.has(chatName)) {
+                    streamingChatStates.set(chatName, {
+                        isActive: false,
+                        startTime: null,
+                        queue: []
+                    });
+                }
+                return streamingChatStates.get(chatName);
+            }
 
             // *** 新增：逻辑时钟系统 - 用序列号替代时间排序 ***
             const createSequenceIdGenerator = () => {
@@ -5137,85 +5149,119 @@
              * @param {Function} task.handler - 处理函数
              * @param {Array} task.args - 参数数组
              * @param {string} task.description - 任务描述
+             * @param {string} task.chatName - 聊天名称（新增：用于并行处理）
              */
             function QQ_EnqueueStreamingTask(task) {
                 // 为任务添加时间戳
                 task.timestamp = Date.now();
                 
-                // 高优先级任务（AI回复）插入队列前面
-                if (task.priority === 'high') {
-                    streamingMessageQueue.unshift(task);
-                    console.log(`🚀 高优先级任务已加入队列前端: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
-                } else {
-                    streamingMessageQueue.push(task);
-                    console.log(`📥 任务已加入队列: ${task.description}, 队列长度: ${streamingMessageQueue.length}`);
+                // 从任务描述中提取聊天名称
+                let chatName = task.chatName;
+                if (!chatName && task.description) {
+                    // 尝试从描述中提取聊天名称
+                    const match = task.description.match(/私聊(.+?)流式显示|群聊(.+?)流式显示|主动消息流式显示: (.+)/);
+                    if (match) {
+                        chatName = match[1] || match[2] || match[3];
+                    }
                 }
                 
-                // 检查是否有卡住的任务（超过10秒还在处理）
-                if (isStreamingDisplayActive && lastStreamingStartTime && 
-                    Date.now() - lastStreamingStartTime > 10000) {
-                    console.warn('⚠️ 检测到流式传输可能卡住，强制重置');
-                    console.warn(`🔍 当前队列长度: ${streamingMessageQueue.length}, 卡住时间: ${Date.now() - lastStreamingStartTime}ms`);
-                    isStreamingDisplayActive = false;
-                    lastStreamingStartTime = null;
+                if (!chatName) {
+                    console.warn('⚠️ 无法确定聊天名称，使用默认队列');
+                    chatName = '__default__';
+                }
+                
+                // 获取该聊天的状态
+                const chatState = getStreamingState(chatName);
+                
+                // 将任务添加到对应聊天的队列
+                if (task.priority === 'high') {
+                    chatState.queue.unshift(task);
+                    console.log(`🚀 高优先级任务已加入${chatName}的队列前端: ${task.description}, 队列长度: ${chatState.queue.length}`);
+                } else {
+                    chatState.queue.push(task);
+                    console.log(`📥 任务已加入${chatName}的队列: ${task.description}, 队列长度: ${chatState.queue.length}`);
+                }
+                
+                // 检查该聊天是否有卡住的任务（超过10秒还在处理）
+                if (chatState.isActive && chatState.startTime && 
+                    Date.now() - chatState.startTime > 10000) {
+                    console.warn(`⚠️ 检测到${chatName}的流式传输可能卡住，强制重置`);
+                    console.warn(`🔍 ${chatName}队列长度: ${chatState.queue.length}, 卡住时间: ${Date.now() - chatState.startTime}ms`);
+                    chatState.isActive = false;
+                    chatState.startTime = null;
                     
-                    // 强制重置后立即尝试处理队列
+                    // 强制重置后立即尝试处理该聊天的队列
                     setTimeout(() => {
-                        console.warn('🔄 强制重置后重新启动队列处理');
-                        QQ_ProcessStreamingQueue();
+                        console.warn(`🔄 强制重置后重新启动${chatName}的队列处理`);
+                        QQ_ProcessStreamingQueueForChat(chatName);
                     }, 100);
                 }
                 
                 // 高优先级任务且队列卡住时，强制立即执行
-                if (task.priority === 'high' && isStreamingDisplayActive) {
-                    console.warn('🔥 高优先级AI回复任务，强制立即执行');
-                    isStreamingDisplayActive = false;
+                if (task.priority === 'high' && chatState.isActive) {
+                    console.warn(`🔥 ${chatName}的高优先级AI回复任务，强制立即执行`);
+                    chatState.isActive = false;
                 }
                 
-                // 如果当前没有流式传输在进行，立即处理队列
-                if (!isStreamingDisplayActive) {
-                    QQ_ProcessStreamingQueue();
+                // 如果该聊天当前没有流式传输在进行，立即处理其队列
+                if (!chatState.isActive) {
+                    QQ_ProcessStreamingQueueForChat(chatName);
                 }
             }
 
             /**
-             * 处理流式传输队列中的下一个任务
+             * 处理指定聊天的流式传输队列中的下一个任务
+             * @param {string} chatName - 聊天名称
              */
-            function QQ_ProcessStreamingQueue() {
-                if (streamingMessageQueue.length === 0) {
-                    console.log(`📋 队列为空，停止处理`);
+            function QQ_ProcessStreamingQueueForChat(chatName) {
+                const chatState = getStreamingState(chatName);
+                
+                if (chatState.queue.length === 0) {
+                    console.log(`📋 ${chatName}的队列为空，停止处理`);
                     return;
                 }
                 
-                if (isStreamingDisplayActive) {
-                    console.log(`⏳ 有任务正在执行，等待完成...`);
+                if (chatState.isActive) {
+                    console.log(`⏳ ${chatName}有任务正在执行，等待完成...`);
                     return;
                 }
                 
-                const task = streamingMessageQueue.shift();
-                console.log(`📤 开始处理队列任务: ${task.description}, 剩余队列长度: ${streamingMessageQueue.length}`);
+                const task = chatState.queue.shift();
+                console.log(`📤 开始处理${chatName}的队列任务: ${task.description}, 剩余队列长度: ${chatState.queue.length}`);
                 
                 // 设置锁并记录开始时间
-                isStreamingDisplayActive = true;
-                lastStreamingStartTime = Date.now();
+                chatState.isActive = true;
+                chatState.startTime = Date.now();
                 
                 // 执行任务
                 task.handler(...task.args).then(() => {
                     // 任务完成后解锁并处理下一个任务
-                    console.log(`✅ 队列任务完成: ${task.description}`);
-                    isStreamingDisplayActive = false;
-                    lastStreamingStartTime = null;
+                    console.log(`✅ ${chatName}的队列任务完成: ${task.description}`);
+                    chatState.isActive = false;
+                    chatState.startTime = null;
                     
-                    // 处理队列中的下一个任务
-                    setTimeout(QQ_ProcessStreamingQueue, 100);
+                    // 处理该聊天队列中的下一个任务
+                    setTimeout(() => QQ_ProcessStreamingQueueForChat(chatName), 100);
                 }).catch((error) => {
-                    console.error(`❌ 队列任务失败: ${task.description}`, error);
-                    isStreamingDisplayActive = false;
-                    lastStreamingStartTime = null;
+                    console.error(`❌ ${chatName}的队列任务失败: ${task.description}`, error);
+                    chatState.isActive = false;
+                    chatState.startTime = null;
                     
                     // 即使失败也要处理下一个任务
-                    setTimeout(QQ_ProcessStreamingQueue, 500);
+                    setTimeout(() => QQ_ProcessStreamingQueueForChat(chatName), 500);
                 });
+            }
+            
+            /**
+             * 处理流式传输队列中的下一个任务（向后兼容）
+             */
+            function QQ_ProcessStreamingQueue() {
+                // 为了向后兼容，处理所有聊天的队列
+                for (const [chatName, chatState] of streamingChatStates) {
+                    if (chatState.queue.length > 0 && !chatState.isActive) {
+                        QQ_ProcessStreamingQueueForChat(chatName);
+                    }
+                }
             }
 
             /**
@@ -5223,13 +5269,35 @@
              */
             function QQ_CancelAllStreaming() {
                 console.log('🚫 取消所有流式传输任务');
-                isStreamingDisplayActive = false;
+                
+                // 清空所有聊天的队列和状态
+                for (const [chatName, chatState] of streamingChatStates) {
+                    chatState.isActive = false;
+                    chatState.startTime = null;
+                    chatState.queue.length = 0;
+                    console.log(`🧹 已清空${chatName}的流式传输队列`);
+                }
+                
+                // 清空全局队列（向后兼容）
                 streamingMessageQueue.length = 0;
                 
                 if (currentStreamingProcess) {
                     clearTimeout(currentStreamingProcess);
                     currentStreamingProcess = null;
                 }
+            }
+            
+            /**
+             * 取消指定聊天的流式传输
+             * @param {string} chatName - 聊天名称
+             */
+            function QQ_CancelStreamingForChat(chatName) {
+                const chatState = getStreamingState(chatName);
+                console.log(`🚫 取消${chatName}的流式传输任务`);
+                
+                chatState.isActive = false;
+                chatState.startTime = null;
+                chatState.queue.length = 0;
             }
 
             // *** 新增：已读状态管理功能 ***
@@ -22804,7 +22872,8 @@ ${index + 1}. ${space.name}
                                 handler: QQ_DisplayStreamingMessagesDirectly,
                                 args: [$msgContent[0], newMessages, name, true, false],
                                 description: `私聊${name}流式显示${newMessages.length}条消息`,
-                                priority: gening ? 'high' : 'normal' // AI回复时为高优先级
+                                priority: gening ? 'high' : 'normal', // AI回复时为高优先级
+                                chatName: name // 添加聊天名称，支持并行处理
                             });
                         } else {
                             // 没有新消息，正常显示所有消息
@@ -23188,7 +23257,8 @@ ${index + 1}. ${space.name}
                             QQ_EnqueueStreamingTask({
                                 handler: QQ_DisplayStreamingMessagesDirectly,
                                 args: [$msgContent[0], newMessages, name, true, false],
-                                description: `群聊${name}流式显示${newMessages.length}条消息`
+                                description: `群聊${name}流式显示${newMessages.length}条消息`,
+                                chatName: name // 添加聊天名称，支持并行处理
                             });
                         } else {
                             // 没有新消息，正常显示所有消息
@@ -27496,7 +27566,8 @@ ${index + 1}. ${space.name}
                                 resolve();
                             },
                             args: [],
-                            description: `主动消息流式显示: ${characterName}`
+                            description: `主动消息流式显示: ${characterName}`,
+                            chatName: characterName // 添加聊天名称，支持并行处理
                         });
                     });
                     
@@ -28054,7 +28125,8 @@ ${index + 1}. ${space.name}
                         console.log(`✅ 已流式显示 ${pendingMessages.length} 条主动消息`);
                     },
                     args: [],
-                    description: `批量主动消息流式显示: ${characterName} (${pendingMessages.length}条)`
+                    description: `批量主动消息流式显示: ${characterName} (${pendingMessages.length}条)`,
+                    chatName: characterName // 添加聊天名称，支持并行处理
                 });
                 
                 // 保存更新后的队列状态
