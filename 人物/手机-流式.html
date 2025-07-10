@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>94%</span>
+                    <span>95%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -4704,14 +4704,70 @@
             - 所有回复必须被唯一的 MiPhone_start 和 MiPhone_end 标签包裹。
             - 聊天、动态、摘要、表格等内容，都必须严格遵循各自的格式要求。
                 `,
-                momentCommentTask: (authorName, userComment) => `
-            ## 任务：回应动态评论
-            **重要**: 这是对现有动态的评论回复，不要创建新的动态内容！
-            - **情景**: 用户评论了【${authorName}】的动态，评论内容是：“${userComment}”。
-            - **要求**:
-                1.  **动态评论回复**: 【${authorName}】本人必须回复用户的评论，同时另有至少2名角色参与评论。
-                2.  **私聊延伸**: 至少1-2名角色因该动态与用户发起【私聊】，进行更深入的讨论。
-            - **输出格式**: 评论使用 \`moment_start\`, 私聊使用 \`<私聊:角色名>\`。
+                momentCommentTask: (authorName, userComment, momentId) => `
+            ## 任务：回应动态评论并智能决定后续交流
+
+            你的任务是作为多个角色，对一个已存在的动态进行评论回复，并根据情景智能判断是否需要通过私聊或群聊进行更深入的交流。
+
+            **【情景上下文】**
+            用户 [{{user}}] 对角色 [${authorName}] 的动态发表了新的评论。
+            
+            ---
+            **【用户新评论】**
+            评论者: {{user}}
+            评论内容: ${userComment}
+            ---
+
+            **【决策指南】**
+            请根据以下几点，并结合你的角色性格，判断是否需要发起私聊或群聊：
+            
+            1. **话题是否私密/敏感？** (涉及个人情感、秘密等 -> 倾向私聊)
+            2. **你和用户的关系有多亲密？** (恋人/挚友间的悄悄话 -> 倾向私聊)
+            3. **用户是否在寻求安慰或表达强烈负面情绪？** (是 -> 倾向私聊)
+            4. **话题是否适合公开讨论或分享？** (适合 -> 倾向群聊)
+            5. **用户的评论是否只是简单的互动？** (例如"好看"、"顶"、"👍" -> 倾向仅评论)
+            6.  **选择合适的私聊发起者**：如果决定私聊，不应局限于动态发布者。**任何因评论内容、与用户关系或自身性格而觉得有必要进行深入沟通的角色**，都可以发起私聊。
+
+            **【输出格式要求】**
+            你的回复必须包含对该动态的评论，并根据你的判断，选择性地附加私聊或群聊内容。
+
+            **1. 动态评论 (必须输出):**
+               - 使用 \`moment_reply_start\` 和 \`moment_reply_end\` 包裹。
+               - 必须包含 \`moment_id::${momentId}\`。
+               - 至少包含2名角色的评论，【${authorName}】必须回复。
+               - 格式: \`评论人--评论内容\`
+
+            **2.  深入交流 (选择性输出):**
+                -   **如果决定私聊**: 可以添加 **一个或多个** \`<{{user}}和角色的私聊>\` 格式块，但总数**不超过3个**。请将“角色”替换为发起私聊的具体角色名。
+                -   **如果决定群聊**: 在 \`moment_reply_end\` 之后，添加一个完整的 \`<群聊:群名字>\` 格式块。
+                -   **如果决定不深入交流**: 则不要输出任何私聊或群聊标签。
+
+            **【完整示例】**
+            *假设用户在角色A的动态下发表了让角色C特别在意的评论，角色A在决定要私下沟通的同时角色B也很关心用户* 
+
+            moment_reply_start
+            moment_id::${momentId}
+            ${authorName}--嗯，谢谢你的关心。
+            角色B--听起来你好像有心事，需要聊聊吗？
+            角色C--你说的那个...我也经历过。
+            moment_reply_end
+
+            <{{user}}和${authorName}的私聊>
+            ${authorName}--刚刚在动态里说的那些...其实有些话我只想对你说。--18:35
+            </{{user}}和${authorName}的私聊>
+
+            <{{user}}和角色C的私聊>
+            角色C--你刚刚在动态下面说的事情，让我想起了一些过去。可以的话，想和你单独聊聊。--19:05
+            </{{user}}和角色C的私聊>
+
+            <{{user}}和角色B的私聊>
+            角色B--指挥官，看你评论的语气不太对，是遇到什么烦心事了吗？不介意的话，和我说说吧。--19:06
+            </{{user}}和角色B的私聊>
+
+            **【注意事项】**
+            - 你的最终决定应绝对符合你的角色性格。
+            - 一个外向、爱热闹的角色更可能在群聊中回应；一个内向、体贴的角色则更倾向于私聊。
+            - 如果用户的评论只是简单的点赞或表情，通常只需要简单回复即可，不必小题大做。
                 `,
                 mixedChatTask: (tasks) => {
                     let rules = ['## 任务：处理多个聊天消息'];
@@ -4758,7 +4814,7 @@
                     taskDescription.push(promptModules.interactiveTask(tasks.interactiveTask));
                 }
                 if (tasks.momentComment) {
-                    taskDescription.push(promptModules.momentCommentTask(tasks.momentComment.author, tasks.momentComment.content));
+                    taskDescription.push(promptModules.momentCommentTask(tasks.momentComment.author, tasks.momentComment.content, tasks.momentComment.momentId));
                 }
                 if ((tasks.privateChats && tasks.privateChats.length > 0) || (tasks.groupChats && tasks.groupChats.length > 0)) {
                     taskDescription.push(promptModules.mixedChatTask(tasks));
@@ -8396,6 +8452,14 @@
                     for (const moment of momentMatches) {
                         const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
                         QQ_Moment_Parse(moment[1], isInCommentContext);
+                    }
+                }
+                
+                // 处理动态回复内容 (moment_reply_start/end)
+                const momentReplyMatches = matchedContent.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g);
+                if (momentReplyMatches) {
+                    for (const reply of momentReplyMatches) {
+                        await QQ_ProcessMomentReply(reply[1]);
                     }
                 }
                 
@@ -23653,7 +23717,7 @@ ${index + 1}. ${space.name}
 
                     // 4. 分析本次的所有任务
                     let tasks = {
-                        momentComment: { author: name, content: value },
+                        momentComment: { author: name, content: value, momentId: momentId },
                         privateChats: [],
                         groupChats: [],
                         interactiveTask: null
@@ -24511,6 +24575,89 @@ ${index + 1}. ${space.name}
              window.QQ_Check_Two_Stage_Send_Status = QQ_Check_Two_Stage_Send_Status;
 
 
+
+             /**
+              * 处理AI的动态评论回复 (moment_reply_start/end格式)
+              * @param {string} content - moment_reply标签内的内容
+              */
+             async function QQ_ProcessMomentReply(content) {
+                console.log('🔄 处理动态评论回复');
+                
+                // 解析moment_id
+                const momentIdMatch = content.match(/moment_id::([^\n]+)/);
+                if (!momentIdMatch) {
+                    console.error('❌ 未找到moment_id，无法处理动态回复');
+                    return;
+                }
+                
+                const momentId = momentIdMatch[1].trim();
+                console.log(`📍 目标动态ID: ${momentId}`);
+                
+                // 查找对应的动态数据
+                const targetMoment = QQ_MomentsData.find(moment => moment.id === momentId);
+                if (!targetMoment) {
+                    console.error(`❌ 未找到ID为 ${momentId} 的动态`);
+                    return;
+                }
+                
+                // 查找对应的DOM元素
+                const $momentDiv = $(`#space_contents .user_moment[data-moment-id="${momentId}"]`);
+                if (!$momentDiv.length) {
+                    console.error(`❌ 未找到ID为 ${momentId} 的动态DOM元素`);
+                    return;
+                }
+                
+                const $commentsList = $momentDiv.find('.user_leave_message_list');
+                
+                // 解析评论内容
+                const lines = content.split(/\r?\n/g);
+                const newComments = [];
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine || trimmedLine.includes('moment_id::')) continue;
+                    
+                    // 匹配评论格式: 评论人--评论内容
+                    const commentMatch = trimmedLine.match(/^\s*(.+?)(?::|：|--)(.+)$/);
+                    if (commentMatch) {
+                        const commenterName = commentMatch[1].trim();
+                        const commentContent = commentMatch[2].trim();
+                        
+                        // 过滤重复的用户评论
+                        if (commenterName === '{{user}}' || commenterName === UserName) {
+                            console.log(`⚠️ 过滤重复的用户评论: ${commenterName}`);
+                            continue;
+                        }
+                        
+                        const commentData = {
+                            name: commenterName,
+                            content: commentContent,
+                            timestamp: new Date().toISOString()
+                        };
+                        
+                        newComments.push(commentData);
+                        targetMoment.comments.push(commentData);
+                        
+                        console.log(`✅ 添加新评论: ${commenterName} - ${commentContent}`);
+                    }
+                }
+                
+                // 保持评论数量上限（50条）
+                if (targetMoment.comments.length > 50) {
+                    targetMoment.comments = targetMoment.comments.slice(-50);
+                }
+                
+                // 重新渲染评论区域
+                QQ_Render_Comments(targetMoment, $commentsList);
+                
+                // 保存动态数据
+                setTimeout(async () => {
+                    await QQ_Save_Moments();
+                    console.log('✅ 动态评论回复处理完成，已保存到世界书');
+                }, 500);
+                
+                console.log(`📊 处理完成: 添加了 ${newComments.length} 条新评论到动态 ${momentId}`);
+             }
 
              function QQ_Moment_Parse(content, isCommentContext = false) {
                 const lines = content.split(/\r?\n/g);
