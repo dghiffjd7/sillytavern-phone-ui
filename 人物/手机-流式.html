@@ -3517,7 +3517,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>102%</span>
+                    <span>103%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -8542,13 +8542,20 @@
                 async processSequentially(content, analysis) {
                     console.log('🔄 执行顺序处理...');
                     
-                    // 使用现有的顺序任务队列处理
-                    const segments = QQ_SequentialTaskQueue.splitIntoSegments(content);
-                    const tasks = QQ_SequentialTaskQueue.createTaskQueue(segments);
-                    
-                    if (tasks.length > 0) {
-                        await QQ_SequentialTaskQueue.processQueue(tasks);
-                        return true;
+                    try {
+                        // 使用现有的顺序任务队列处理
+                        const segments = QQ_SequentialTaskQueue.splitIntoSegments(content);
+                        const tasks = QQ_SequentialTaskQueue.createTaskQueue(segments);
+                        
+                        if (tasks.length > 0) {
+                            await QQ_SequentialTaskQueue.processQueue(tasks);
+                            
+                            // *** 重要：执行完整的后处理流程 ***
+                            await this.executePostProcessing();
+                            return true;
+                        }
+                    } catch (error) {
+                        console.error('❌ 顺序处理过程中出错:', error);
                     }
                     return false;
                 },
@@ -8559,21 +8566,71 @@
                 async processInParallel(content, analysis) {
                     console.log('⚡ 执行并行处理...');
                     
-                    // 使用原有的分离式处理逻辑，它本身就是并行的
-                    const separateResult = await QQ_ExtractAndProcessOnlineFormatFirst(content);
-                    
-                    if (separateResult.processed && separateResult.processedCount > 0) {
-                        console.log('✅ 并行处理完成，处理了线上格式内容');
+                    try {
+                        // 使用原有的分离式处理逻辑，它本身就是并行的
+                        const separateResult = await QQ_ExtractAndProcessOnlineFormatFirst(content);
                         
-                        // 如果还有剩余的互动内容，也要处理
-                        if (separateResult.remainingResult && separateResult.remainingResult.trim()) {
-                            console.log('🎭 处理剩余的互动内容');
-                            await QQ_HandleInteractiveContent(separateResult.remainingResult);
+                        if (separateResult.processed && separateResult.processedCount > 0) {
+                            console.log('✅ 并行处理完成，处理了线上格式内容');
+                            
+                            // 如果还有剩余的互动内容，也要处理
+                            if (separateResult.remainingResult && separateResult.remainingResult.trim()) {
+                                console.log('🎭 处理剩余的互动内容');
+                                await QQ_HandleInteractiveContent(separateResult.remainingResult);
+                            }
+                            
+                            // *** 重要：执行完整的后处理流程 ***
+                            await this.executePostProcessing();
+                            return true;
                         }
-                        
-                        return true;
+                    } catch (error) {
+                        console.error('❌ 并行处理过程中出错:', error);
                     }
                     return false;
+                },
+                
+                /**
+                 * *** 新增：执行完整的后处理流程 ***
+                 * 包括短期记忆存储、聊天备份、新消息提示等关键功能
+                 */
+                async executePostProcessing() {
+                    console.log('🔧 执行后处理流程...');
+                    
+                    try {
+                        // 1. 更新短期记忆（如果存在此功能）
+                        if (typeof QQ_UpdateShortTermMemory === 'function') {
+                            console.log('📝 更新短期记忆...');
+                            await QQ_UpdateShortTermMemory();
+                        }
+                        
+                        // 2. 保存聊天备份（包含用户缓存和发送的消息）
+                        if (typeof QQ_Save_Chat_Backup === 'function') {
+                            console.log('💾 保存聊天备份...');
+                            await QQ_Save_Chat_Backup();
+                        }
+                        
+                        // 3. 保存消息到世界书（如果有专门的消息保存函数）
+                        if (typeof QQ_Save_Msg === 'function') {
+                            console.log('📚 保存消息到世界书...');
+                            await QQ_Save_Msg();
+                        }
+                        
+                        // 4. 更新新消息提示
+                        if (typeof QQ_UpdateNewTips === 'function') {
+                            console.log('🔔 更新新消息提示...');
+                            QQ_UpdateNewTips();
+                        }
+                        
+                        // 5. 重置重试计数
+                        if (typeof QQ_ResetRetry === 'function') {
+                            QQ_ResetRetry();
+                        }
+                        
+                        console.log('✅ 后处理流程完成');
+                        
+                    } catch (error) {
+                        console.error('❌ 后处理流程出错:', error);
+                    }
                 }
             };
 
@@ -9606,12 +9663,7 @@
                     const processed = await QQ_SmartContentScheduler.process(result);
                     
                     if (processed) {
-                        // 更新相关状态
-                        QQ_ResetRetry();
-                        QQ_UpdateNewTips();
-                        await QQ_Save_Chat_Backup();
-                        
-                        console.log('✅ 智能调度处理完成，跳过原有处理逻辑');
+                        console.log('✅ 智能调度处理完成（包含完整后处理流程），跳过原有处理逻辑');
                         return; // 处理完成，结束流程
                     }
                 }
