@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>97%</span>
+                    <span>98%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -22603,39 +22603,58 @@ ${index + 1}. ${space.name}
                         }
                     }
                     
-                    // 收集动态评论
+                    // 收集动态评论（仅收集新的，有序列号且未处理的）
+                    console.log(`🔍 开始收集新动态和评论（序列号 > ${QQ_LastProcessedSequenceId}）`);
                     if (typeof QQ_MomentsData !== 'undefined' && Array.isArray(QQ_MomentsData)) {
                         for (let momentIndex = 0; momentIndex < QQ_MomentsData.length; momentIndex++) {
                             const moment = QQ_MomentsData[momentIndex];
-                            // 添加动态本身
-                            if (moment.message) {
-                                newMessages.push({
-                                    type: '动态',
-                                    sender: moment.userName || moment.name,
-                                    content: `发布动态: ${moment.message}`,
-                                    time: moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
-                                    momentIndex: momentIndex, // 在动态数组中的位置
-                                    globalIndex: messageIndex++, // 全局消息顺序索引
-                                    timestamp: moment.timestamp ? new Date(moment.timestamp).getTime() : QQ_ParseTime(moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
-                                });
+                            
+                            // 检查动态本身是否为新动态（有序列号且未处理）
+                            if (moment.message && moment.sequenceId) {
+                                // 只收集序列号大于上次处理的动态
+                                if (moment.sequenceId > QQ_LastProcessedSequenceId) {
+                                    console.log(`🆕 发现新动态 [seq:${moment.sequenceId}] (上次处理: ${QQ_LastProcessedSequenceId}): ${moment.message.substring(0, 30)}...`);
+                                    newMessages.push({
+                                        type: '动态',
+                                        sender: moment.userName || moment.name,
+                                        content: `发布动态: ${moment.message}`,
+                                        time: moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }),
+                                        momentIndex: momentIndex, // 在动态数组中的位置
+                                        globalIndex: messageIndex++, // 全局消息顺序索引
+                                        sequenceId: moment.sequenceId, // 添加序列号
+                                        timestamp: moment.timestamp ? new Date(moment.timestamp).getTime() : QQ_ParseTime(moment.timestamp || now.toLocaleTimeString('zh-CN', { hour12: false }))
+                                    });
+                                } else {
+                                    console.log(`⏭️ 跳过已处理动态 [seq:${moment.sequenceId}] (上次处理: ${QQ_LastProcessedSequenceId}): ${moment.message.substring(0, 30)}...`);
+                                }
                             }
                             
-                            // 添加动态评论
+                            // 检查动态评论（仅收集新的）
                             if (moment.comments && Array.isArray(moment.comments)) {
                                 for (let commentIndex = 0; commentIndex < moment.comments.length; commentIndex++) {
                                     const comment = moment.comments[commentIndex];
-                                    newMessages.push({
-                                        type: '动态评论',
-                                        sender: comment.name || comment.userName,
-                                        content: comment.content || comment.message,
-                                        time: comment.timestamp || QQ_GetTime(),
-                                        momentAuthor: moment.userName || moment.name,
-                                        momentContent: moment.message,
-                                        momentIndex: momentIndex, // 所属动态的位置
-                                        commentIndex: commentIndex, // 在评论数组中的位置
-                                        globalIndex: messageIndex++, // 全局消息顺序索引
-                                        timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || QQ_GetTime())
-                                    });
+                                    
+                                    // 只收集有序列号且未处理的评论
+                                    if (comment.sequenceId && comment.sequenceId > QQ_LastProcessedSequenceId) {
+                                        console.log(`🆕 发现新评论 [seq:${comment.sequenceId}] (上次处理: ${QQ_LastProcessedSequenceId}): ${comment.content?.substring(0, 30) || ''}...`);
+                                        newMessages.push({
+                                            type: '动态评论',
+                                            sender: comment.name || comment.userName,
+                                            content: comment.content || comment.message,
+                                            time: comment.timestamp || QQ_GetTime(),
+                                            momentAuthor: moment.userName || moment.name,
+                                            momentContent: moment.message,
+                                            momentIndex: momentIndex, // 所属动态的位置
+                                            commentIndex: commentIndex, // 在评论数组中的位置
+                                            globalIndex: messageIndex++, // 全局消息顺序索引
+                                            sequenceId: comment.sequenceId, // 添加序列号
+                                            timestamp: comment.timestamp ? new Date(comment.timestamp).getTime() : QQ_ParseTime(comment.timestamp || QQ_GetTime())
+                                        });
+                                    } else if (comment.sequenceId) {
+                                        console.log(`⏭️ 跳过已处理评论 [seq:${comment.sequenceId}] (上次处理: ${QQ_LastProcessedSequenceId}): ${comment.content?.substring(0, 30) || ''}...`);
+                                    } else {
+                                        console.log(`⏭️ 跳过无序列号的历史评论: ${comment.content?.substring(0, 30) || ''}...`);
+                                    }
                                 }
                             }
                         }
@@ -24765,7 +24784,8 @@ ${index + 1}. ${space.name}
                         const commentData = {
                             name: commenterName,
                             content: commentContent,
-                            timestamp: new Date().toISOString()
+                            timestamp: new Date().toISOString(),
+                            sequenceId: QQ_MessageSequence.next() // 为新评论分配序列号
                         };
                         
                         newComments.push(commentData);
@@ -24828,7 +24848,8 @@ ${index + 1}. ${space.name}
                             commentLines.push({
                                 name: commenterName,
                                 content: commentMatch[2],
-                                timestamp: new Date().toISOString()
+                                timestamp: new Date().toISOString(),
+                                sequenceId: QQ_MessageSequence.next() // 为新评论分配序列号
                             });
                         }
                     }
@@ -24908,6 +24929,7 @@ ${index + 1}. ${space.name}
                             extraContent: match[5] || '',
                             imgcontent: fakeimg,
                             comments: [], // 初始化评论数组
+                            sequenceId: QQ_MessageSequence.next(), // 为新动态分配序列号
                             // 新增：点赞相关字段
                             likes: {
                                 count: parseInt(match[5]) || 0, // 点赞总数
@@ -24955,7 +24977,8 @@ ${index + 1}. ${space.name}
                         const commentData = {
                             name: commenterName,
                             content: match[2],
-                            timestamp: new Date().toISOString()
+                            timestamp: new Date().toISOString(),
+                            sequenceId: QQ_MessageSequence.next() // 为新评论分配序列号
                         };
                         currentMomentData.comments.push(commentData);
                         
@@ -24991,12 +25014,12 @@ ${index + 1}. ${space.name}
                         console.log('动态解析完成，已保存到世界书备份');
                     }, 1000); // 延迟保存，确保所有处理完成
                 }
-                
+
                 //点赞调用
-                if (typeof QQ_InitMomentLikes === 'function') {
-                    console.log('✅ (来自 QQ_Moment_Parse) 新动态已解析，重新初始化点赞按钮事件...');
-                    QQ_InitMomentLikes();
-                }
+                //if (typeof QQ_InitMomentLikes === 'function') {
+                //    console.log('✅ (来自 QQ_Moment_Parse) 新动态已解析，重新初始化点赞按钮事件...');
+                //    QQ_InitMomentLikes();
+                //}
 
             }
             function QQ_GetRandomHead() {
