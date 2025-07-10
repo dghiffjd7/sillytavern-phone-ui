@@ -3517,7 +3517,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>100%</span>
+                    <span>101%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -4930,6 +4930,8 @@
                 `,
                 mixedChatTask: (tasks) => {
                     let rules = ['## 任务：处理多个聊天消息'];
+                    rules.push(`- **动态发布决策**: ${promptModules.momentCreationTask}`);
+                    
                     if (tasks.privateChats.length > 0) {
                         rules.push(`- **私聊**: 回复【${tasks.privateChats.join(', ')}】发来的消息。`);
                     }
@@ -4938,7 +4940,7 @@
                         rules.push(`- **群聊**: 在【${groupName}】中进行回应，需有多名角色参与。
                                     - **私聊延申**：1-3名相关角色可通过私聊进行进一步的深入讨论。`);
                     }
-                    rules.push(`- **动态发布决策**: ${promptModules.momentCreationTask}`);
+                    
                     return rules.join('\n');
                 },
                 interactiveTask: (task) => `
@@ -8645,7 +8647,7 @@
                     // 提取私聊内容并处理
                     const matches = task.content.matchAll(/<([^和]+?)和([^的]+?)的私聊>([\s\S]*?)<\/\1和\2的私聊>/g);
                     for (const match of matches) {
-                        QQ_Chat_Parse(match[3], `${match[1]}和${match[2]}的聊天`);
+                        QQ_ParsePrivateChatContent(match[3], `${match[1]}和${match[2]}的聊天`);
                     }
                 },
                 
@@ -8653,7 +8655,7 @@
                     console.log('👥 处理群聊内容');
                     const matches = task.content.matchAll(/<群聊[:：]([^>]+?)>([\s\S]*?)<\/群聊[:：]\1>/g);
                     for (const match of matches) {
-                        QQ_Group_Parse(match[2], match[1]);
+                        QQ_ParseGroupChatContent(match[2], match[1]);
                     }
                 },
                 
@@ -8714,70 +8716,23 @@
                  * @param {string} content - 互动内容
                  */
                 async displayInteractiveInChat(content) {
-                    console.log('🎨 准备在聊天容器中显示互动内容');
+                    console.log('🎨 准备在当前聊天容器中显示互动内容');
                     
-                    // 检测互动内容的归属（单角色或多角色）
-                    const targetCharacter = QQ_DetectInteractiveTarget(content);
+                    // 获取当前对话的角色名称
+                    const currentCharacter = QQ_LastRequestName || charcardname;
                     
-                    if (targetCharacter) {
-                        // 单角色互动，显示在对应的聊天界面
-                        await QQ_DisplayInteractiveInPrivateChat(content, targetCharacter);
+                    // 直接在当前界面显示互动内容，不做复杂的角色检测
+                    if (currentCharacter) {
+                        console.log(`💬 在当前与${currentCharacter}的对话中显示互动内容`);
+                        await QQ_DisplayInteractiveInPrivateChat(content, currentCharacter);
                     } else {
-                        // 多角色或公共互动，创建专门的群聊或显示在当前群聊
+                        console.log(`👥 在当前界面显示公共互动内容`);
                         await QQ_DisplayInteractiveInGroupChat(content);
                     }
                 }
             };
 
-            /**
-             * 检测互动内容的目标角色
-             * @param {string} content - 互动内容
-             * @returns {string|null} 目标角色名称，如果是多角色则返回null
-             */
-            function QQ_DetectInteractiveTarget(content) {
-                // 从上下文中获取当前对话的角色
-                const currentCharacter = QQ_LastRequestName || charcardname;
-                
-                // 检查内容中是否提及多个角色
-                const characterMentions = QQ_ExtractCharacterMentions(content);
-                
-                if (characterMentions.length === 0 || characterMentions.length === 1) {
-                    // 单角色互动
-                    return currentCharacter;
-                } else {
-                    // 多角色互动
-                    return null;
-                }
-            }
-
-            /**
-             * 提取内容中提到的角色
-             * @param {string} content - 内容文本
-             * @returns {string[]} 角色名称数组
-             */
-            function QQ_ExtractCharacterMentions(content) {
-                const mentions = [];
-                
-                // 匹配各种角色提及模式
-                const patterns = [
-                    /【([^】]+)】/g,  // 【角色名】
-                    /\*([^*]+)\*/g,   // *角色名*
-                    /（([^）]+)）/g,  // （角色名）
-                ];
-                
-                for (const pattern of patterns) {
-                    const matches = content.matchAll(pattern);
-                    for (const match of matches) {
-                        const name = match[1].trim();
-                        // 过滤掉动作描述，只保留可能的角色名
-                        if (name.length <= 10 && !name.includes(' ')) {
-                            mentions.push(name);
-                        }
-                    }
-                }
-                
-                return [...new Set(mentions)]; // 去重
-            }
+            // 注释：移除了复杂的角色检测函数，现在直接在当前界面显示互动内容
 
             /**
              * 在私聊界面中显示互动内容
@@ -8785,25 +8740,20 @@
              * @param {string} characterName - 角色名称
              */
             async function QQ_DisplayInteractiveInPrivateChat(content, characterName) {
-                console.log(`💬 在${characterName}的私聊界面显示互动内容`);
+                console.log(`💬 在当前界面显示${characterName}的互动内容`);
                 
-                // 检查当前是否在对应的私聊界面
-                const isInTargetChat = QQ_IsInPrivateChatWith(characterName);
+                // 直接在当前可见的聊天容器中添加互动内容，不切换界面
+                const currentChatContainer = $('.QQ_chat_page:visible .msgcontent');
                 
-                if (!isInTargetChat) {
-                    // 如果不在对应的私聊界面，先切换到该界面
-                    await QQ_SwitchToPrivateChat(characterName);
-                }
-                
-                // 在聊天容器中添加互动内容
-                const chatContainer = $('.msgcontent');
-                if (chatContainer.length > 0) {
+                if (currentChatContainer.length > 0) {
+                    console.log('✅ 找到当前可见的聊天容器，直接添加互动内容');
+                    
                     // 创建互动内容消息元素
                     const interactiveMsg = QQ_CreateInteractiveMessage(content, characterName);
-                    chatContainer.append(interactiveMsg);
+                    currentChatContainer.append(interactiveMsg);
                     
                     // 滚动到底部
-                    chatContainer.scrollTop(chatContainer[0].scrollHeight);
+                    currentChatContainer.scrollTop(currentChatContainer[0].scrollHeight);
                     
                     // 流式显示动画
                     await QQ_AnimateStreamText(interactiveMsg.find('.interactive-text'));
@@ -8813,6 +8763,10 @@
                     
                     // 触发互动内容显示事件
                     $(document).trigger('interactiveContentDisplayed');
+                } else {
+                    console.warn('⚠️ 未找到可见的聊天容器，无法显示互动内容');
+                    // 作为备选方案，使用原有的互动空间显示
+                    QQ_HandleInteractiveContent(content, characterName);
                 }
             }
 
@@ -8821,38 +8775,37 @@
              * @param {string} content - 互动内容
              */
             async function QQ_DisplayInteractiveInGroupChat(content) {
-                console.log(`👥 在群聊界面显示公共互动内容`);
+                console.log(`👥 在当前界面显示公共互动内容`);
                 
-                // 从内容中提取场景信息，决定使用哪个群聊
-                const sceneInfo = QQ_ExtractSceneInfo(content);
-                let targetGroup = sceneInfo.suggestedGroup || '公共互动空间';
+                // 直接在当前可见的聊天容器中添加互动内容，不切换界面
+                const currentChatContainer = $('.QQ_chat_page:visible .msgcontent');
                 
-                // 检查群聊是否存在，不存在则创建
-                if (!QQ_Groups.includes(targetGroup)) {
-                    QQ_CreateGroup(targetGroup);
-                }
-                
-                // 切换到目标群聊
-                await QQ_SwitchToGroupChat(targetGroup);
-                
-                // 在群聊容器中添加互动内容
-                const chatContainer = $('.msgcontent');
-                if (chatContainer.length > 0) {
+                if (currentChatContainer.length > 0) {
+                    console.log('✅ 找到当前可见的聊天容器，直接添加公共互动内容');
+                    
+                    // 从内容中提取场景信息，用于命名
+                    const sceneInfo = QQ_ExtractSceneInfo(content);
+                    const groupLabel = sceneInfo.suggestedGroup || '公共互动';
+                    
                     // 创建互动内容消息元素
-                    const interactiveMsg = QQ_CreateInteractiveMessage(content, null, true);
-                    chatContainer.append(interactiveMsg);
+                    const interactiveMsg = QQ_CreateInteractiveMessage(content, null, true, groupLabel);
+                    currentChatContainer.append(interactiveMsg);
                     
                     // 滚动到底部
-                    chatContainer.scrollTop(chatContainer[0].scrollHeight);
+                    currentChatContainer.scrollTop(currentChatContainer[0].scrollHeight);
                     
                     // 流式显示动画
                     await QQ_AnimateStreamText(interactiveMsg.find('.interactive-text'));
                     
                     // 保存互动内容到公共空间
-                    await QQ_SaveInteractiveToPublicSpace(content, targetGroup);
+                    await QQ_SaveInteractiveToPublicSpace(content, groupLabel);
                     
                     // 触发互动内容显示事件
                     $(document).trigger('interactiveContentDisplayed');
+                } else {
+                    console.warn('⚠️ 未找到可见的聊天容器，无法显示互动内容');
+                    // 作为备选方案，使用原有的互动空间显示
+                    QQ_HandleInteractiveContent(content);
                 }
             }
 
@@ -8863,7 +8816,7 @@
              * @param {boolean} isGroup - 是否为群聊
              * @returns {jQuery} 消息元素
              */
-            function QQ_CreateInteractiveMessage(content, characterName = null, isGroup = false) {
+            function QQ_CreateInteractiveMessage(content, characterName = null, isGroup = false, groupLabel = null) {
                 const messageId = `interactive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const timestamp = QQ_GetTime();
                 
@@ -8896,7 +8849,7 @@
                                 color: white;
                                 font-size: 10px;
                             ">✨</span>
-                            <span class="interactive-label">${isGroup ? '公共互动' : `与${characterName}的互动`}</span>
+                            <span class="interactive-label">${isGroup ? (groupLabel || '公共互动') : `与${characterName}的互动`}</span>
                             <span class="interactive-time" style="margin-left: auto; opacity: 0.7;">${timestamp}</span>
                         </div>
                         <div class="interactive-content" style="
@@ -8945,50 +8898,7 @@
                 element.removeClass('typing');
             }
 
-            /**
-             * 检查是否在指定角色的私聊界面
-             * @param {string} characterName - 角色名称
-             * @returns {boolean}
-             */
-            function QQ_IsInPrivateChatWith(characterName) {
-                const chatPage = $('.QQ_chat_page');
-                if (!chatPage.is(':visible')) return false;
-                
-                const chatTitle = $('#QQ_chat_username').text();
-                const userName = QQ_GetUserName();
-                
-                return chatTitle === `${userName}和${characterName}的聊天` || 
-                       chatTitle === `${characterName}和${userName}的聊天`;
-            }
-
-            /**
-             * 切换到指定的私聊界面
-             * @param {string} characterName - 角色名称
-             */
-            async function QQ_SwitchToPrivateChat(characterName) {
-                console.log(`切换到${characterName}的私聊界面`);
-                
-                // 触发私聊切换
-                const chatKey = `${QQ_GetUserName()}和${characterName}的聊天`;
-                QQ_ChangeChatPage(null, chatKey);
-                
-                // 等待界面切换完成
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
-
-            /**
-             * 切换到指定的群聊界面
-             * @param {string} groupName - 群聊名称
-             */
-            async function QQ_SwitchToGroupChat(groupName) {
-                console.log(`切换到${groupName}群聊界面`);
-                
-                // 触发群聊切换
-                QQ_ChangeChatPage(null, groupName);
-                
-                // 等待界面切换完成
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
+            // 注释：移除了界面切换相关函数，互动内容现在直接显示在当前界面中
 
             /**
              * 从内容中提取场景信息
@@ -25823,6 +25733,114 @@ ${index + 1}. ${space.name}
                 }, 500);
                 
                 console.log(`📊 处理完成: 添加了 ${newComments.length} 条新评论到动态 ${momentId}`);
+             }
+
+             /**
+              * 解析私聊内容并添加到QQ_msgjson.私聊数据结构中
+              * @param {string} content - 私聊内容文本
+              * @param {string} chatKey - 聊天键值（如"UserName和角色名的聊天"）
+              */
+             function QQ_ParsePrivateChatContent(content, chatKey) {
+                console.log(`💬 解析私聊内容: ${chatKey}`);
+                
+                if (!content || !chatKey) {
+                    console.warn('私聊内容或聊天键为空');
+                    return;
+                }
+                
+                // 确保私聊数据结构存在
+                if (!QQ_msgjson.私聊[chatKey]) {
+                    QQ_msgjson.私聊[chatKey] = [];
+                }
+                
+                // 按行分割内容
+                const lines = content.split(/\r?\n/);
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) continue;
+                    
+                    // 解析消息格式：发送者名称 + 分隔符 + 消息内容
+                    const messageMatch = trimmedLine.match(/^(.+?)(?:[:：\-]{1,2})(.+)$/);
+                    if (messageMatch) {
+                        const senderName = messageMatch[1].trim();
+                        const messageContent = messageMatch[2].trim();
+                        const timestamp = new Date().toLocaleTimeString('zh-CN', { 
+                            hour12: false, 
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit' 
+                        });
+                        
+                        // 构建消息格式：发送者--内容--时间
+                        const formattedMessage = `${senderName}--${messageContent}--${timestamp}`;
+                        
+                        // 检查是否为重复消息
+                        if (!QQ_msgjson.私聊[chatKey].includes(formattedMessage)) {
+                            // 添加序列ID并存储消息
+                            const sequenceId = QQ_GetNextMessageId();
+                            const messageWithSequence = QQ_AddSequenceIdToMessage(formattedMessage, sequenceId);
+                            QQ_msgjson.私聊[chatKey].push(messageWithSequence);
+                            console.log(`✅ 添加私聊消息: ${senderName} -> ${messageContent}`);
+                        }
+                    }
+                }
+             }
+
+             /**
+              * 解析群聊内容并添加到QQ_msgjson.群聊数据结构中
+              * @param {string} content - 群聊内容文本
+              * @param {string} groupName - 群聊名称
+              */
+             function QQ_ParseGroupChatContent(content, groupName) {
+                console.log(`👥 解析群聊内容: ${groupName}`);
+                
+                if (!content || !groupName) {
+                    console.warn('群聊内容或群名为空');
+                    return;
+                }
+                
+                // 确保群聊数据结构存在
+                if (!QQ_msgjson.群聊[groupName]) {
+                    QQ_msgjson.群聊[groupName] = { msgs: [] };
+                }
+                
+                if (!QQ_msgjson.群聊[groupName].msgs) {
+                    QQ_msgjson.群聊[groupName].msgs = [];
+                }
+                
+                // 按行分割内容
+                const lines = content.split(/\r?\n/);
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) continue;
+                    
+                    // 解析消息格式：发送者名称 + 分隔符 + 消息内容
+                    const messageMatch = trimmedLine.match(/^(.+?)(?:[:：\-]{1,2})(.+)$/);
+                    if (messageMatch) {
+                        const senderName = messageMatch[1].trim();
+                        const messageContent = messageMatch[2].trim();
+                        const timestamp = new Date().toLocaleTimeString('zh-CN', { 
+                            hour12: false, 
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit' 
+                        });
+                        
+                        // 构建消息格式：发送者--内容--时间
+                        const formattedMessage = `${senderName}--${messageContent}--${timestamp}`;
+                        
+                        // 检查是否为重复消息
+                        if (!QQ_msgjson.群聊[groupName].msgs.includes(formattedMessage)) {
+                            // 添加序列ID并存储消息
+                            const sequenceId = QQ_GetNextMessageId();
+                            const messageWithSequence = QQ_AddSequenceIdToMessage(formattedMessage, sequenceId);
+                            QQ_msgjson.群聊[groupName].msgs.push(messageWithSequence);
+                            console.log(`✅ 添加群聊消息: ${senderName} -> ${messageContent}`);
+                        }
+                    }
+                }
              }
 
              function QQ_Moment_Parse(content, isCommentContext = false) {
