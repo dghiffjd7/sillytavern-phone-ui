@@ -3379,7 +3379,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>95%</span>
+                    <span>96%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -8116,57 +8116,95 @@
                 let processed = false;
                 let processedCount = 0;
                 
-                // 定义线上格式正则表达式
-                const formatPatterns = [
+                // 第一阶段：处理MiPhone完整格式，全面解析其中包含的所有格式
+                const miPhoneMatches = [...result.matchAll(/MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/g)];
+                for (const miPhoneMatch of miPhoneMatches) {
+                    const fullMatch = miPhoneMatch[0];
+                    const content = miPhoneMatch[1];
+                    
+                    console.log(`📱 提取到MiPhone完整格式内容，长度: ${content.length}`);
+                    
+                    // 在MiPhone内容中查找并处理所有子格式
+                    let hasSubFormats = false;
+                    
+                    // 1. 处理动态回复格式
+                    const momentReplyMatches = [...content.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g)];
+                    for (const replyMatch of momentReplyMatches) {
+                        console.log(`💬 在MiPhone中提取到动态回复格式`);
+                        await QQ_ProcessMomentReply(replyMatch[1]);
+                        hasSubFormats = true;
+                    }
+                    
+                    // 2. 处理普通动态格式
+                    const momentMatches = [...content.matchAll(/moment_start([\s\S]+?)moment_end/g)];
+                    for (const momentMatch of momentMatches) {
+                        console.log(`📱 在MiPhone中提取到动态格式`);
+                        const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                        QQ_Moment_Parse(momentMatch[1], isInCommentContext);
+                        hasSubFormats = true;
+                    }
+                    
+                    // 3. 处理私聊和群聊格式 - 如果有其他格式，则需要处理剩余内容
+                    if (content.includes('的私聊>') || content.includes('群聊:')) {
+                        console.log(`💬 在MiPhone中发现聊天格式`);
+                        await QQ_Msg_Parse(fullMatch);
+                        hasSubFormats = true;
+                    }
+                    
+                    // 如果找到了子格式，标记为已处理
+                    if (hasSubFormats) {
+                        result = result.replace(fullMatch, '');
+                        processed = true;
+                        processedCount++;
+                        console.log(`✅ 已处理MiPhone完整格式: ${fullMatch.substring(0, 100)}...`);
+                    }
+                }
+                
+                // 第二阶段：处理未被MiPhone包裹的独立格式
+                const standalonePatterns = [
                     {
-                        name: '私聊格式',
+                        name: '独立私聊格式',
                         pattern: /<(.+?)和(.+?)的私聊>([\s\S]+?)<\/(.+?)和(.+?)的私聊>/g,
                         handler: async (match, fullMatch) => {
-                            console.log(`💬 提取到私聊格式内容`);
-                            // 使用现有的 QQ_Msg_Parse 处理
+                            console.log(`💬 提取到独立私聊格式内容`);
                             const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
                             await QQ_Msg_Parse(wrappedContent);
                             return true;
                         }
                     },
                     {
-                        name: '群聊格式',
+                        name: '独立群聊格式',
                         pattern: /<群聊:(.+?)>([\s\S]+?)<\/群聊:(.+?)>/g,
                         handler: async (match, fullMatch) => {
-                            console.log(`💬 提取到群聊格式内容`);
+                            console.log(`💬 提取到独立群聊格式内容`);
                             const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
                             await QQ_Msg_Parse(wrappedContent);
                             return true;
                         }
                     },
                     {
-                        name: '动态格式',
+                        name: '独立动态格式',
                         pattern: /moment_start([\s\S]+?)moment_end/g,
                         handler: async (match, fullMatch) => {
-                            console.log(`📱 提取到动态格式内容`);
-                            const wrappedContent = `MiPhone_JSON_START${fullMatch}MiPhone_JSON_END`;
-                            await QQ_Moment_Parse(wrappedContent);
+                            console.log(`📱 提取到独立动态格式内容`);
+                            const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                            QQ_Moment_Parse(match[1], isInCommentContext);
                             return true;
                         }
                     },
                     {
-                        name: 'MiPhone完整格式',
-                        pattern: /MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/g,
+                        name: '独立动态回复格式',
+                        pattern: /moment_reply_start([\s\S]+?)moment_reply_end/g,
                         handler: async (match, fullMatch) => {
-                            console.log(`📱 提取到MiPhone完整格式内容`);
-                            // 检查内容是否包含线上格式
-                            const content = match[1];
-                            if (content.includes('的私聊>') || content.includes('群聊:') || content.includes('moment_start')) {
-                                await QQ_Msg_Parse(fullMatch);
-                                return true;
-                            }
-                            return false;
+                            console.log(`💬 提取到独立动态回复格式内容`);
+                            await QQ_ProcessMomentReply(match[1]);
+                            return true;
                         }
                     }
                 ];
                 
-                // 逐个尝试各种格式模式
-                for (const formatDef of formatPatterns) {
+                // 逐个尝试独立格式模式
+                for (const formatDef of standalonePatterns) {
                     const matches = [...result.matchAll(formatDef.pattern)];
                     
                     for (const match of matches) {
@@ -8803,6 +8841,9 @@
                         /<\/群聊:/,
                         /<\/[^>]+和[^>]+的(?:聊天|私聊)>/,
                         /<\/(?:私聊|聊天):/,                 // 新增：对应的结束标签
+                        /moment_start/,                      // 动态格式线索
+                        /moment_reply_start/,                // 动态回复格式线索
+                        /moment_id::/,                       // 动态ID线索
                         /时间:\s*\d{4}-\d{2}-\d{2}/,
                         /--\d{4}-\d{2}-\d{2}/
                     ];
@@ -8843,6 +8884,14 @@
                     }
                 }
                 
+                // 处理动态回复内容
+                const momentReplyMatches = repairedContent.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g);
+                if (momentReplyMatches) {
+                    for (const reply of momentReplyMatches) {
+                        await QQ_ProcessMomentReply(reply[1]);
+                    }
+                }
+                
                 return { success: true };
             }
             
@@ -8866,7 +8915,7 @@
              * *** 新增：直接有效标签提取器（忽略所有格式要求） ***
              * 在所有模糊匹配失败后，直接从混乱格式中提取任何有效的标签内容
              */
-            function QQ_ExtractValidTagsDirectly(input) {
+            async function QQ_ExtractValidTagsDirectly(input) {
                 console.log("🎯 开始直接有效标签提取（忽略格式）");
                 
                 try {
@@ -8967,7 +9016,25 @@
                         }
                     }
                     
-                    // *** 3. 直接处理提取到的内容 ***
+                    // *** 3. 直接提取动态和动态回复标签 ***
+                    // 处理动态回复
+                    const momentReplyMatches = [...input.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g)];
+                    for (const replyMatch of momentReplyMatches) {
+                        console.log(`🎯 找到动态回复格式，内容长度: ${replyMatch[1].length}`);
+                        await QQ_ProcessMomentReply(replyMatch[1]);
+                        hasValidContent = true;
+                    }
+                    
+                    // 处理普通动态
+                    const momentMatches = [...input.matchAll(/moment_start([\s\S]+?)moment_end/g)];
+                    for (const momentMatch of momentMatches) {
+                        console.log(`🎯 找到动态格式，内容长度: ${momentMatch[1].length}`);
+                        const isInCommentContext = QQ_LastRequest && QQ_LastRequest.includes('用户在') && QQ_LastRequest.includes('的动态下评论');
+                        QQ_Moment_Parse(momentMatch[1], isInCommentContext);
+                        hasValidContent = true;
+                    }
+                    
+                    // *** 4. 直接处理提取到的内容 ***
                     if (hasValidContent) {
                         console.log("🎯 直接标签提取成功，开始处理内容");
                         console.log(`📊 提取统计: 群聊 ${Object.keys(results.群聊).length} 个，私聊 ${Object.keys(results.私聊).length} 个`);
@@ -9091,7 +9158,7 @@
                 console.log("🎯 开始智能提取有效信息");
                 
                 // *** 新增：首先尝试直接的有效标签提取（最高优先级） ***
-                const directTagResult = QQ_ExtractValidTagsDirectly(result);
+                const directTagResult = await QQ_ExtractValidTagsDirectly(result);
                 if (directTagResult.success) {
                     console.log("✅ 直接标签提取成功，跳过其他提取方式");
                     return { success: true };
@@ -9172,6 +9239,36 @@
                 if (QQ_HasContentTag(result)) {
                     const contentText = QQ_CleanContentTags(result);
                     if (contentText && contentText.trim().length > 10) {
+                        
+                        // 检查content内容是否包含moment_reply格式
+                        if (contentText.includes('moment_reply_start')) {
+                            console.log("💬 content标签中发现动态回复格式，优先处理");
+                            const momentReplyMatches = contentText.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g);
+                            for (const reply of momentReplyMatches) {
+                                await QQ_ProcessMomentReply(reply[1]);
+                            }
+                            
+                            // 移除已处理的moment_reply内容
+                            const remainingContent = contentText.replace(/moment_reply_start[\s\S]+?moment_reply_end/g, '').trim();
+                            
+                            // 如果还有其他内容，作为互动内容处理
+                            if (remainingContent.length > 10) {
+                                console.log("✅ 处理完动态回复后，剩余内容作为互动空间显示");
+                                QQ_HandleInteractiveContent(result.replace(contentText, remainingContent), QQ_LastRequestName);
+                            }
+                            
+                            return { success: true };
+                        }
+                        
+                        // 检查是否包含其他格式
+                        if (contentText.includes('moment_start') || contentText.includes('的私聊>') || contentText.includes('群聊:')) {
+                            console.log("💬 content标签中发现聊天格式，尝试严格格式处理");
+                            const strictResult = await QQ_ProcessStrictFormat(contentText);
+                            if (strictResult.success) {
+                                return { success: true };
+                            }
+                        }
+                        
                         console.log("✅ 找到有效content标签，显示互动空间");
                         QQ_HandleInteractiveContent(result, QQ_LastRequestName);
                         return { success: true };
@@ -9187,6 +9284,21 @@
              */
              async function QQ_ProcessMsgContent(content) {
                 console.log("📝 QQ_ProcessMsgContent 开始处理:", content.substring(0, 200) + "...");
+                
+                // *** 特殊处理：检测moment_reply内容 ***
+                if (content.includes('moment_reply_start')) {
+                    console.log("💬 检测到moment_reply内容，进行动态回复处理");
+                    const momentReplyMatches = content.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g);
+                    for (const reply of momentReplyMatches) {
+                        await QQ_ProcessMomentReply(reply[1]);
+                    }
+                    // 移除已处理的moment_reply内容
+                    content = content.replace(/moment_reply_start[\s\S]+?moment_reply_end/g, '').trim();
+                    // 如果移除后没有其他内容，直接返回
+                    if (!content || content.length < 10) {
+                        return;
+                    }
+                }
                 
                 // *** 特殊处理：检测moment内容 ***
                 if (content.includes('moment_start')) {
