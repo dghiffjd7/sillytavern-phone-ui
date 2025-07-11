@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>112%</span>
+                    <span>114%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -8004,6 +8004,19 @@
                 if (!SendValue) {
                     const $container = $(event.target).closest(".QQ_chat_page");
                     name = $container.attr("data-name") || "未知用户";
+                    
+                    // *** 修复：检查世界书中是否有该群聊，如果有则添加到QQ_Groups ***
+                    if (!QQ_Groups.includes(name) && name !== "未知用户") {
+                        if (entries) {
+                            const groupEntry = entries.find(e => e.comment === `手机-群聊-${name}` || (e.content && e.content.includes(`[${name}]`) && e.content.includes('类型=群聊')));
+                            if (groupEntry) {
+                                console.log(`✅ 发现新群聊 "${name}"，添加到QQ_Groups`);
+                                QQ_Groups.push(name);
+                                window.QQ_Groups = QQ_Groups;
+                            }
+                        }
+                    }
+                    
                     const input = $container.find(".userInput");
                     content = input.val()?.toString() ?? "";
                     if (content) {
@@ -8051,7 +8064,8 @@
                         // *** 修复：在清空缓存前构建完整的value ***
                         let fullValue = QQ_CacheSendMsg || ""; // 获取所有缓存消息
                         if (content) {
-                            const actionText = QQ_Groups.includes(name) ? `在群聊"${name}"中发送:${content}` : `给${name}发消息:${content}`;
+                            const isCurrentGroup = QQ_Groups.includes(name);
+                            const actionText = isCurrentGroup ? `在群聊${name}中发送:${content}` : `给${name}发消息:${content}`;
                             fullValue += (fullValue ? '\n' : '') + actionText; // 添加当前消息
                         }
                         
@@ -11226,6 +11240,13 @@
              */
             function QQ_CleanContentTags(content) {
                 if (!content || typeof content !== 'string') return '';
+                
+                // *** 核心修复：删除<content>标签之前的所有内容（包括thinking内容） ***
+                const contentIndex = content.search(/<content>/i);
+                if (contentIndex !== -1) {
+                    console.log('🧹 找到<content>标签，删除其之前的所有内容');
+                    content = content.substring(contentIndex);
+                }
                 
                 // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
                 const processedContent = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
