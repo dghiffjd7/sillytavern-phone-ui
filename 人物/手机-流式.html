@@ -3517,7 +3517,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>106%</span>
+                    <span>107%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -9043,11 +9043,21 @@
                 
                 async processInteractive(task) {
                     console.log('🎭 处理互动内容');
+                    console.log('📝 原始任务内容预览:', task.content.substring(0, 100) + '...');
+                    
                     // 使用新的流式显示逻辑
                     const match = task.content.match(/<content>([\s\S]*?)<\/content>/);
                     if (match) {
                         // 提取content标签内的内容，不包含标签本身
                         const contentInside = match[1];
+                        
+                        // 验证提取的内容是否有效
+                        if (!contentInside || contentInside.trim().length === 0) {
+                            console.log('⚠️ content标签为空，跳过处理');
+                            return;
+                        }
+                        
+                        console.log('📝 提取的content内容长度:', contentInside.length);
                         
                         // 检查content内部是否包含MiPhone或其他格式（支持各种变化）
                         const hasMiPhone = contentInside.includes('MiPhone_JSON_START') || 
@@ -9057,8 +9067,13 @@
                                          contentInside.includes('MiPhone_JSON_start') ||
                                          /MiPhone[^_]/.test(contentInside);
                         
-                        if (hasMiPhone) {
-                            console.log('📱 发现content内包含MiPhone格式，递归处理');
+                        // 检查是否包含其他聊天格式标签
+                        const hasChatFormats = /<群聊[：:]/i.test(contentInside) || 
+                                             /<[^>]*和[^>]*的?(?:私聊|聊天)/i.test(contentInside) ||
+                                             /moment_start|moment_end/i.test(contentInside);
+                        
+                        if (hasMiPhone || hasChatFormats) {
+                            console.log('📱 发现content内包含MiPhone或聊天格式，递归处理');
                             // 递归处理content内的内容
                             const innerSegments = this.splitIntoSegments(contentInside);
                             const innerTasks = this.createTaskQueue(innerSegments);
@@ -9067,11 +9082,18 @@
                             }
                         } else {
                             // 纯互动内容 - 只传递content标签内的内容，不包含标签本身
+                            console.log('🎭 纯互动内容，直接显示（不包含content标签）');
                             await this.displayInteractiveInChat(contentInside);
                         }
                     } else {
-                        // 如果没有content标签，可能是纯文本互动内容
-                        await this.displayInteractiveInChat(task.content);
+                        // 如果没有content标签，检查是否有其他有效内容
+                        const cleanContent = task.content.replace(/<\/?content>/gi, '').trim();
+                        if (cleanContent && cleanContent.length > 0) {
+                            console.log('📝 没有完整content标签，但有有效内容，直接显示');
+                            await this.displayInteractiveInChat(cleanContent);
+                        } else {
+                            console.log('⚠️ 没有有效的互动内容，跳过处理');
+                        }
                     }
                 },
                 
@@ -9130,16 +9152,39 @@
                 async displayInteractiveInChat(content) {
                     console.log('🎨 准备在当前聊天容器中显示互动内容');
                     
+                    // 验证内容是否有效
+                    if (!content || typeof content !== 'string') {
+                        console.log('⚠️ 互动内容为空或无效，跳过显示');
+                        return;
+                    }
+                    
+                    // 清理可能残留的content标签
+                    let cleanContent = content.replace(/<\/?content>/gi, '').trim();
+                    
+                    // 进一步验证清理后的内容
+                    if (!cleanContent || cleanContent.length === 0) {
+                        console.log('⚠️ 清理后的互动内容为空，跳过显示');
+                        return;
+                    }
+                    
+                    // 确保内容有实际意义（不仅仅是空白字符）
+                    if (cleanContent.replace(/\s+/g, '').length === 0) {
+                        console.log('⚠️ 互动内容只包含空白字符，跳过显示');
+                        return;
+                    }
+                    
+                    console.log(`✅ 互动内容验证通过，长度: ${cleanContent.length}`);
+                    
                     // 获取当前对话的角色名称
                     const currentCharacter = QQ_LastRequestName || charcardname;
                     
                     // 直接在当前界面显示互动内容，不做复杂的角色检测
                     if (currentCharacter) {
                         console.log(`💬 在当前与${currentCharacter}的对话中显示互动内容`);
-                        await QQ_DisplayInteractiveInPrivateChat(content, currentCharacter);
+                        await QQ_DisplayInteractiveInPrivateChat(cleanContent, currentCharacter);
                     } else {
                         console.log(`👥 在当前界面显示公共互动内容`);
-                        await QQ_DisplayInteractiveInGroupChat(content);
+                        await QQ_DisplayInteractiveInGroupChat(cleanContent);
                     }
                 }
             };
@@ -10631,7 +10676,7 @@
                         }
                         
                         console.log("✅ 找到有效content标签，使用新的流式显示");
-                        await QQ_SequentialTaskQueue.displayInteractiveInChat(result);
+                        await QQ_SequentialTaskQueue.displayInteractiveInChat(contentText);
                         return { success: true };
                     }
                 }
@@ -11176,14 +11221,27 @@
                 // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
                 const processedContent = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
                 
-                // 提取content标签内容
-                const contentMatch = processedContent.match(/<content>([\s\S]*?)<\/content>/i);
-                if (!contentMatch) {
-                    console.log('❌ 没有找到content标签');
-                    return '';
+                // 首先尝试匹配完整的content标签
+                let contentMatch = processedContent.match(/<content>([\s\S]*?)<\/content>/i);
+                if (contentMatch) {
+                    console.log('✅ 找到完整的content标签');
+                    return contentMatch[1].trim();
                 }
                 
-                return contentMatch[1].trim();
+                // 如果没有完整标签，尝试匹配不完整的标签
+                contentMatch = processedContent.match(/<content>([\s\S]*?)(?=<\/|$)/i);
+                if (contentMatch) {
+                    console.log('✅ 找到不完整的content标签，提取内容');
+                    let extractedContent = contentMatch[1];
+                    
+                    // 清理可能的系统标签
+                    extractedContent = extractedContent.replace(/<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink)[^>]*>[\s\S]*$/gi, '');
+                    
+                    return extractedContent.trim();
+                }
+                
+                console.log('❌ 没有找到content标签');
+                return '';
             }
 
             /**
