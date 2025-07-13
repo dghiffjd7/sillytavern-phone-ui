@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>121%</span>
+                    <span>122%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -24389,15 +24389,52 @@ ${index + 1}. ${space.name}
                             displayTime = QQ_FormatTimeToMinutes(msg.time);
                         }
                         
+                        // *** 修复：检测互动内容占位符并存储到短期记忆 ***
+                        const interactiveMatch = msg.content.match(/\[发生了一段互动 \(ID: (.+?)\)\]/);
+                        let contentToStore = msg.content;
+                        
+                        if (interactiveMatch) {
+                            const interactiveId = interactiveMatch[1];
+                            console.log(`🎭 短期记忆中检测到互动内容占位符: ${interactiveId}`);
+                            
+                            // 将占位符保存到短期记忆的互动内容列表中
+                            if (!window.QQ_ShortTermInteractiveContent) {
+                                window.QQ_ShortTermInteractiveContent = [];
+                            }
+                            
+                            // 确保不重复添加
+                            if (!window.QQ_ShortTermInteractiveContent.find(item => item.id === interactiveId)) {
+                                window.QQ_ShortTermInteractiveContent.unshift({
+                                    id: interactiveId,
+                                    timestamp: new Date().toISOString(),
+                                    sequenceId: msg.sequenceId,
+                                    context: {
+                                        type: msg.type,
+                                        sender: msg.sender,
+                                        time: displayTime,
+                                        chatPartner: msg.chatPartner,
+                                        groupName: msg.groupName
+                                    }
+                                });
+                                
+                                // 保持最新的20个互动内容占位符
+                                if (window.QQ_ShortTermInteractiveContent.length > 20) {
+                                    window.QQ_ShortTermInteractiveContent = window.QQ_ShortTermInteractiveContent.slice(0, 20);
+                                }
+                                
+                                console.log(`📝 互动内容占位符已存储到短期记忆，当前数量: ${window.QQ_ShortTermInteractiveContent.length}`);
+                            }
+                        }
+                        
                         // 添加新消息内容到newContent
                         if (msg.type === '私聊') {
-                            newContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}对${msg.chatPartner}说: ${contentToStore}\n`;
                         } else if (msg.type === '群聊') {
-                            newContent += `[${displayTime}] ${msg.sender}在群聊"${msg.groupName}"中说: ${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}在群聊"${msg.groupName}"中说: ${contentToStore}\n`;
                         } else if (msg.type === '动态') {
-                            newContent += `[${displayTime}] ${msg.sender}${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}${contentToStore}\n`;
                         } else if (msg.type === '动态评论') {
-                            newContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${msg.content}\n`;
+                            newContent += `[${displayTime}] ${msg.sender}评论${msg.momentAuthor}的动态: ${contentToStore}\n`;
                         }
                         
                         // *** 对话回合检测逻辑 ***
@@ -24542,6 +24579,10 @@ ${index + 1}. ${space.name}
                     console.log(`🎯 查找结果: ${memoryEntryForSave ? `找到现有条目 (UID: ${memoryEntryForSave.uid})` : '未找到，将创建新条目'}`);
                     
                     if (memoryEntryForSave) {
+                        // *** 修复：在保存前处理互动内容占位符 ***
+                        console.log(`🎭 正在处理短期记忆中的互动内容占位符...`);
+                        memoryContent = await QQ_ProcessShortTermMemoryInteractiveContent(memoryContent);
+                        
                         // *** 使用与聊天备份相同的更新方式 - 只更新content ***
                         console.log(`💾 [调试] 准备保存内容长度: ${memoryContent.length}`);
                         
@@ -24563,6 +24604,10 @@ ${index + 1}. ${space.name}
                             console.error(`❌ [验证失败] 保存后无法找到条目`);
                         }
                     } else {
+                        // *** 修复：在创建新条目前处理互动内容占位符 ***
+                        console.log(`🎭 正在处理新条目中的互动内容占位符...`);
+                        memoryContent = await QQ_ProcessShortTermMemoryInteractiveContent(memoryContent);
+                        
                         // *** 使用与聊天备份完全相同的创建方式 ***
                         await createLorebookEntry(worldbook, {
                             comment: entryComment,
@@ -38538,6 +38583,67 @@ ${index + 1}. ${space.name}
                 }
             }
             
+            /**
+             * *** 新增：处理短期记忆中的互动内容占位符 ***
+             * 在发送短期记忆给AI时，自动替换最新三个占位符为完整的互动内容
+             */
+            async function QQ_ProcessShortTermMemoryInteractiveContent(memoryContent) {
+                try {
+                    console.log('🎭 开始处理短期记忆中的互动内容占位符...');
+                    
+                    if (!window.QQ_ShortTermInteractiveContent || window.QQ_ShortTermInteractiveContent.length === 0) {
+                        console.log('📝 短期记忆中没有互动内容占位符');
+                        return memoryContent;
+                    }
+                    
+                    console.log(`🔍 找到 ${window.QQ_ShortTermInteractiveContent.length} 个互动内容占位符`);
+                    
+                    // 获取最新的三个互动内容占位符
+                    const latestInteractiveItems = window.QQ_ShortTermInteractiveContent.slice(0, 3);
+                    console.log(`🎯 将处理最新的 ${latestInteractiveItems.length} 个互动内容占位符`);
+                    
+                    let processedContent = memoryContent;
+                    let replacementCount = 0;
+                    
+                    for (const item of latestInteractiveItems) {
+                        const placeholderPattern = new RegExp(`\\[发生了一段互动 \\(ID: ${item.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\]`, 'g');
+                        
+                        // 检查内容中是否包含此占位符
+                        if (placeholderPattern.test(processedContent)) {
+                            console.log(`🔄 正在替换占位符: ${item.id}`);
+                            
+                            // 从世界书加载互动内容
+                            const interactiveContent = await QQ_LoadInteractiveContentFromWorldBook(item.id);
+                            
+                            if (interactiveContent && interactiveContent.content) {
+                                // 准备替换文本，包含上下文信息
+                                const contextInfo = item.context.type === '私聊' 
+                                    ? `${item.context.sender}对${item.context.chatPartner}的私聊中` 
+                                    : item.context.type === '群聊' 
+                                    ? `${item.context.sender}在群聊"${item.context.groupName}"中` 
+                                    : `${item.context.sender}`;
+                                    
+                                const replacementText = `【互动内容】${contextInfo}发生了以下互动：\n${interactiveContent.content}`;
+                                
+                                // 替换占位符
+                                processedContent = processedContent.replace(placeholderPattern, replacementText);
+                                replacementCount++;
+                                
+                                console.log(`✅ 成功替换占位符 ${item.id}，长度: ${interactiveContent.content.length}`);
+                            } else {
+                                console.warn(`⚠️ 无法加载互动内容: ${item.id}`);
+                            }
+                        }
+                    }
+                    
+                    console.log(`🎉 短期记忆互动内容处理完成，共替换 ${replacementCount} 个占位符`);
+                    return processedContent;
+                    
+                } catch (error) {
+                    console.error('处理短期记忆互动内容时出错:', error);
+                    return memoryContent; // 出错时返回原始内容
+                }
+            }
 
 
             /**
