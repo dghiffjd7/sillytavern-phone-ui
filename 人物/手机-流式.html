@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>117%</span>
+                    <span>118%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -5409,6 +5409,57 @@
             
             // *** 新增：短期记忆滚动式更新状态跟踪 ***
             let QQ_LastProcessedSequenceId = 0; // 记录上次处理的最大序列号
+            
+            /**
+             * *** 修复：短期记忆序列号持久化机制 ***
+             * 从世界书加载最后处理的序列号，避免重复处理历史内容
+             */
+            async function QQ_LoadLastProcessedSequenceId() {
+                try {
+                    if (!worldbook || !entries) {
+                        console.log('⚠️ 世界书不可用，使用默认序列号 0');
+                        return 0;
+                    }
+                    
+                    const entry = entries.find(e => e.comment === '手机-短期记忆序列号状态');
+                    if (entry && entry.content) {
+                        const data = JSON.parse(entry.content);
+                        const savedSequenceId = data.lastProcessedSequenceId || 0;
+                        console.log(`📥 已加载上次处理的序列号: ${savedSequenceId}`);
+                        return savedSequenceId;
+                    }
+                    
+                    console.log('📝 未找到序列号状态记录，使用默认值 0');
+                    return 0;
+                } catch (error) {
+                    console.error('❌ 加载序列号状态失败:', error);
+                    return 0;
+                }
+            }
+            
+            /**
+             * *** 修复：保存当前处理的序列号状态 ***
+             */
+            async function QQ_SaveLastProcessedSequenceId(sequenceId) {
+                try {
+                    if (!worldbook || !entries) {
+                        console.log('⚠️ 世界书不可用，无法保存序列号状态');
+                        return false;
+                    }
+                    
+                    const comment = '手机-短期记忆序列号状态';
+                    const data = {
+                        lastProcessedSequenceId: sequenceId,
+                        timestamp: new Date().toISOString(),
+                        description: '短期记忆系统最后处理的消息序列号，用于避免重复处理历史内容'
+                    };
+                    
+                    return await QQ_SafeSaveToWorldBook('序列号状态', data, comment);
+                } catch (error) {
+                    console.error('❌ 保存序列号状态失败:', error);
+                    return false;
+                }
+            }
             
             // *** 新增：当前回复消息保护机制 ***
             let QQ_CurrentReplyMessages = new Set(); // 存储当前AI回复的消息ID，确保不被删除
@@ -19091,6 +19142,10 @@ ${index + 1}. ${space.name}
                 console.log('开始初始化互动空间系统...');
                 await QQ_InitInteractiveSystem();
                 
+                // *** 修复：加载短期记忆序列号状态 ***
+                console.log('开始加载短期记忆序列号状态...');
+                QQ_LastProcessedSequenceId = await QQ_LoadLastProcessedSequenceId();
+                
                 console.log('页面初始化完成');
                 
                 // 为聊天元素绑定点击事件
@@ -24217,6 +24272,9 @@ ${index + 1}. ${space.name}
                                 } else {
                                     console.log(`⏭️ 跳过已处理动态 [seq:${moment.sequenceId}] (上次处理: ${QQ_LastProcessedSequenceId}): ${moment.message.substring(0, 30)}...`);
                                 }
+                            } else if (moment.message && !moment.sequenceId) {
+                                // *** 修复：跳过没有序列号的历史动态，避免重复添加 ***
+                                console.log(`📜 跳过历史动态（无序列号）: ${moment.message.substring(0, 30)}...`);
                             }
                             
                             // 检查动态评论（仅收集新的）
@@ -24532,11 +24590,22 @@ ${index + 1}. ${space.name}
                         }
                     }, 1000);
                     
-                    // *** 修改：更新最后处理的序列ID ***
+                    // *** 修复：更新并持久化最后处理的序列ID ***
                     if (newMessages.length > 0) {
                         const maxSequenceId = Math.max(...newMessages.map(msg => msg.sequenceId || 0));
                         QQ_LastProcessedSequenceId = maxSequenceId;
                         console.log(`🔄 已更新最后处理的序列ID: ${QQ_LastProcessedSequenceId}`);
+                        
+                        // *** 立即保存序列号状态到世界书 ***
+                        QQ_SaveLastProcessedSequenceId(maxSequenceId).then(success => {
+                            if (success) {
+                                console.log(`💾 序列号状态已保存到世界书: ${maxSequenceId}`);
+                            } else {
+                                console.warn(`⚠️ 序列号状态保存失败: ${maxSequenceId}`);
+                            }
+                        }).catch(error => {
+                            console.error('保存序列号状态异常:', error);
+                        });
                     }
                     
                 } catch (error) {
