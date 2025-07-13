@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>96%</span>
+                    <span>97%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -9306,7 +9306,7 @@
                     
                     // *** 修复：在开始显示互动内容时立即标记聊天已触发，确保开关立即显示 ***
                     const chatName = currentCharacter || '公共聊天';
-                    console.log(`🎭 立即标记聊天 ${chatName} 已触发互动内容`);
+                    console.log(`🎭 立即标记聊天 ${chatName} 已触发互动内容（从 displayInteractiveInChat）`);
                     await QQ_InteractiveMode.markChatTriggered(chatName);
                     
                     // 直接在当前界面显示互动内容，不做复杂的角色检测
@@ -9824,10 +9824,12 @@
                     if (!this.triggeredChats.has(chatName)) {
                         this.triggeredChats.add(chatName);
                         await this.saveTriggeredChats();
-                        console.log(`🎭 标记聊天 ${chatName} 已触发互动内容`);
+                        console.log(`🎭 标记聊天 ${chatName} 已触发互动内容（首次）`);
                         
                         // 更新该聊天页面的开关显示
                         this.updateSwitchVisibility(chatName);
+                    } else {
+                        console.log(`🔄 聊天 ${chatName} 已经被标记过，跳过重复标记`);
                     }
                 },
                 
@@ -9875,8 +9877,15 @@
                     addSwitchToContainers();
                     
                     // 监听DOM变化，为新创建的输入容器添加开关
-                    const observer = new MutationObserver(() => {
-                        addSwitchToContainers();
+                    const observer = new MutationObserver((mutations) => {
+                        // *** 修复：只在添加了新节点时才重新检查，避免过度触发 ***
+                        const hasNewNodes = mutations.some(mutation => 
+                            mutation.type === 'childList' && mutation.addedNodes.length > 0
+                        );
+                        if (hasNewNodes) {
+                            console.log('🔄 DOM变化检测到新节点，更新互动开关');
+                            addSwitchToContainers();
+                        }
                     });
                     
                     observer.observe(document.body, {
@@ -22713,7 +22722,7 @@ ${index + 1}. ${space.name}
                         msg && msg.includes && msg.includes('[发生了一段互动 (ID:')
                     );
                     if (hasInteractivePlaceholder) {
-                        console.log(`🎭 聊天页面 ${name} 包含互动内容占位符，标记为已触发`);
+                        console.log(`🎭 聊天页面 ${name} 包含互动内容占位符，标记为已触发（从页面加载）`);
                         QQ_InteractiveMode.markChatTriggered(name);
                     }
                 }
@@ -27256,6 +27265,7 @@ ${index + 1}. ${space.name}
                         }
                         
                         // *** 修复：标记该聊天已触发互动内容，确保开关显示 ***
+                        console.log(`🎭 标记聊天 ${name} 已触发互动内容（从普通消息检测）`);
                         QQ_InteractiveMode.markChatTriggered(name);
                         
                         // *** 修复：异步加载互动内容并渲染 ***
@@ -35066,6 +35076,8 @@ ${index + 1}. ${space.name}
                 
                 // *** 修复：同时加载内存和持久化的群聊消息 ***
                 let hasMessages = false;
+                // *** 新增：跟踪已处理的互动内容ID，防止重复处理 ***
+                const processedInteractiveIds = new Set();
                 
                 // 1. 先加载持久化的群聊消息（QQ_msgjson.群聊）
                 const groupName = groupId; // 假设 groupId 就是群聊名称
@@ -35076,6 +35088,18 @@ ${index + 1}. ${space.name}
                     // 使用现有的 QQ_Chat_AddMsg 函数显示持久化消息
                     persistedMessages.forEach(msgString => {
                         if (typeof msgString === 'string' && msgString.includes('--')) {
+                            // *** 修复：检查是否包含互动内容占位符，记录ID防止重复处理 ***
+                            const interactiveMatch = msgString.match(/\[发生了一段互动 \(ID: (.+?)\)\]/);
+                            if (interactiveMatch) {
+                                const interactiveId = interactiveMatch[1];
+                                if (processedInteractiveIds.has(interactiveId)) {
+                                    console.log(`⚠️ 跳过重复的互动内容: ${interactiveId}`);
+                                    return; // 跳过已处理的互动内容
+                                }
+                                processedInteractiveIds.add(interactiveId);
+                                console.log(`📝 记录互动内容ID: ${interactiveId}`);
+                            }
+                            
                             QQ_Chat_AddMsg(msgString, chatContainer, false); // false 表示不是新消息，不需要滚动
                         }
                     });
@@ -35090,6 +35114,18 @@ ${index + 1}. ${space.name}
                     // 显示内存中的消息（包括系统消息）
                     memoryMessages.forEach(message => {
                         if (message.type === 'system') {
+                            // *** 修复：检查系统消息是否包含互动内容占位符 ***
+                            const interactiveMatch = message.content.match(/\[发生了一段互动 \(ID: (.+?)\)\]/);
+                            if (interactiveMatch) {
+                                const interactiveId = interactiveMatch[1];
+                                if (processedInteractiveIds.has(interactiveId)) {
+                                    console.log(`⚠️ 跳过重复的内存互动内容: ${interactiveId}`);
+                                    return; // 跳过已处理的互动内容
+                                }
+                                processedInteractiveIds.add(interactiveId);
+                                console.log(`📝 记录内存互动内容ID: ${interactiveId}`);
+                            }
+                            
                             // 显示系统消息
                             const systemMsgDiv = document.createElement('div');
                             systemMsgDiv.className = 'system-message';
