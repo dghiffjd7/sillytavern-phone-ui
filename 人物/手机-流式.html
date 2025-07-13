@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>120%</span>
+                    <span>121%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -21163,7 +21163,7 @@ ${index + 1}. ${space.name}
                     const tempDiv = $('<div>');
                     
                     // 使用修改后的QQ_Chat_AddMsg添加消息，跳过滚动和计数
-                    QQ_Chat_AddMsg(tempDiv[0], msg, chatName, false, true);
+                    await QQ_Chat_AddMsg(tempDiv[0], msg, chatName, false, true);
                     
                     // 将消息插入到容器顶部
                     if ($firstMsg.length > 0) {
@@ -22413,7 +22413,7 @@ ${index + 1}. ${space.name}
                 // }
                 $(`.QQ_chat_page`).hide();
             }
-            function QQ_ChangeChatPage(event, directName = null) {
+            async function QQ_ChangeChatPage(event, directName = null) {
                 const $QQpage = $("#App_QQ");
                 if ($QQpage.length === 0) {
                     console.log("获取QQpage失败");
@@ -22461,7 +22461,7 @@ ${index + 1}. ${space.name}
                 let $page = $(`.QQ_chat_page[data-name='${name}']`);
                 if ($page.length === 0) {
                     console.log(`${name}的聊天页不存在,开始创建`);
-                    $page = $(QQ_CreatChatPage(name));
+                    $page = $(await QQ_CreatChatPage(name));
                     $QQpage.append($page);
                 }
                 
@@ -22527,7 +22527,7 @@ ${index + 1}. ${space.name}
              * @param name 聊天页名称
              * @returns 聊天页HTML
              */
-             function QQ_CreatChatPage(name) {
+             async function QQ_CreatChatPage(name) {
                 console.log(`创建聊天页: ${name}`);
                 const isGroup = QQ_Groups.includes(name);
                 
@@ -22560,9 +22560,9 @@ ${index + 1}. ${space.name}
                     const messagesToShow = allMessages.slice(startIndex);
                     
                     // 添加消息到界面
-                    messagesToShow.forEach(msg => {
-                        QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过分页控制
-                    });
+                    for (const msg of messagesToShow) {
+                        await QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过分页控制
+                    }
                     
                     // 更新显示计数
                     chatDisplayCounts[name] = messagesToShow.length;
@@ -23524,7 +23524,7 @@ ${index + 1}. ${space.name}
                 
                 let currentIndex = 0;
                 
-                function displayNextMessage() {
+                async function displayNextMessage() {
                     // 移除当前的输入指示器（使用改进的管理函数）
                     QQ_HideTypingIndicatorForChat(chatName);
                     
@@ -23567,7 +23567,7 @@ ${index + 1}. ${space.name}
                     const partContent = `${sender}--${part}--${timestamp}`;
                     
                     // 显示当前消息（跳过流式检查，避免重复流式处理）
-                    QQ_Chat_AddMsg(chatContainer, partContent, chatName, isNew && currentIndex === 0, skipScrollAndCount, true);
+                    await QQ_Chat_AddMsg(chatContainer, partContent, chatName, isNew && currentIndex === 0, skipScrollAndCount, true);
                     
                     currentIndex++;
                     
@@ -23584,12 +23584,12 @@ ${index + 1}. ${space.name}
                         const delay = QQ_GenerateBenfordDelay(isGroupChat);
                         
                         console.log(`⏱️ 下一条消息将在 ${delay}ms 后显示（${isGroupChat ? '群聊' : '私聊'}模式）`);
-                        setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                        setTimeout(async () => await displayNextMessage(), delay + 500); // 额外500ms用于输入动画
                     }
                 }
                 
                 // 开始显示第一条消息
-                displayNextMessage();
+                displayNextMessage().catch(error => console.error('流式显示错误:', error));
             }
             
             /**
@@ -23601,7 +23601,7 @@ ${index + 1}. ${space.name}
              * @param {boolean} isNew - 是否为新消息
              * @param {boolean} skipScrollAndCount - 是否跳过滚动和计数
              */
-            function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
+            async function QQ_DisplayStreamingMessagesDirectly(chatContainer, fullMessages, chatName, isNew, skipScrollAndCount) {
                 console.log(`🌊 开始流式显示 ${fullMessages.length} 条完整消息 - 聊天: ${chatName}`);
                 
                 // 检查容器是否存在（修复：支持在隐藏的聊天页面中查找容器）
@@ -23647,7 +23647,7 @@ ${index + 1}. ${space.name}
                 
                 return new Promise((resolve, reject) => {
                     let currentIndex = 0;
-                    function displayNextMessage() {
+                    async function displayNextMessage() {
                         try {
                             // 移除当前的输入指示器（使用改进的管理函数）
                             QQ_HideTypingIndicatorForChat(chatName);
@@ -23691,7 +23691,7 @@ ${index + 1}. ${space.name}
                             const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
                             
                             // 显示当前消息（跳过流式检查，避免重复流式处理）
-                            QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount, true);
+                            await QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount, true);
                             console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
                             
                             currentIndex++;
@@ -23719,7 +23719,7 @@ ${index + 1}. ${space.name}
                                 if (chatState.currentProcess) {
                                     clearTimeout(chatState.currentProcess);
                                 }
-                                chatState.currentProcess = setTimeout(displayNextMessage, delay + 500); // 额外500ms用于输入动画
+                                chatState.currentProcess = setTimeout(async () => await displayNextMessage(), delay + 500); // 额外500ms用于输入动画
                             }
                         } catch (error) {
                             console.error('🚫 流式显示过程中发生错误:', error);
@@ -23729,7 +23729,10 @@ ${index + 1}. ${space.name}
                     
                     // 开始显示第一条消息
                     try {
-                        displayNextMessage();
+                        displayNextMessage().catch(error => {
+                            console.error('🚫 流式显示失败:', error);
+                            reject(error);
+                        });
                     } catch (error) {
                         console.error('🚫 流式显示启动失败:', error);
                         reject(error);
@@ -24844,7 +24847,7 @@ ${index + 1}. ${space.name}
                         if ($page.length === 0) {
                             Creat = true;
                             console.log(`${name}的聊天页不存在,开始创建123`);
-                            $page = $(QQ_CreatChatPage(`${name}`));
+                            $page = $(await QQ_CreatChatPage(`${name}`));
                             $QQpage.append($page);
                         }
                         if (json.私聊[str].length == 0) {
@@ -24957,7 +24960,7 @@ ${index + 1}. ${space.name}
                             
                             // 先显示已有消息（立即显示，无延迟）
                             for (let msg of existingMessages) {
-                                QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
+                                await QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
                             }
                             
                             // 在新消息开始前添加时间分隔线（仅当有旧消息时）
@@ -24977,7 +24980,7 @@ ${index + 1}. ${space.name}
                             // 没有新消息，正常显示所有消息
                             for (let msg of json.私聊[str]) {
                                 const isNewMsg = !QQ_msgjson.私聊[str].includes(msg);
-                                QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                                await QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
                             }
                             
                             // 如果是首次加载且有消息，在最后添加时间分隔线
@@ -25242,7 +25245,7 @@ ${index + 1}. ${space.name}
                             if (window.currentGroupChat && window.currentGroupChat.name === name) {
                                 $page = ensureGroupChatPage(window.currentGroupChat);
                             } else {
-                            $page = $(QQ_CreatChatPage(name));
+                            $page = $(await QQ_CreatChatPage(name));
                             $QQpage.append($page);
                             }
                         }
@@ -25343,7 +25346,7 @@ ${index + 1}. ${space.name}
                             
                             // 先显示已有消息（立即显示，无延迟）
                             for (let msg of existingMessages) {
-                                QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
+                                await QQ_Chat_AddMsg($msgContent[0], msg, name, false, true); // 跳过滚动和计数
                             }
                             
                             // 在新消息开始前添加时间分隔线（仅当有旧消息时）
@@ -25363,7 +25366,7 @@ ${index + 1}. ${space.name}
                             // 没有新消息，正常显示所有消息
                             for (let msg of json.群聊[name]["msgs"]) {
                                 const isNewMsg = !QQ_msgjson.群聊[name]["msgs"].includes(msg);
-                                QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
+                                await QQ_Chat_AddMsg($msgContent[0], msg, name, isNewMsg);
                             }
                             
                             // 如果是首次加载且有消息，在最后添加时间分隔线
@@ -26940,7 +26943,7 @@ ${index + 1}. ${space.name}
              * @param {*} skipScrollAndCount - 是否跳过滚动和计数
              * @param {*} skipStreamingCheck - 是否跳过流式检查（避免重复流式处理）
              */
-            function QQ_Chat_AddMsg(dom, content, name, isNew, skipScrollAndCount = false, skipStreamingCheck = false) {
+            async function QQ_Chat_AddMsg(dom, content, name, isNew, skipScrollAndCount = false, skipStreamingCheck = false) {
                 console.log(`QQ_Chat_AddMsg: 添加消息 "${content}" 到聊天页面 "${name}", isNew: ${isNew}`);
                 
                 // *** 分页控制：检查当前消息数量 ***
@@ -27040,6 +27043,112 @@ ${index + 1}. ${space.name}
                     console.log(`消息发送者: ${sender}, 内容: ${messageContent}, 时间: ${timestamp}`);
                     if (originalSender !== sender) {
                         console.log(`🔧 发送者名称已规范化: "${originalSender}" -> "${sender}"`);
+                    }
+                    
+                    // *** 修复：检测互动内容占位符（在普通消息中） ***
+                    const interactiveMatch = messageContent.match(/\[发生了一段互动 \(ID: (.+?)\)\]/);
+                    if (interactiveMatch) {
+                        const interactiveId = interactiveMatch[1];
+                        console.log(`🎭 在普通消息中检测到互动内容占位符: ${interactiveId}`);
+                        
+                        // *** 修复：异步加载互动内容并渲染 ***
+                        (async () => {
+                            try {
+                                const interactiveContent = await QQ_LoadInteractiveContentFromWorldBook(interactiveId);
+                                if (interactiveContent && interactiveContent.content) {
+                                    console.log(`✅ 成功加载互动内容，直接渲染: ${interactiveId}`);
+                                    
+                                    // 直接创建展开的互动内容显示，不使用点击占位符
+                                    const expandedDiv = QQ_CreateExpandedInteractiveDisplay(interactiveContent.content, interactiveId);
+                                    $(dom).append(expandedDiv);
+                                    
+                                    // 移除临时占位符
+                                    $(dom).find(`.temp-placeholder[data-id="${interactiveId}"]`).remove();
+                                    
+                                    if (!skipScrollAndCount && isNew) {
+                                        chatDisplayCounts[name] = (chatDisplayCounts[name] || 0) + 1;
+                                        $(dom).scrollTop(dom.scrollHeight);
+                                    }
+                                } else {
+                                    console.warn(`⚠️ 互动内容加载失败，保持占位符显示: ${interactiveId}`);
+                                    // 将临时占位符转换为可点击占位符
+                                    const tempPlaceholder = $(dom).find(`.temp-placeholder[data-id="${interactiveId}"]`);
+                                    if (tempPlaceholder.length > 0) {
+                                        tempPlaceholder.removeClass('temp-placeholder').addClass('interactive-placeholder');
+                                        tempPlaceholder.css('cursor', 'pointer');
+                                        tempPlaceholder.append('<div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">点击展开互动内容</div>');
+                                        
+                                        // 添加点击事件
+                                        tempPlaceholder.on('click', async function() {
+                                            $(this).html('🔄 正在加载互动内容...');
+                                            try {
+                                                const content = await QQ_LoadInteractiveContentFromWorldBook(interactiveId);
+                                                if (content && content.content) {
+                                                    const expandedDiv = QQ_CreateExpandedInteractiveDisplay(content.content, interactiveId);
+                                                    $(this).after(expandedDiv);
+                                                    $(this).html('✅ 互动内容已展开');
+                                                    $(this).off('click');
+                                                } else {
+                                                    $(this).html('❌ 互动内容加载失败');
+                                                }
+                                            } catch (error) {
+                                                $(this).html('❌ 互动内容加载出错');
+                                                console.error('加载互动内容时出错:', error);
+                                            }
+                                        });
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('加载互动内容时出错，保持占位符显示:', error);
+                            }
+                        })();
+                        
+                        // 如果加载失败，创建占位符作为备选方案
+                        const interactiveDiv = $(`
+                            <div class="interactive-placeholder" data-id="${interactiveId}" style="
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                padding: 8px 12px;
+                                margin: 5px 0;
+                                border-radius: 15px;
+                                text-align: center;
+                                cursor: pointer;
+                                font-size: 13px;
+                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+                                transition: all 0.3s ease;
+                            ">
+                                ✨ ${messageContent}
+                                <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">点击展开互动内容</div>
+                            </div>
+                        `);
+                        
+                        // 添加点击事件
+                        interactiveDiv.on('click', async function() {
+                            $(this).html('🔄 正在加载互动内容...');
+                            try {
+                                const content = await QQ_LoadInteractiveContentFromWorldBook(interactiveId);
+                                if (content && content.content) {
+                                    const expandedDiv = QQ_CreateExpandedInteractiveDisplay(content.content, interactiveId);
+                                    $(this).after(expandedDiv);
+                                    $(this).html('✅ 互动内容已展开');
+                                    $(this).off('click');
+                                } else {
+                                    $(this).html('❌ 互动内容加载失败');
+                                }
+                            } catch (error) {
+                                $(this).html('❌ 互动内容加载出错');
+                                console.error('加载互动内容时出错:', error);
+                            }
+                        });
+                        
+                        $(dom).append(interactiveDiv);
+                        
+                        // 跳过后续的普通消息处理
+                        if (!skipScrollAndCount && isNew) {
+                            chatDisplayCounts[name] = (chatDisplayCounts[name] || 0) + 1;
+                            $(dom).scrollTop(dom.scrollHeight);
+                        }
+                        return;
                     }
                     
                     // *** 阶段一：流式消息分割与智能显示 ***
@@ -30906,7 +31015,7 @@ ${index + 1}. ${space.name}
                 /**
                  * 测试流式显示功能
                  */
-                testStreamingDisplay: function(chatName = '港区') {
+                testStreamingDisplay: async function(chatName = '港区') {
                     const testMessages = [
                         '柴郡--测试流式显示第一条消息--17:10',
                         '萨拉托加--测试流式显示第二条消息--17:10',
@@ -30920,7 +31029,7 @@ ${index + 1}. ${space.name}
                     }
                     
                     console.log('🧪 开始测试流式显示...');
-                    QQ_DisplayStreamingMessagesDirectly(chatContainer, testMessages, chatName, true, false);
+                    await QQ_DisplayStreamingMessagesDirectly(chatContainer, testMessages, chatName, true, false);
                     return true;
                 }
             };
