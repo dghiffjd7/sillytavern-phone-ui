@@ -9533,7 +9533,12 @@
                 };
                 
                 // 使用统一的互动内容保存机制
-                const interactiveId = await QQ_SaveInteractiveContentToWorldBook(content, characterName);
+                const locationInfo = {
+                    type: 'privateChat',
+                    target: characterName,
+                    chatType: 'character'
+                };
+                const interactiveId = await QQ_SaveInteractiveContentToWorldBook(content, characterName, locationInfo);
                 
                 // *** 修复：在聊天记录中插入占位符 ***
                 if (interactiveId) {
@@ -9703,7 +9708,12 @@
                 };
                 
                 // 使用统一的互动内容保存机制
-                const interactiveId = await QQ_SaveInteractiveContentToWorldBook(content, null);
+                const locationInfo = {
+                    type: 'groupChat',
+                    target: groupName,
+                    chatType: 'group'
+                };
+                const interactiveId = await QQ_SaveInteractiveContentToWorldBook(content, null, locationInfo);
                 
                 // *** 修复：在群聊记录中插入占位符 ***
                 if (interactiveId && groupName && QQ_Groups.includes(groupName)) {
@@ -35004,13 +35014,31 @@ ${index + 1}. ${space.name}
                 // 清空现有消息
                 chatContainer.innerHTML = '';
                 
-                // 检查是否有保存的群聊消息
-                if (window.groupChatMessages && window.groupChatMessages[groupId]) {
-                    const messages = window.groupChatMessages[groupId];
-                    console.log(`群聊 ${groupId} 有 ${messages.length} 条消息`);
+                // *** 修复：同时加载内存和持久化的群聊消息 ***
+                let hasMessages = false;
+                
+                // 1. 先加载持久化的群聊消息（QQ_msgjson.群聊）
+                const groupName = groupId; // 假设 groupId 就是群聊名称
+                if (QQ_msgjson && QQ_msgjson.群聊 && QQ_msgjson.群聊[groupName] && QQ_msgjson.群聊[groupName].msgs) {
+                    const persistedMessages = QQ_msgjson.群聊[groupName].msgs;
+                    console.log(`从 QQ_msgjson.群聊 加载群聊 ${groupName} 的 ${persistedMessages.length} 条消息`);
                     
-                    // 显示所有消息（包括系统消息）
-                    messages.forEach(message => {
+                    // 使用现有的 QQ_Chat_AddMsg 函数显示持久化消息
+                    persistedMessages.forEach(msgString => {
+                        if (typeof msgString === 'string' && msgString.includes('--')) {
+                            QQ_Chat_AddMsg(msgString, chatContainer, false); // false 表示不是新消息，不需要滚动
+                        }
+                    });
+                    hasMessages = true;
+                }
+                
+                // 2. 再加载内存中的群聊消息（window.groupChatMessages）
+                if (window.groupChatMessages && window.groupChatMessages[groupId]) {
+                    const memoryMessages = window.groupChatMessages[groupId];
+                    console.log(`从 window.groupChatMessages 加载群聊 ${groupId} 的 ${memoryMessages.length} 条消息`);
+                    
+                    // 显示内存中的消息（包括系统消息）
+                    memoryMessages.forEach(message => {
                         if (message.type === 'system') {
                             // 显示系统消息
                             const systemMsgDiv = document.createElement('div');
@@ -35031,10 +35059,11 @@ ${index + 1}. ${space.name}
                             // TODO: 添加普通消息显示逻辑
                         }
                     });
+                    hasMessages = true;
                 }
                 
                 // 如果没有消息，显示欢迎消息
-                if (chatContainer.children.length === 0) {
+                if (!hasMessages && chatContainer.children.length === 0) {
                     const welcomeDiv = document.createElement('div');
                     welcomeDiv.className = 'system-message';
                     welcomeDiv.style.cssText = `
@@ -38642,7 +38671,7 @@ ${index + 1}. ${space.name}
              * *** 修复：互动内容保存函数 ***
              * 使用项目统一的QQ_SafeSaveToWorldBook机制，保持与其他功能一致性
              */
-            async function QQ_SaveInteractiveContentToWorldBook(content, characterName = null) {
+            async function QQ_SaveInteractiveContentToWorldBook(content, characterName = null, locationInfo = null) {
                 if (!worldbook || !entries) {
                     console.log('互动内容保存跳过：缺少worldbook或entries');
                     return null;
@@ -38654,7 +38683,12 @@ ${index + 1}. ${space.name}
                         characterName: characterName,
                         timestamp: new Date().toISOString(),
                         id: `interactive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                        type: characterName ? 'character_specific' : 'public'
+                        type: characterName ? 'character_specific' : 'public',
+                        // *** 新增：存储位置信息用于重新加载时恢复 ***
+                        location: locationInfo || {
+                            type: characterName ? 'privateChat' : 'publicChat',
+                            target: characterName || 'public'
+                        }
                     };
                     
                     // *** 修复：使用与动态内容完全相同的世界书操作方式 ***
