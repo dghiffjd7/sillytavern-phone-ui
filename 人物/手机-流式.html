@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>122%</span>
+                    <span>123%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -9747,19 +9747,73 @@
             const QQ_InteractiveMode = {
                 enabled: false,
                 hasTriggered: false, // 是否已经触发过互动内容
+                triggeredChats: new Set(), // 记录哪些聊天页面曾经有过互动内容
                 switchElement: null,
                 
                 /**
                  * 初始化互动模式系统
                  */
-                init() {
+                async init() {
                     // 监听互动内容的首次触发
                     $(document).on('interactiveContentDisplayed', () => {
                         this.onFirstInteractive();
                     });
                     
+                    // 加载持久化的触发状态
+                    await this.loadTriggeredChats();
+                    
                     // 创建开关元素
                     this.createSwitch();
+                },
+                
+                /**
+                 * *** 新增：加载已触发互动内容的聊天列表 ***
+                 */
+                async loadTriggeredChats() {
+                    try {
+                        // 从世界书加载触发状态
+                        const data = await QQ_GetFromWorldBook('互动模式触发状态');
+                        if (data && Array.isArray(data)) {
+                            this.triggeredChats = new Set(data);
+                            console.log(`🎭 加载互动触发状态: ${data.length}个聊天页面`);
+                        }
+                    } catch (error) {
+                        console.warn('加载互动触发状态失败:', error);
+                    }
+                },
+                
+                /**
+                 * *** 新增：保存触发状态到世界书 ***
+                 */
+                async saveTriggeredChats() {
+                    try {
+                        const data = Array.from(this.triggeredChats);
+                        await QQ_SafeSaveToWorldBook('互动模式触发状态', data, 'QQ_互动模式触发状态');
+                        console.log(`🎭 保存互动触发状态: ${data.length}个聊天页面`);
+                    } catch (error) {
+                        console.warn('保存互动触发状态失败:', error);
+                    }
+                },
+                
+                /**
+                 * *** 新增：检查特定聊天是否已触发过互动内容 ***
+                 */
+                hasChatTriggered(chatName) {
+                    return this.triggeredChats.has(chatName);
+                },
+                
+                /**
+                 * *** 新增：标记特定聊天已触发互动内容 ***
+                 */
+                async markChatTriggered(chatName) {
+                    if (!this.triggeredChats.has(chatName)) {
+                        this.triggeredChats.add(chatName);
+                        await this.saveTriggeredChats();
+                        console.log(`🎭 标记聊天 ${chatName} 已触发互动内容`);
+                        
+                        // 更新该聊天页面的开关显示
+                        this.updateSwitchVisibility(chatName);
+                    }
                 },
                 
                 /**
@@ -9769,21 +9823,30 @@
                     const self = this;
                     
                     function addSwitchToContainers() {
-                        const switchHtml = `
-                            <div class="interactive-mode-switch ${self.hasTriggered ? 'visible' : ''}">
-                                <div class="interactive-mode-button ${self.enabled ? 'active' : ''}">
-                                    <span class="interactive-mode-icon">✨</span>
-                                </div>
-                            </div>
-                        `;
-                        
                         // 添加到每个输入容器
                         $('.input-container').each(function() {
+                            // 获取当前聊天页面名称
+                            const $chatPage = $(this).closest('.QQ_chat_page');
+                            const chatName = $chatPage.attr('data-name') || '';
+                            
+                            // 检查该聊天是否已触发过互动内容
+                            const hasChatTriggered = self.hasChatTriggered(chatName);
+                            
+                            const switchHtml = `
+                                <div class="interactive-mode-switch ${hasChatTriggered ? 'visible' : ''}">
+                                    <div class="interactive-mode-button ${self.enabled ? 'active' : ''}">
+                                        <span class="interactive-mode-icon">✨</span>
+                                    </div>
+                                </div>
+                            `;
+                            
                             if (!$(this).find('.interactive-mode-switch').length) {
                                 $(this).prepend(switchHtml);
                             } else {
-                                // 同步已存在按钮的状态
-                                $(this).find('.interactive-mode-button').toggleClass('active', self.enabled);
+                                // 同步已存在按钮的状态和可见性
+                                const $switch = $(this).find('.interactive-mode-switch');
+                                $switch.toggleClass('visible', hasChatTriggered);
+                                $switch.find('.interactive-mode-button').toggleClass('active', self.enabled);
                             }
                         });
                     }
@@ -9808,6 +9871,19 @@
                         $('.interactive-mode-button').toggleClass('active', this.enabled);
                         this.onModeChange();
                     });
+                },
+                
+                /**
+                 * *** 新增：更新特定聊天页面的开关可见性 ***
+                 */
+                updateSwitchVisibility(chatName) {
+                    const $chatPage = $(`.QQ_chat_page[data-name="${chatName}"]`);
+                    if ($chatPage.length) {
+                        const $switch = $chatPage.find('.interactive-mode-switch');
+                        const hasChatTriggered = this.hasChatTriggered(chatName);
+                        $switch.toggleClass('visible', hasChatTriggered);
+                        console.log(`🎭 更新聊天 ${chatName} 的开关可见性: ${hasChatTriggered ? '显示' : '隐藏'}`);
+                    }
                 },
                 
                 /**
@@ -9875,8 +9951,8 @@
             };
 
             // 在页面加载完成后初始化互动模式系统
-            $(document).ready(() => {
-                QQ_InteractiveMode.init();
+            $(document).ready(async () => {
+                await QQ_InteractiveMode.init();
             });
 
             async function ResultHandle(result, isRetry = false) {
@@ -22571,6 +22647,15 @@ ${index + 1}. ${space.name}
                     QQ_Update_Chat_LoadMore(name, $msgContent[0]);
                     
                     console.log(`聊天页面加载完成: 显示 ${messagesToShow.length}/${allMessages.length} 条消息`);
+                    
+                    // *** 修复：检查页面中是否包含互动内容占位符，如有则标记该聊天已触发 ***
+                    const hasInteractivePlaceholder = allMessages.some(msg => 
+                        msg && msg.includes && msg.includes('[发生了一段互动 (ID:')
+                    );
+                    if (hasInteractivePlaceholder) {
+                        console.log(`🎭 聊天页面 ${name} 包含互动内容占位符，标记为已触发`);
+                        QQ_InteractiveMode.markChatTriggered(name);
+                    }
                 }
                 
                 // 滚动到底部
@@ -27095,6 +27180,9 @@ ${index + 1}. ${space.name}
                     if (interactiveMatch) {
                         const interactiveId = interactiveMatch[1];
                         console.log(`🎭 在普通消息中检测到互动内容占位符: ${interactiveId}`);
+                        
+                        // *** 修复：标记该聊天已触发互动内容，确保开关显示 ***
+                        QQ_InteractiveMode.markChatTriggered(name);
                         
                         // *** 修复：异步加载互动内容并渲染 ***
                         (async () => {
