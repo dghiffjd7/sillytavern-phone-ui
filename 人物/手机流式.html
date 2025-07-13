@@ -1553,23 +1553,11 @@
             
             /* 消息状态样式增强 */
             .QQ_chat_mymsg .message-status {
-                animation: statusFadeIn 0.6s ease-out;
                 background: rgba(255,255,255,0.8);
                 border-radius: 12px;
                 padding: 3px 8px;
                 backdrop-filter: blur(4px);
                 box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-            }
-            
-            @keyframes statusFadeIn {
-                0% {
-                    opacity: 0;
-                    transform: translateY(5px);
-                }
-                100% {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
             }
             .QQ_chat_charmsg {
                 max-width: 80%;
@@ -3513,7 +3501,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>97%</span>
+                    <span>98%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -10022,6 +10010,17 @@
             // 在页面加载完成后初始化互动模式系统
             $(document).ready(async () => {
                 await QQ_InteractiveMode.init();
+                QQ_ApplyRandomAvatarsToDefaults();
+                
+                // 额外检查和应用随机头像到所有可能的头像元素
+                QQ_ScanAndFixAllAvatars();
+                
+                // 定期检查头像（每2分钟检查一次，避免过于频繁）
+                setInterval(() => {
+                    QQ_ScanAndFixAllAvatars();
+                }, 120000);
+                
+                console.log('🎭 随机头像系统已初始化（包含定期检查）');
             });
 
             async function ResultHandle(result, isRetry = false) {
@@ -21083,8 +21082,8 @@ ${index + 1}. ${space.name}
                                             console.log(`群聊 "${groupName}" 有 ${groupData.msgs.length} 条历史消息，标记为已初始化`);
                                         }
                                         
-                                        // 使用默认头像创建群聊入口，详细元数据将在第二阶段补充
-                                        const defaultAvatar = 'https://files.catbox.moe/skngqq.jpg';
+                                        // 使用随机头像创建群聊入口，详细元数据将在第二阶段补充
+                                        const defaultAvatar = QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg';
                                         const members = groupData.members || [];
                                         
                                         // 检查群聊是否已在界面中存在，避免重复创建
@@ -22067,11 +22066,16 @@ ${index + 1}. ${space.name}
              */
             function AddNewChar(name, head) {
                 console.log(`添加新角色:${name}  ${head}`);
+                
+                // 如果没有提供头像或头像为空，使用随机头像
+                let finalHead = head && head.trim() ? head.trim() : QQ_GetAvatarWithFallback(name);
+                
                 let html = _.template(chat_list_item)({
                     name: name,
-                    head: head.trim(),
+                    head: finalHead,
                 });
                 $("#QQ_home_chars").append(html);
+                console.log(`角色 ${name} 使用头像: ${finalHead}`);
                 QQ_pages.push(name);
                 const style = $("<style></style>").prop("type", "text/css");
                 const cssRule = chat_headraw_namespaceObject
@@ -22092,6 +22096,12 @@ ${index + 1}. ${space.name}
              */
              function AddNewGroup(name, head, members, description) {
                 console.log(`添加/更新群聊:${name}  |  成员:${members.length}人  |  描述:${description}`);
+                
+                // 如果没有提供头像或头像为空，使用随机头像
+                if (!head || !head.trim()) {
+                    head = QQ_GetAvatarWithFallback(name);
+                    console.log(`群聊 ${name} 使用随机头像: ${head}`);
+                }
 
                 // *** 新增：预检查，如果群聊已初始化且有消息数据，谨慎处理 ***
                 if (QQ_GroupInitializedSet.has(name) && QQ_msgjson.群聊[name] && QQ_msgjson.群聊[name].msgs.length > 0) {
@@ -22126,10 +22136,10 @@ ${index + 1}. ${space.name}
                     } else if (head.type === 'url' && head.url) {
                         headStr = head.url;
                     } else {
-                        headStr = 'https://files.catbox.moe/skngqq.jpg'; // 默认头像
+                        headStr = QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg'; // 随机头像
                     }
                 } else {
-                    headStr = head || 'https://files.catbox.moe/skngqq.jpg'; // 默认头像
+                    headStr = head || QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg'; // 随机头像
                 }
                 
                 let html = _.template(chat_list_item)({ name: name, head: headStr });
@@ -25270,7 +25280,7 @@ ${index + 1}. ${space.name}
                         } else if (storedGroup) {
                             // 群聊在存储中存在，但界面元素不存在，重新创建
                             console.log(`群聊 ${name} 在存储中存在，重新创建界面元素`);
-                            AddNewGroup(storedGroup.name, storedGroup.avatar || 'https://files.catbox.moe/skngqq.jpg', storedGroup.members, storedGroup.description);
+                            AddNewGroup(storedGroup.name, storedGroup.avatar || QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg', storedGroup.members, storedGroup.description);
                             isExistingGroup = true;
                         } else {
                             // 这是一个全新的群聊，需要智能处理
@@ -27027,26 +27037,9 @@ ${index + 1}. ${space.name}
 
             }
             function QQ_GetRandomHead() {
-                // return `http://sharkpan.xyz/f/${random_head_list[Math.floor(Math.random() * random_head_list.length)]
-                //   }`;
-                if (QQ_RandomHead.length === 0) return null; // 处理空数组
-                let minCount = Infinity;
-                const candidates = [];
-                // 一次遍历找到最小值和候选对象
-                for (const obj of QQ_RandomHead) {
-                    if (obj.count < minCount) {
-                        minCount = obj.count;
-                        candidates.length = 0; // 清空数组，重置候选
-                        candidates.push(obj);
-                    } else if (obj.count === minCount) {
-                        candidates.push(obj);
-                    }
-                }
-                // 随机选择一个（即使只有一个元素也适用）
-                const selected =
-                    candidates[Math.floor(Math.random() * candidates.length)];
-                selected.count++; // 直接修改原对象
-                return selected.url;
+                // 使用新的随机头像系统
+                console.log('QQ_GetRandomHead: 重定向到新的随机头像系统');
+                return QQ_GetRandomAvatar();
             }
             let Phone = [
                 "小米",
@@ -27088,6 +27081,330 @@ ${index + 1}. ${space.name}
                 // 如果找不到，返回空字符串，让后续逻辑处理默认头像
                 return "";
             }
+            
+            /**
+             * 解析并获取随机头像列表
+             * @returns {Array} - 头像URL数组
+             */
+            function QQ_GetRandomAvatarList() {
+                if (typeof _raw_namespaceObject === 'undefined') {
+                    console.warn('随机头像数据未找到');
+                    return [];
+                }
+                
+                // 解析头像列表，按行分割并过滤空行
+                const avatars = _raw_namespaceObject
+                    .split('\r\n')
+                    .map(line => line.trim())
+                    .filter(line => line && (line.startsWith('http://') || line.startsWith('https://')));
+                
+                console.log(`成功加载 ${avatars.length} 个随机头像`);
+                return avatars;
+            }
+            
+            /**
+             * 获取随机头像URL
+             * @returns {string} - 随机选择的头像URL
+             */
+            function QQ_GetRandomAvatar() {
+                const avatars = QQ_GetRandomAvatarList();
+                if (avatars.length === 0) {
+                    console.warn('没有可用的随机头像，使用默认头像');
+                    return '';
+                }
+                
+                const randomIndex = Math.floor(Math.random() * avatars.length);
+                const selectedAvatar = avatars[randomIndex];
+                console.log(`选择随机头像: ${selectedAvatar}`);
+                return selectedAvatar;
+            }
+            
+            /**
+             * 获取头像URL，优先使用角色头像，否则使用随机头像
+             * @param {string} name - 角色名
+             * @returns {string} - 头像URL
+             */
+            function QQ_GetAvatarWithFallback(name) {
+                // 优先尝试获取角色专用头像
+                const charHead = GetCharHead(name);
+                if (charHead) {
+                    return charHead;
+                }
+                
+                // 如果没有专用头像，返回随机头像
+                return QQ_GetRandomAvatar();
+            }
+            
+            /**
+             * 应用随机头像到所有缺失头像的元素
+             */
+            function QQ_ApplyRandomAvatarsToDefaults() {
+                console.log('开始应用随机头像到所有默认头像元素');
+                
+                // 查找所有需要设置头像的元素
+                const selectors = [
+                    '.user_avatar:not([style*="background-image"])',
+                    '.QQ_home_head:not([style*="background-image"])',
+                    '.head:not([style*="background-image"])'
+                ];
+                
+                selectors.forEach(selector => {
+                    const elements = document.querySelectorAll(selector);
+                    console.log(`找到 ${elements.length} 个元素匹配选择器: ${selector}`);
+                    
+                    elements.forEach((element, index) => {
+                        // *** 优先检查是否有角色专用头像 ***
+                        const characterName = element.getAttribute('data-name');
+                        let avatarToUse = null;
+                        
+                        if (characterName) {
+                            const charHead = GetCharHead(characterName);
+                            if (charHead && charHead.trim() !== '') {
+                                avatarToUse = charHead;
+                                console.log(`为元素 ${index + 1} 使用角色专用头像: ${avatarToUse}`);
+                            }
+                        }
+                        
+                        // 如果没有专用头像，使用随机头像
+                        if (!avatarToUse) {
+                            avatarToUse = QQ_GetRandomAvatar();
+                            if (avatarToUse) {
+                                console.log(`为元素 ${index + 1} 使用随机头像: ${avatarToUse}`);
+                            }
+                        }
+                        
+                        if (avatarToUse) {
+                            element.style.backgroundImage = `url('${avatarToUse}')`;
+                            element.style.backgroundSize = 'cover';
+                            element.style.backgroundPosition = 'center';
+                        }
+                    });
+                });
+            }
+            
+            /**
+             * 为指定元素设置随机头像（如果还没有头像）
+             * @param {Element} element - 要设置头像的元素
+             * @param {string} characterName - 角色名称（可选，用于优先获取专用头像）
+             */
+            function QQ_SetRandomAvatarIfEmpty(element, characterName = null) {
+                if (!element) return;
+                
+                // 检查元素是否已经有头像
+                const hasBackground = element.style.backgroundImage && 
+                                    element.style.backgroundImage !== 'none' && 
+                                    element.style.backgroundImage !== '';
+                
+                if (!hasBackground) {
+                    const avatarUrl = characterName ? 
+                        QQ_GetAvatarWithFallback(characterName) : 
+                        QQ_GetRandomAvatar();
+                        
+                    if (avatarUrl) {
+                        element.style.backgroundImage = `url('${avatarUrl}')`;
+                        element.style.backgroundSize = 'cover';
+                        element.style.backgroundPosition = 'center';
+                        console.log(`为元素设置${characterName ? '角色专用' : '随机'}头像: ${avatarUrl}`);
+                    }
+                }
+            }
+            
+            /**
+             * 确保角色有头像设置，特别是AI自创角色或未知角色
+             * @param {string} characterName - 角色名称
+             */
+            function QQ_EnsureCharacterAvatar(characterName) {
+                console.log(`🎭 检查角色头像设置: ${characterName}`);
+                
+                // *** 更严格的头像检查：包括 QQ_Char 和其他可能的头像来源 ***
+                
+                // 1. 检查 QQ_Char 角色数据
+                if (typeof QQ_Char !== 'undefined' && QQ_Char[characterName] && QQ_Char[characterName].head) {
+                    console.log(`✅ 角色 ${characterName} 在 QQ_Char 中已有头像设置`);
+                    return;
+                }
+                
+                // 2. 检查 GetCharHead 函数返回
+                const charHead = GetCharHead(characterName);
+                if (charHead && charHead.trim() !== '') {
+                    console.log(`✅ 角色 ${characterName} 通过 GetCharHead 已有头像设置: ${charHead}`);
+                    return;
+                }
+                
+                // 3. 检查 Npc_Settings 中是否有头像
+                if (typeof Npc_Settings !== 'undefined' && 
+                    Npc_Settings[characterName] && 
+                    Npc_Settings[characterName].head &&
+                    Npc_Settings[characterName].head.trim() !== '') {
+                    console.log(`✅ 角色 ${characterName} 在 Npc_Settings 中已有头像`);
+                    return;
+                }
+                
+                // 4. 检查是否已经有CSS规则为该角色设置了头像
+                const existingElements = $(`.head[data-name='${characterName}']`);
+                let hasValidAvatar = false;
+                existingElements.each(function() {
+                    const bgImage = $(this).css('background-image');
+                    if (bgImage && bgImage !== 'none' && bgImage !== '' && !bgImage.includes('data:image/svg+xml')) {
+                        hasValidAvatar = true;
+                        return false; // 跳出 each 循环
+                    }
+                });
+                
+                if (hasValidAvatar) {
+                    console.log(`✅ 角色 ${characterName} 的头像元素已有有效背景图片`);
+                    return;
+                }
+                
+                // *** 只有在确认没有任何头像设置的情况下，才分配随机头像 ***
+                console.log(`🔧 角色 ${characterName} 确实没有头像，开始设置随机头像`);
+                const randomAvatar = QQ_GetRandomAvatar();
+                if (randomAvatar) {
+                    // 如果 Npc_Settings 存在，添加到其中（但不使用 !important）
+                    if (typeof Npc_Settings !== 'undefined') {
+                        if (!Npc_Settings[characterName]) {
+                            Npc_Settings[characterName] = {};
+                        }
+                        Npc_Settings[characterName].head = randomAvatar;
+                        console.log(`🎭 为角色 ${characterName} 在 Npc_Settings 中设置随机头像: ${randomAvatar}`);
+                    }
+                    
+                    // *** 重要修改：不使用 !important，让原本的头像设置优先 ***
+                    const style = document.createElement('style');
+                    style.textContent = `.head[data-name='${characterName}'] { background-image: url('${randomAvatar}'); }`;
+                    document.head.appendChild(style);
+                    console.log(`🎭 为角色 ${characterName} 创建CSS头像规则（低优先级）: ${randomAvatar}`);
+                    
+                    // 立即应用到现有的空白头像元素（只对空白的应用）
+                    $(`.head[data-name='${characterName}']`).each(function() {
+                        const currentBg = $(this).css('background-image');
+                        if (!currentBg || currentBg === 'none' || currentBg === '' || currentBg.includes('data:image/svg+xml')) {
+                            $(this).css('background-image', `url('${randomAvatar}')`);
+                            console.log(`🎭 为空白头像元素应用随机头像: ${randomAvatar}`);
+                        } else {
+                            console.log(`✅ 头像元素已有背景图片，保持不变: ${currentBg}`);
+                        }
+                    });
+                } else {
+                    console.warn(`⚠️ 无法为角色 ${characterName} 获取随机头像`);
+                }
+            }
+            
+            /**
+             * 扫描并修复所有可能的空白头像
+             */
+            function QQ_ScanAndFixAllAvatars() {
+                console.log('🔍 开始扫描所有头像元素...');
+                
+                // 查找所有可能的头像元素选择器
+                const avatarSelectors = [
+                    '.head',
+                    '.QQ_chat_head',
+                    '.QQ_home_head',
+                    '.user_avatar',
+                    '.discord-thread-content-original-author-head'
+                ];
+                
+                let fixedCount = 0;
+                
+                avatarSelectors.forEach(selector => {
+                    $(selector).each(function() {
+                        const $element = $(this);
+                        const characterName = $element.attr('data-name');
+                        
+                        // *** 严格检查：只有真正空白的才修复 ***
+                        const bgImage = $element.css('background-image');
+                        const hasValidBg = bgImage && 
+                                         bgImage !== 'none' && 
+                                         bgImage !== '' && 
+                                         bgImage !== 'initial' &&
+                                         !bgImage.includes('data:image/svg+xml'); // 排除默认SVG占位符
+                        
+                        // *** 如果有角色名，先检查该角色是否应该有专用头像 ***
+                        if (characterName && hasValidBg) {
+                            // 如果已经有有效背景图片，检查是否是随机头像覆盖了专用头像
+                            const charHead = GetCharHead(characterName);
+                            if (charHead && charHead.trim() !== '' && !bgImage.includes(charHead)) {
+                                // 发现专用头像被随机头像覆盖，恢复专用头像
+                                console.log(`🔄 恢复角色 ${characterName} 的专用头像: ${charHead}`);
+                                $element.css({
+                                    'background-image': `url('${charHead}')`,
+                                    'background-size': 'cover',
+                                    'background-position': 'center'
+                                });
+                                return; // 跳过后续处理
+                            }
+                        }
+                        
+                        // *** 只有在确实没有有效背景图片的情况下才应用随机头像 ***
+                        if (!hasValidBg) {
+                            console.log(`🔧 发现空白头像元素: ${selector}${characterName ? ` (角色: ${characterName})` : ''}`);
+                            
+                            // 如果有角色名，先尝试获取专用头像
+                            let avatarToUse = null;
+                            if (characterName) {
+                                const charHead = GetCharHead(characterName);
+                                if (charHead && charHead.trim() !== '') {
+                                    avatarToUse = charHead;
+                                    console.log(`✅ 使用角色专用头像: ${avatarToUse}`);
+                                }
+                            }
+                            
+                            // 如果没有专用头像，使用随机头像
+                            if (!avatarToUse) {
+                                avatarToUse = QQ_GetRandomAvatar();
+                                if (avatarToUse) {
+                                    console.log(`🎲 使用随机头像: ${avatarToUse}`);
+                                }
+                            }
+                            
+                            if (avatarToUse) {
+                                $element.css({
+                                    'background-image': `url('${avatarToUse}')`,
+                                    'background-size': 'cover',
+                                    'background-position': 'center'
+                                });
+                                fixedCount++;
+                                console.log(`✅ 为空白头像元素设置头像: ${avatarToUse}`);
+                            }
+                        }
+                    });
+                });
+                
+                console.log(`🎭 头像扫描完成，共修复 ${fixedCount} 个空白头像`);
+            }
+            
+            /**
+             * 验证头像优先级设置是否正确
+             * @param {string} characterName - 要验证的角色名
+             */
+            function QQ_ValidateAvatarPriority(characterName) {
+                console.log(`🔍 验证角色 ${characterName} 的头像优先级...`);
+                
+                // 检查各种头像来源
+                const sources = {
+                    'QQ_Char': typeof QQ_Char !== 'undefined' && QQ_Char[characterName] && QQ_Char[characterName].head,
+                    'GetCharHead': GetCharHead(characterName),
+                    'Npc_Settings': typeof Npc_Settings !== 'undefined' && Npc_Settings[characterName] && Npc_Settings[characterName].head,
+                    'DOM_CSS': $(`.head[data-name='${characterName}']`).css('background-image')
+                };
+                
+                console.log(`📊 角色 ${characterName} 头像来源状态:`, sources);
+                
+                // 验证优先级
+                if (sources.QQ_Char) {
+                    console.log(`✅ 使用 QQ_Char 中的专用头像: ${sources.QQ_Char}`);
+                } else if (sources.GetCharHead) {
+                    console.log(`✅ 使用 GetCharHead 返回的头像: ${sources.GetCharHead}`);
+                } else if (sources.Npc_Settings) {
+                    console.log(`✅ 使用 Npc_Settings 中的头像: ${sources.Npc_Settings}`);
+                } else {
+                    console.log(`⚠️ 角色 ${characterName} 没有专用头像，应使用随机头像`);
+                }
+                
+                return sources;
+            }
+            
              /**
              * 核心消息渲染函数 - 统一的消息DOM创建和添加逻辑
              * @param {*} dom - 聊天容器 DOM
@@ -27120,6 +27437,11 @@ ${index + 1}. ${space.name}
                 // 添加到聊天界面
                 $(dom).append(messageHtml);
                 console.log(`消息已添加到DOM: ${sender}: ${messageContent}`);
+                
+                // *** 新增：确保角色头像设置 ***
+                if (!isUser) {
+                    QQ_EnsureCharacterAvatar(sender);
+                }
                 
                 // 如果是用户消息，启动状态模拟和长按功能
                 if (isUser) {
@@ -27492,10 +27814,15 @@ ${index + 1}. ${space.name}
                     chatDisplayCounts[chatKey] = $(dom).children().not('.load-more-messages').length;
                 }
                              
-                // 滚动到底部（无论是否为新消息，确保用户能看到最新内容）
+                // 智能滚动：只有用户已经在底部时才滚动，避免打断用户阅读
                 if (!skipScrollAndCount && dom && dom.scrollHeight) {
-                    $(dom).scrollTop(dom.scrollHeight);
-                    console.log(`聊天区域已滚动到底部`);
+                    const isNearBottom = $(dom).scrollTop() + $(dom).height() >= dom.scrollHeight - 50;
+                    if (isNearBottom || isNew) {
+                        $(dom).scrollTop(dom.scrollHeight);
+                        console.log(`聊天区域已滚动到底部`);
+                    } else {
+                        console.log(`用户正在查看历史消息，跳过自动滚动`);
+                    }
                 }
             }
             
@@ -31460,7 +31787,7 @@ ${index + 1}. ${space.name}
                                     // *** 额外检查：确保这个群聊在当前会话中没有被初始化过 ***
                                     if (!QQ_GroupInitializedSet.has(groupData.name)) {
                                         console.log('群聊不存在且未初始化，调用AddNewGroup函数添加群聊:', groupData.name);
-                                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                                    AddNewGroup(groupData.name, groupData.avatar || QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                                     } else {
                                         console.log('群聊在当前会话中已初始化，跳过重复创建:', groupData.name);
                                         // 如果已经初始化过，说明数据已经正确设置，不需要重新创建
@@ -32764,7 +33091,7 @@ ${index + 1}. ${space.name}
                     groupData = {
                         name: cleanGroupName,
                         members: msgGroupData.members || [],
-                        avatar: 'https://files.catbox.moe/skngqq.jpg' // 默认头像
+                        avatar: QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg' // 随机头像
                     };
                 }
                 
@@ -32773,7 +33100,7 @@ ${index + 1}. ${space.name}
                     groupData = {
                         name: cleanGroupName,
                         members: ['成员1', '成员2', '成员3'], // 示例成员
-                        avatar: 'https://files.catbox.moe/skngqq.jpg'
+                        avatar: QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg'
                     };
                     console.warn(`群聊 ${cleanGroupName} 数据未找到，使用默认数据`);
                 }
@@ -34085,7 +34412,7 @@ ${index + 1}. ${space.name}
                     } else if (avatarData && typeof avatarData === 'string') {
                         finalAvatarUrl = avatarData;
                     } else {
-                        finalAvatarUrl = avatarUrl || 'https://files.catbox.moe/skngqq.jpg';
+                        finalAvatarUrl = avatarUrl || QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg';
                     }
                     
                     // *** 修复：确保AddNewGroup完成后再刷新界面 ***
@@ -34489,7 +34816,7 @@ ${index + 1}. ${space.name}
                     
                     if (!existsByID && !existsByName) {
                         console.log('恢复群聊到联系人列表:', groupData.name, 'ID:', groupData.id);
-                        AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                        AddNewGroup(groupData.name, groupData.avatar || QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                     } else {
                         console.log('群聊已存在于联系人列表:', groupData.name);
                         // 确保现有群聊的头像正确显示
@@ -35631,7 +35958,7 @@ ${index + 1}. ${space.name}
                 
                 groups.forEach(groupData => {
                     console.log('恢复群聊:', groupData.name);
-                    AddNewGroup(groupData.name, groupData.avatar || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
+                    AddNewGroup(groupData.name, groupData.avatar || QQ_GetRandomAvatar() || 'https://files.catbox.moe/skngqq.jpg', groupData.members, groupData.description);
                 });
                 
                 console.log('群聊数据恢复完成，共', groups.length, '个群聊');
