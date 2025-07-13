@@ -3501,7 +3501,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>98%</span>
+                    <span>99%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -23748,7 +23748,8 @@ ${index + 1}. ${space.name}
                     const partContent = `${sender}--${part}--${timestamp}`;
                     
                     // 显示当前消息（跳过流式检查，避免重复流式处理）
-                    await QQ_Chat_AddMsg(chatContainer, partContent, chatName, isNew && currentIndex === 0, skipScrollAndCount, true);
+                    // *** 修复：流式输出时每条消息都应该被视为新消息，确保滚动和显示 ***
+                    await QQ_Chat_AddMsg(chatContainer, partContent, chatName, true, false, true);
                     
                     currentIndex++;
                     
@@ -23872,7 +23873,8 @@ ${index + 1}. ${space.name}
                             const sender = messageParts.length >= 1 ? messageParts[0] : 'Unknown';
                             
                             // 显示当前消息（跳过流式检查，避免重复流式处理）
-                            await QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, isNew && currentIndex === 0, skipScrollAndCount, true);
+                            // *** 修复：流式输出时每条消息都应该被视为新消息，确保滚动和显示 ***
+                            await QQ_Chat_AddMsg(chatContainer, fullMessage, chatName, true, false, true);
                             console.log(`📤 流式显示消息 ${currentIndex + 1}/${fullMessages.length}: ${sender}`);
                             
                             currentIndex++;
@@ -27834,12 +27836,24 @@ ${index + 1}. ${space.name}
                              
                 // 智能滚动：只有用户已经在底部时才滚动，避免打断用户阅读
                 if (!skipScrollAndCount && dom && dom.scrollHeight) {
-                    const isNearBottom = $(dom).scrollTop() + $(dom).height() >= dom.scrollHeight - 50;
-                    if (isNearBottom || isNew) {
-                        $(dom).scrollTop(dom.scrollHeight);
-                        console.log(`聊天区域已滚动到底部`);
+                    // *** 修复：使用更可靠的底部检测逻辑 ***
+                    const $dom = $(dom);
+                    const scrollTop = $dom.scrollTop();
+                    const containerHeight = $dom.height();
+                    const scrollHeight = dom.scrollHeight;
+                    
+                    // 放宽底部检测范围，并增加强制滚动条件
+                    const isNearBottom = scrollTop + containerHeight >= scrollHeight - 100;
+                    const shouldScroll = isNearBottom || isNew;
+                    
+                    if (shouldScroll) {
+                        // *** 使用更可靠的滚动方法 ***
+                        setTimeout(() => {
+                            $dom.scrollTop(dom.scrollHeight);
+                            console.log(`聊天区域已滚动到底部 (scrollHeight: ${dom.scrollHeight})`);
+                        }, 10); // 小延迟确保DOM更新完成
                     } else {
-                        console.log(`用户正在查看历史消息，跳过自动滚动`);
+                        console.log(`用户正在查看历史消息，跳过自动滚动 (scrollTop: ${scrollTop}, near bottom: ${isNearBottom})`);
                     }
                 }
             }
