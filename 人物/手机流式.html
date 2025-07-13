@@ -3501,7 +3501,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>98%</span>
+                    <span>99%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -9173,12 +9173,14 @@
                         
                         if (hasMiPhone || hasChatFormats) {
                             console.log('📱 发现content内包含MiPhone或聊天格式，递归处理');
-                            // 递归处理content内的内容
+                            // *** 修复：递归处理content内的内容，但不重复显示互动内容 ***
                             const innerSegments = this.splitIntoSegments(contentInside);
                             const innerTasks = this.createTaskQueue(innerSegments);
                             for (const innerTask of innerTasks) {
                                 await this.processTask(innerTask);
                             }
+                            // *** 递归处理完成后，不再执行后续的互动内容显示，避免重复 ***
+                            return; 
                         } else {
                             // 纯互动内容 - 只传递content标签内的内容，不包含标签本身
                             console.log('🎭 纯互动内容，直接显示（不包含content标签）');
@@ -9199,14 +9201,20 @@
                 async processMiPhone(task) {
                     console.log('📱 处理MiPhone格式');
                     
-                    // 尝试所有可能的MiPhone格式变化（参考原有灵活匹配逻辑）
+                    // 尝试所有可能的MiPhone格式变化（包括不完整格式）
                     const miPhonePatterns = [
+                        // 完整格式（优先）
                         /MiPhone_start([\s\S]*?)MiPhone_end/g,
                         /MiPhone_JSON_START([\s\S]*?)MiPhone_JSON_END/g,
                         /MiPhone_JSON_start([\s\S]*?)MiPhone_JSON_end/g,
                         /MiPhone_Start([\s\S]*?)MiPhone_End/g,
                         /MiPhone_START([\s\S]*?)MiPhone_END/g,
-                        /MiPhone([\s\S]*?)MiPhone/g
+                        /MiPhone([\s\S]*?)MiPhone/g,
+                        // *** 新增：不完整格式（仅开始标签） ***
+                        /^MiPhone_JSON_START([\s\S]*)$/,
+                        /^MiPhone_start([\s\S]*)$/,
+                        /^MiPhone_Start([\s\S]*)$/,
+                        /^MiPhone_START([\s\S]*)$/
                     ];
                     
                     let matched = false;
@@ -9235,8 +9243,17 @@
                     }
                     
                     if (!matched) {
-                        console.warn('⚠️ 未能匹配任何MiPhone格式变化，内容可能格式不正确');
+                        console.warn('⚠️ 未能匹配任何MiPhone格式变化，尝试使用原有处理逻辑');
                         console.log('🔍 MiPhone任务内容预览:', task.content.substring(0, 200));
+                        
+                        // *** 修复：调用原有的MiPhone处理逻辑作为回退方案 ***
+                        try {
+                            console.log('🔄 使用原有QQ_Msg_Parse处理逻辑');
+                            await QQ_Msg_Parse(task.content);
+                            console.log('✅ 原有逻辑处理成功');
+                        } catch (fallbackError) {
+                            console.error('❌ 原有逻辑也处理失败:', fallbackError);
+                        }
                     }
                 },
                 
