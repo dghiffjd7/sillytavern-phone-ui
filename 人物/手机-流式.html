@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>126%</span>
+                    <span>127%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -27100,55 +27100,60 @@ ${index + 1}. ${space.name}
                     const interactiveMatch = sysMsgText.match(/\[发生了一段互动 \(ID: (.+?)\)\]/);
                     if (interactiveMatch) {
                         const interactiveId = interactiveMatch[1];
-                        console.log(`🎭 检测到互动内容占位符: ${interactiveId}`);
+                        console.log(`🎭 系统消息中检测到互动内容占位符: ${interactiveId}`);
                         
-                        // 创建可点击的互动内容占位符（不显示ID）
-                        const interactiveDiv = $(`
-                            <div class="interactive-placeholder" data-id="${interactiveId}" style="
-                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                color: white;
-                                padding: 8px 12px;
-                                margin: 5px 0;
-                                border-radius: 15px;
-                                text-align: center;
-                                cursor: pointer;
-                                font-size: 13px;
-                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-                                transition: all 0.3s ease;
-                            ">
-                                ✨ [发生了一段互动]
-                                <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">点击展开互动内容</div>
-                            </div>
-                        `);
-                        
-                        // 添加点击事件以加载和显示互动内容
-                        interactiveDiv.on('click', async function() {
-                            const id = $(this).data('id');
-                            console.log(`📖 用户点击互动占位符: ${id}`);
+                        // *** 修复：防止重复创建，检查是否已存在该ID的占位符 ***
+                        if ($(dom).find(`[data-id="${interactiveId}"]`).length === 0) {
+                            // 创建可点击的互动内容占位符（不显示ID）
+                            const interactiveDiv = $(`
+                                <div class="interactive-placeholder" data-id="${interactiveId}" style="
+                                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                    color: white;
+                                    padding: 8px 12px;
+                                    margin: 5px 0;
+                                    border-radius: 15px;
+                                    text-align: center;
+                                    cursor: pointer;
+                                    font-size: 13px;
+                                    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+                                    transition: all 0.3s ease;
+                                ">
+                                    ✨ [发生了一段互动]
+                                    <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">点击展开互动内容</div>
+                                </div>
+                            `);
                             
-                            // 显示加载状态
-                            $(this).html('🔄 正在加载互动内容...');
-                            
-                            try {
-                                // 从世界书加载特定的互动内容
-                                const interactiveContent = await QQ_LoadInteractiveContentFromWorldBook(id);
-                                if (interactiveContent && interactiveContent.content) {
-                                    // 在占位符下方展开显示互动内容
-                                    const expandedDiv = QQ_CreateExpandedInteractiveDisplay(interactiveContent.content, id);
-                                    $(this).after(expandedDiv);
-                                    $(this).html('✅ 互动内容已展开');
-                                    $(this).off('click'); // 移除点击事件，防止重复展开
-                                } else {
-                                    $(this).html('❌ 互动内容加载失败');
-                                    console.error(`未找到互动内容: ${id}`);
+                            // 添加点击事件以加载和显示互动内容
+                            interactiveDiv.on('click', async function() {
+                                const id = $(this).data('id');
+                                console.log(`📖 用户点击互动占位符: ${id}`);
+                                
+                                // 显示加载状态
+                                $(this).html('🔄 正在加载互动内容...');
+                                
+                                try {
+                                    // 从世界书加载特定的互动内容
+                                    const interactiveContent = await QQ_LoadInteractiveContentFromWorldBook(id);
+                                    if (interactiveContent && interactiveContent.content) {
+                                        // 在占位符下方展开显示互动内容
+                                        const expandedDiv = QQ_CreateExpandedInteractiveDisplay(interactiveContent.content, id);
+                                        $(this).after(expandedDiv);
+                                        $(this).html('✅ 互动内容已展开');
+                                        $(this).off('click'); // 移除点击事件，防止重复展开
+                                    } else {
+                                        $(this).html('❌ 互动内容加载失败');
+                                        console.error(`未找到互动内容: ${id}`);
+                                    }
+                                } catch (error) {
+                                    $(this).html('❌ 互动内容加载出错');
+                                    console.error('加载互动内容时出错:', error);
                                 }
-                            } catch (error) {
-                                $(this).html('❌ 互动内容加载出错');
-                                console.error('加载互动内容时出错:', error);
-                            }
-                        });
-                        
-                        $(dom).append(interactiveDiv);
+                            });
+                            
+                            $(dom).append(interactiveDiv);
+                        } else {
+                            console.log(`⚠️ 互动内容占位符已存在，跳过创建: ${interactiveId}`);
+                        }
                     } else {
                         // 普通系统消息
                         const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
@@ -27180,6 +27185,15 @@ ${index + 1}. ${space.name}
                     if (interactiveMatch) {
                         const interactiveId = interactiveMatch[1];
                         console.log(`🎭 在普通消息中检测到互动内容占位符: ${interactiveId}`);
+                        
+                        // *** 修复：防止重复创建，检查是否已存在该ID的占位符 ***
+                        if ($(dom).find(`[data-id="${interactiveId}"]`).length > 0) {
+                            console.log(`⚠️ 互动内容占位符已存在，跳过普通消息处理: ${interactiveId}`);
+                            // 继续处理普通消息但跳过互动内容创建
+                            const msgDiv = QQ_CreateMessageElement(sender, messageContent, timestamp, originalSender);
+                            $(dom).append(msgDiv);
+                            return;
+                        }
                         
                         // *** 修复：标记该聊天已触发互动内容，确保开关显示 ***
                         QQ_InteractiveMode.markChatTriggered(name);
