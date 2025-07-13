@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>115%</span>
+                    <span>116%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -9482,12 +9482,114 @@
                 };
                 
                 // 使用统一的互动内容保存机制
-                await QQ_SaveInteractiveContentToWorldBook(content, characterName);
+                const interactiveId = await QQ_SaveInteractiveContentToWorldBook(content, characterName);
+                
+                // *** 新增：在聊天记录中插入占位符 ***
+                if (interactiveId) {
+                    const placeholder = `[发生了一段互动 (ID: ${interactiveId})]`;
+                    const chatKey = `${UserName}和${characterName}的聊天`;
+                    if (QQ_msgjson.私聊[chatKey] && Array.isArray(QQ_msgjson.私聊[chatKey])) {
+                        // 添加占位符到当前聊天记录
+                        const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                        const placeholderMsg = `系统消息--${placeholder}--${timestamp}`;
+                        QQ_msgjson.私聊[chatKey].push(placeholderMsg);
+                        console.log(`✅ 添加互动内容占位符到聊天记录: ${placeholder}`);
+                    }
+                }
                 
                 // 同时保存到角色空间备份
                 QQ_SaveCharacterSpaces().catch(error => {
                     console.error('保存角色互动空间失败:', error);
                 });
+            }
+
+            /**
+             * *** 新增：创建展开的互动内容显示 ***
+             * @param {string} content - 互动内容
+             * @param {string} interactiveId - 互动内容ID
+             * @returns {jQuery} 展开的互动内容元素
+             */
+            function QQ_CreateExpandedInteractiveDisplay(content, interactiveId) {
+                const expandedDiv = $(`
+                    <div class="expanded-interactive-content" data-id="${interactiveId}" style="
+                        background: rgba(102, 126, 234, 0.1);
+                        border: 1px solid rgba(102, 126, 234, 0.3);
+                        border-radius: 12px;
+                        padding: 12px;
+                        margin: 8px 0;
+                        font-size: 14px;
+                        line-height: 1.4;
+                        color: #333;
+                        white-space: pre-wrap;
+                        position: relative;
+                    ">
+                        <div style="
+                            background: #667eea;
+                            color: white;
+                            padding: 4px 8px;
+                            border-radius: 6px;
+                            font-size: 11px;
+                            margin-bottom: 8px;
+                            display: inline-block;
+                        ">🎭 互动内容 (ID: ${interactiveId})</div>
+                        <div class="interactive-text-content" style="margin-top: 8px;"></div>
+                        <div style="
+                            text-align: right;
+                            margin-top: 8px;
+                            font-size: 11px;
+                            color: #666;
+                            border-top: 1px solid rgba(102, 126, 234, 0.2);
+                            padding-top: 6px;
+                        ">
+                            <button class="collapse-interactive" style="
+                                background: #667eea;
+                                color: white;
+                                border: none;
+                                padding: 4px 8px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 11px;
+                            ">收起</button>
+                        </div>
+                    </div>
+                `);
+
+                // 添加互动内容（支持流式显示）
+                const textContainer = expandedDiv.find('.interactive-text-content');
+                textContainer.text(content);
+
+                // 添加收起按钮功能
+                expandedDiv.find('.collapse-interactive').on('click', function() {
+                    expandedDiv.slideUp(300, function() {
+                        expandedDiv.remove();
+                        // 恢复占位符的点击功能
+                        const placeholder = $(`.interactive-placeholder[data-id="${interactiveId}"]`);
+                        if (placeholder.length > 0) {
+                            placeholder.html(`✨ [发生了一段互动 (ID: ${interactiveId})]<div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">点击展开互动内容</div>`);
+                            // 重新绑定点击事件
+                            placeholder.off('click').on('click', async function() {
+                                const id = $(this).data('id');
+                                $(this).html('🔄 正在加载互动内容...');
+                                try {
+                                    const interactiveContent = await QQ_LoadInteractiveContentFromWorldBook(id);
+                                    if (interactiveContent && interactiveContent.content) {
+                                        const expandedDiv = QQ_CreateExpandedInteractiveDisplay(interactiveContent.content, id);
+                                        $(this).after(expandedDiv);
+                                        $(this).html('✅ 互动内容已展开');
+                                        $(this).off('click');
+                                    } else {
+                                        $(this).html('❌ 互动内容加载失败');
+                                    }
+                                } catch (error) {
+                                    $(this).html('❌ 互动内容加载出错');
+                                    console.error('加载互动内容时出错:', error);
+                                }
+                            });
+                        }
+                    });
+                });
+
+                return expandedDiv;
             }
 
             /**
@@ -9535,7 +9637,19 @@
                 };
                 
                 // 使用统一的互动内容保存机制
-                await QQ_SaveInteractiveContentToWorldBook(content, null);
+                const interactiveId = await QQ_SaveInteractiveContentToWorldBook(content, null);
+                
+                // *** 新增：在群聊记录中插入占位符 ***
+                if (interactiveId && groupName && QQ_Groups.includes(groupName)) {
+                    const placeholder = `[发生了一段互动 (ID: ${interactiveId})]`;
+                    if (QQ_msgjson.群聊[groupName] && Array.isArray(QQ_msgjson.群聊[groupName].msgs)) {
+                        // 添加占位符到当前群聊记录
+                        const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                        const placeholderMsg = `系统消息--${placeholder}--${timestamp}`;
+                        QQ_msgjson.群聊[groupName].msgs.push(placeholderMsg);
+                        console.log(`✅ 添加互动内容占位符到群聊记录: ${placeholder}`);
+                    }
+                }
                 
                 // 同时保存到公共空间备份
                 QQ_SaveInteractiveSpaces().catch(error => {
@@ -26728,8 +26842,65 @@ ${index + 1}. ${space.name}
                 // *** 核心改造：判断是否为系统消息 ***
                 if (content.startsWith("系统消息--")) {
                     const sysMsgText = content.split("--")[2]; // 提取真实的消息内容
-                    const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
-                    $(dom).append(msgDiv);
+                    
+                    // *** 新增：检测互动内容占位符 ***
+                    const interactiveMatch = sysMsgText.match(/\[发生了一段互动 \(ID: (.+?)\)\]/);
+                    if (interactiveMatch) {
+                        const interactiveId = interactiveMatch[1];
+                        console.log(`🎭 检测到互动内容占位符: ${interactiveId}`);
+                        
+                        // 创建可点击的互动内容占位符
+                        const interactiveDiv = $(`
+                            <div class="interactive-placeholder" data-id="${interactiveId}" style="
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                padding: 8px 12px;
+                                margin: 5px 0;
+                                border-radius: 15px;
+                                text-align: center;
+                                cursor: pointer;
+                                font-size: 13px;
+                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+                                transition: all 0.3s ease;
+                            ">
+                                ✨ ${sysMsgText}
+                                <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">点击展开互动内容</div>
+                            </div>
+                        `);
+                        
+                        // 添加点击事件以加载和显示互动内容
+                        interactiveDiv.on('click', async function() {
+                            const id = $(this).data('id');
+                            console.log(`📖 用户点击互动占位符: ${id}`);
+                            
+                            // 显示加载状态
+                            $(this).html('🔄 正在加载互动内容...');
+                            
+                            try {
+                                // 从世界书加载特定的互动内容
+                                const interactiveContent = await QQ_LoadInteractiveContentFromWorldBook(id);
+                                if (interactiveContent && interactiveContent.content) {
+                                    // 在占位符下方展开显示互动内容
+                                    const expandedDiv = QQ_CreateExpandedInteractiveDisplay(interactiveContent.content, id);
+                                    $(this).after(expandedDiv);
+                                    $(this).html('✅ 互动内容已展开');
+                                    $(this).off('click'); // 移除点击事件，防止重复展开
+                                } else {
+                                    $(this).html('❌ 互动内容加载失败');
+                                    console.error(`未找到互动内容: ${id}`);
+                                }
+                            } catch (error) {
+                                $(this).html('❌ 互动内容加载出错');
+                                console.error('加载互动内容时出错:', error);
+                            }
+                        });
+                        
+                        $(dom).append(interactiveDiv);
+                    } else {
+                        // 普通系统消息
+                        const msgDiv = $("<div>", { class: "system-message" }).text(sysMsgText);
+                        $(dom).append(msgDiv);
+                    }
                 } else {
                     // --- 修复：使用正确的模板系统 ---
                     let sp = content.split("--");
@@ -38009,11 +38180,8 @@ ${index + 1}. ${space.name}
                         type: characterName ? 'character_specific' : 'public'
                     };
                     
-                    // 确定保存的键值（世界书条目comment）
-                    // 角色互动内容和公共互动内容使用不同的世界书条目
-                    const worldbookKey = characterName ? 
-                        `QQ_角色互动内容_${characterName}` : 
-                        'QQ_公共互动内容备份';
+                    // *** 修改：所有互动内容都保存到统一的世界书条目中 ***
+                    const worldbookKey = '手机-互动内容存储';
                     
                     // 加载现有数据
                     const existingData = await QQ_GetFromWorldBook(worldbookKey);
@@ -38021,24 +38189,25 @@ ${index + 1}. ${space.name}
                     
                     if (existingData && Array.isArray(existingData)) {
                         dataArray = existingData;
-                    } else if (existingData && existingData.interactiveContent && Array.isArray(existingData.interactiveContent)) {
-                        // 兼容旧格式
-                        dataArray = existingData.interactiveContent;
+                    } else if (existingData && typeof existingData === 'object') {
+                        // 兼容可能的对象格式
+                        dataArray = Object.values(existingData);
                     }
                     
                     // 添加新数据到数组开头
                     dataArray.unshift(interactiveData);
                     
-                    // 限制数量（最多30个）
-                    if (dataArray.length > 30) {
-                        dataArray.splice(30);
+                    // *** 修改：限制数量为20个（滚动式存储） ***
+                    if (dataArray.length > 20) {
+                        console.log(`🔄 互动内容存储达到上限，移除最旧的 ${dataArray.length - 20} 个`);
+                        dataArray = dataArray.slice(0, 20);
                     }
                     
                     console.log(`准备保存互动内容到世界书: ${worldbookKey}, 内容数量: ${dataArray.length}`);
                     
                     // 使用统一的保存机制
                     const success = await QQ_SafeSaveToWorldBook(
-                        `互动内容_${characterName || '公共'}`, 
+                        '互动内容存储', 
                         dataArray, 
                         worldbookKey
                     );
@@ -38061,30 +38230,36 @@ ${index + 1}. ${space.name}
              * *** 修复：互动内容加载函数 ***
              * 使用项目统一的QQ_GetFromWorldBook机制，保持与其他功能一致性
              */
-            async function QQ_LoadInteractiveContentFromWorldBook(characterName = null) {
+            async function QQ_LoadInteractiveContentFromWorldBook(interactiveId = null) {
                 try {
-                    // 确定世界书键值（与保存时一致）
-                    const worldbookKey = characterName ? 
-                        `QQ_角色互动内容_${characterName}` : 
-                        'QQ_公共互动内容备份';
+                    // *** 修改：从统一的世界书条目加载 ***
+                    const worldbookKey = '手机-互动内容存储';
                     
                     // 使用统一的加载机制
                     const data = await QQ_GetFromWorldBook(worldbookKey);
                     
                     if (data && Array.isArray(data)) {
-                        console.log(`✅ 加载${characterName || '公共'}互动内容: ${data.length}个项目`);
+                        // 如果提供了ID，返回特定的互动内容
+                        if (interactiveId) {
+                            const specificContent = data.find(item => item.id === interactiveId);
+                            if (specificContent) {
+                                console.log(`✅ 找到互动内容: ID=${interactiveId}`);
+                                return specificContent;
+                            } else {
+                                console.log(`❌ 未找到互动内容: ID=${interactiveId}`);
+                                return null;
+                            }
+                        }
+                        // 否则返回所有内容
+                        console.log(`✅ 加载所有互动内容: ${data.length}个项目`);
                         return data;
-                    } else if (data && data.interactiveContent && Array.isArray(data.interactiveContent)) {
-                        // 兼容旧格式
-                        console.log(`✅ 加载${characterName || '公共'}互动内容(旧格式): ${data.interactiveContent.length}个项目`);
-                        return data.interactiveContent;
                     } else {
-                        console.log(`📋 ${characterName || '公共'}没有互动内容`);
-                        return [];
+                        console.log(`📋 没有保存的互动内容`);
+                        return interactiveId ? null : [];
                     }
                 } catch (error) {
                     console.error('从世界书加载互动内容失败:', error);
-                    return [];
+                    return interactiveId ? null : [];
                 }
             }
             
