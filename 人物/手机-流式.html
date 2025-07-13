@@ -3513,7 +3513,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>118%</span>
+                    <span>119%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -25871,8 +25871,26 @@ ${index + 1}. ${space.name}
                          for (const msgMatch of allMsgMatches) {
                              let msgContent = msgMatch[1].trim();
                              
-                             // *** 新增：清理AI回复中的consider注释和其他标签 ***
+                             // *** 修复：清理AI回复中的MiPhone标签和其他标签 ***
                              msgContent = QQ_CleanNestedTags(msgContent);
+                             msgContent = msgContent.replace(/MiPhone_start/g, '').replace(/MiPhone_end/g, '').trim();
+                             
+                             // *** 修复：检查清理后是否有有效内容 ***
+                             if (!msgContent || msgContent.length < 10) {
+                                 console.log('⚠️ 私聊消息内容为空或过短，跳过处理:', msgContent);
+                                 continue;
+                             }
+                             
+                             // *** 修复：检查是否包含有效的聊天格式标签 ***
+                             const hasChatTags = msgContent.includes('私聊>') || 
+                                               msgContent.includes('群聊>') || 
+                                               msgContent.includes('和') && msgContent.includes('的聊天') ||
+                                               msgContent.includes('--') && /\d{2}:\d{2}/.test(msgContent);
+                             
+                             if (!hasChatTags) {
+                                 console.log('⚠️ 私聊消息不包含有效聊天格式，跳过处理:', msgContent.substring(0, 50));
+                                 continue;
+                             }
                              
                              // 创建消息唯一标识（避免重复处理） - 增强版
                              let messageHash;
@@ -38256,6 +38274,11 @@ ${index + 1}. ${space.name}
              * 使用项目统一的QQ_SafeSaveToWorldBook机制，保持与其他功能一致性
              */
             async function QQ_SaveInteractiveContentToWorldBook(content, characterName = null) {
+                if (!worldbook || !entries) {
+                    console.log('互动内容保存跳过：缺少worldbook或entries');
+                    return null;
+                }
+                
                 try {
                     const interactiveData = {
                         content: content,
@@ -38265,48 +38288,71 @@ ${index + 1}. ${space.name}
                         type: characterName ? 'character_specific' : 'public'
                     };
                     
-                    // *** 修改：所有互动内容都保存到统一的世界书条目中 ***
-                    const worldbookKey = '手机-互动内容存储';
+                    // *** 修复：使用与动态内容完全相同的世界书操作方式 ***
+                    const worldbookComment = '手机-互动内容存储';
+                    
+                    // 查找现有条目（与动态保存方式相同）
+                    let interactiveEntry = entries.find(entry => entry.comment === worldbookComment);
                     
                     // 加载现有数据
-                    const existingData = await QQ_GetFromWorldBook(worldbookKey);
                     let dataArray = [];
-                    
-                    if (existingData && Array.isArray(existingData)) {
-                        dataArray = existingData;
-                    } else if (existingData && typeof existingData === 'object') {
-                        // 兼容可能的对象格式
-                        dataArray = Object.values(existingData);
+                    if (interactiveEntry && interactiveEntry.content) {
+                        try {
+                            const existingData = JSON.parse(interactiveEntry.content);
+                            if (Array.isArray(existingData)) {
+                                dataArray = existingData;
+                            } else if (existingData && typeof existingData === 'object') {
+                                dataArray = Object.values(existingData);
+                            }
+                        } catch (parseError) {
+                            console.warn('解析现有互动数据失败，使用空数组:', parseError);
+                            dataArray = [];
+                        }
                     }
                     
                     // 添加新数据到数组开头
                     dataArray.unshift(interactiveData);
                     
-                    // *** 修改：限制数量为20个（滚动式存储） ***
+                    // *** 限制数量为20个（滚动式存储） ***
                     if (dataArray.length > 20) {
                         console.log(`🔄 互动内容存储达到上限，移除最旧的 ${dataArray.length - 20} 个`);
                         dataArray = dataArray.slice(0, 20);
                     }
                     
-                    console.log(`准备保存互动内容到世界书: ${worldbookKey}, 内容数量: ${dataArray.length}`);
+                    const interactiveJson = JSON.stringify(dataArray, null, 2);
+                    console.log(`准备保存互动内容: ${dataArray.length}个项目, 新增ID: ${interactiveData.id}`);
                     
-                    // 使用统一的保存机制
-                    const success = await QQ_SafeSaveToWorldBook(
-                        '互动内容存储', 
-                        dataArray, 
-                        worldbookKey
-                    );
-                    
-                    if (success) {
-                        console.log(`🎯 互动内容保存成功: ${characterName || '公共'}, ID: ${interactiveData.id}`);
-                        return interactiveData.id;
+                    if (interactiveEntry) {
+                        // *** 更新现有条目（与动态保存方式相同） ***
+                        await setLorebookEntries(worldbook, [{
+                            uid: interactiveEntry.uid,
+                            content: interactiveJson,
+                        }]);
+                        console.log('互动内容已更新到现有worldbook条目');
                     } else {
-                        console.error('互动内容保存失败：QQ_SafeSaveToWorldBook返回false');
-                        return null;
+                        // *** 创建新条目（使用与动态保存相同的参数） ***
+                        await createLorebookEntry(worldbook, {
+                            comment: worldbookComment,
+                            key: ["此世界书永不触发_互动内容存储"],
+                            content: interactiveJson,
+                            position: "at_depth_as_system",
+                            type: "selective",
+                            depth: 0,
+                            exclude_recursion: true,
+                            order: 9999,
+                            enabled: true,
+                        });
+                        console.log('互动内容已保存到新worldbook条目');
+                        
+                        // *** 重新获取entries以包含新创建的条目 ***
+                        entries = await getLorebookEntries(worldbook);
                     }
                     
+                    console.log(`🎯 互动内容保存成功: ${characterName || '公共'}, ID: ${interactiveData.id}`);
+                    return interactiveData.id;
+                    
                 } catch (error) {
-                    console.error('保存互动内容失败:', error);
+                    console.error('保存互动内容到世界书失败:', error);
                     return null;
                 }
             }
