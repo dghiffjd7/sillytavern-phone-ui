@@ -3501,7 +3501,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>99%</span>
+                    <span>128%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -9418,7 +9418,7 @@
                     <div id="${messageId}" class="message-item interactive-message" style="
                         margin: 10px 0;
                         padding: 12px 15px;
-                        background: rgba(240, 240, 240, 0.6);
+                        background: rgba(240, 240, 240, 0.9);
                         border-radius: 12px;
                         position: relative;
                         animation: fadeIn 0.3s ease;
@@ -9593,7 +9593,7 @@
             function QQ_CreateExpandedInteractiveDisplay(content, interactiveId) {
                 const expandedDiv = $(`
                     <div class="expanded-interactive-content" data-id="${interactiveId}" style="
-                        background: rgba(102, 126, 234, 0.1) !important;
+                        background: rgba(102, 126, 234, 0.15) !important;
                         border: 1px solid rgba(102, 126, 234, 0.3) !important;
                         border-radius: 12px;
                         padding: 12px;
@@ -19152,6 +19152,12 @@ ${index + 1}. ${space.name}
                         // 添加到页面
                         $("#App_QQ").append(groupChatPage);
                         
+                        // *** 修复：切换到群聊页面时清理已处理的互动内容ID，防止重复显示 ***
+                        if (window.QQ_ProcessedInteractiveIds) {
+                            console.log(`🧹 切换到群聊时清理已处理的互动内容ID集合，当前数量: ${window.QQ_ProcessedInteractiveIds.size}`);
+                            window.QQ_ProcessedInteractiveIds.clear();
+                        }
+                        
                         // 显示群聊页面
                         groupChatPage.show();
                         $("#App_QQ").css("background-color", "#ffffff");
@@ -22681,6 +22687,13 @@ ${index + 1}. ${space.name}
                 $("#QQ_space_page").hide();
                 // 隐藏底部导航栏
                 $(".QQ_bottom_nav").hide();
+                
+                // *** 修复：切换聊天页面时清理已处理的互动内容ID，防止重复显示 ***
+                if (window.QQ_ProcessedInteractiveIds) {
+                    console.log(`🧹 清理已处理的互动内容ID集合，当前数量: ${window.QQ_ProcessedInteractiveIds.size}`);
+                    window.QQ_ProcessedInteractiveIds.clear();
+                }
+                
                 $page.show();
                 console.log(`显示聊天页:QQ_chat_${name}`);
                 let $msgContent = $page.find(".msgcontent");
@@ -26928,11 +26941,20 @@ ${index + 1}. ${space.name}
                         // 是新动态内容
                         console.log(`匹配到动态内容:${match[0]}`);
                         
-                        // *** 保存上一个动态数据 ***
+                        // *** 修复：保存上一个动态数据，避免重复添加现有动态 ***
                         if (currentMomentData && momentdiv) {
-                            QQ_MomentsData.unshift(currentMomentData); // 新动态添加到数组开头
-                            count += 1;
-                            $("#space_contents").prepend(momentdiv);
+                            const existingIndex = QQ_MomentsData.findIndex(moment => moment.id === currentMomentData.id);
+                            if (existingIndex === -1) {
+                                // 新动态，添加到数据数组和DOM
+                                QQ_MomentsData.unshift(currentMomentData);
+                                count += 1;
+                                $("#space_contents").prepend(momentdiv);
+                                console.log(`✅ 添加新动态到界面: ${currentMomentData.message.substring(0, 30)}...`);
+                            } else {
+                                // 现有动态，更新数据但不重复添加DOM
+                                QQ_MomentsData[existingIndex] = currentMomentData;
+                                console.log(`🔄 更新现有动态数据: ${currentMomentData.message.substring(0, 30)}...`);
+                            }
                         }
                         
                         let fakeimg = "";
@@ -26949,8 +26971,27 @@ ${index + 1}. ${space.name}
                             ? QQ_CharSettings.readValue(match[1], "手机型号")
                             : QQ_GetRandomPhone();
                         
-                        // *** 新增：创建动态数据对象 ***
-                        const momentId = `${match[1]}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                        // *** 修复：检查是否为重复的现有动态，避免重新分配序列号 ***
+                        const dynamicContent = `${match[1]}--${match[2]}--${match[3]}`;
+                        const existingMoment = QQ_MomentsData.find(moment => 
+                            moment.userName === match[1] && 
+                            moment.message === message && 
+                            moment.timestampText === match[3]
+                        );
+                        
+                        let momentId, sequenceId;
+                        if (existingMoment) {
+                            // 如果是现有动态，保持原有ID和序列号
+                            momentId = existingMoment.id;
+                            sequenceId = existingMoment.sequenceId;
+                            console.log(`🔄 发现现有动态，保持原序列号 [seq:${sequenceId}]: ${message.substring(0, 30)}...`);
+                        } else {
+                            // 如果是新动态，分配新的ID和序列号
+                            momentId = `${match[1]}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                            sequenceId = QQ_MessageSequence.next();
+                            console.log(`✨ 发现新动态，分配新序列号 [seq:${sequenceId}]: ${message.substring(0, 30)}...`);
+                        }
+                        
                         currentMomentData = {
                             id: momentId, // 使用更可靠的唯一ID
                             userName: match[1],
@@ -26961,10 +27002,10 @@ ${index + 1}. ${space.name}
                             randomPhone: randomPhone,
                             extraContent: match[5] || '',
                             imgcontent: fakeimg,
-                            comments: [], // 初始化评论数组
-                            sequenceId: QQ_MessageSequence.next(), // 为新动态分配序列号
-                            // 新增：点赞相关字段
-                            likes: {
+                            comments: existingMoment ? existingMoment.comments : [], // 保持现有评论或初始化
+                            sequenceId: sequenceId, // *** 修复：使用检查后确定的序列号 ***
+                            // *** 修复：点赞相关字段，保持现有数据或初始化 ***
+                            likes: existingMoment ? existingMoment.likes : {
                                 count: parseInt(match[5]) || 0, // 点赞总数
                                 userLiked: false, // 用户是否已点赞
                                 likedBy: [], // 点赞用户列表
@@ -27030,11 +27071,20 @@ ${index + 1}. ${space.name}
                     }
                 }
                 
-                // *** 保存最后一个动态数据 ***
+                // *** 修复：保存最后一个动态数据，避免重复添加现有动态 ***
                 if (currentMomentData && momentdiv) {
-                    QQ_MomentsData.unshift(currentMomentData);
-                    count += 1;
-                    $("#space_contents").prepend(momentdiv);
+                    const existingIndex = QQ_MomentsData.findIndex(moment => moment.id === currentMomentData.id);
+                    if (existingIndex === -1) {
+                        // 新动态，添加到数据数组和DOM
+                        QQ_MomentsData.unshift(currentMomentData);
+                        count += 1;
+                        $("#space_contents").prepend(momentdiv);
+                        console.log(`✅ 添加新动态到界面: ${currentMomentData.message.substring(0, 30)}...`);
+                    } else {
+                        // 现有动态，更新数据但不重复添加DOM
+                        QQ_MomentsData[existingIndex] = currentMomentData;
+                        console.log(`🔄 更新现有动态数据: ${currentMomentData.message.substring(0, 30)}...`);
+                    }
                 }
                 
                 QQ_NewMsg["moment"] = count;
@@ -27514,7 +27564,13 @@ ${index + 1}. ${space.name}
                         console.log(`🎭 系统消息中检测到互动内容占位符: ${interactiveId}`);
                         
                         // *** 修复：防止重复创建，检查是否已存在该ID的占位符 ***
-                        if ($(dom).find(`[data-id="${interactiveId}"]`).length === 0) {
+                        // 同时检查全局已处理ID集合
+                        if ($(dom).find(`[data-id="${interactiveId}"]`).length === 0 && !window.QQ_ProcessedInteractiveIds?.has(interactiveId)) {
+                            // 添加到全局已处理集合
+                            if (!window.QQ_ProcessedInteractiveIds) {
+                                window.QQ_ProcessedInteractiveIds = new Set();
+                            }
+                            window.QQ_ProcessedInteractiveIds.add(interactiveId);
                             // 创建可点击的互动内容占位符（不显示ID）
                             const interactiveDiv = $(`
                                 <div class="interactive-placeholder" data-id="${interactiveId}" style="
@@ -27563,7 +27619,7 @@ ${index + 1}. ${space.name}
                             
                             $(dom).append(interactiveDiv);
                         } else {
-                            console.log(`⚠️ 互动内容占位符已存在，跳过创建: ${interactiveId}`);
+                            console.log(`⚠️ 互动内容占位符已处理过或已存在，跳过创建: ${interactiveId}`);
                         }
                     } else {
                         // 普通系统消息
@@ -27598,13 +27654,20 @@ ${index + 1}. ${space.name}
                         console.log(`🎭 在普通消息中检测到互动内容占位符: ${interactiveId}`);
                         
                         // *** 修复：防止重复创建，检查是否已存在该ID的占位符 ***
-                        if ($(dom).find(`[data-id="${interactiveId}"]`).length > 0) {
-                            console.log(`⚠️ 互动内容占位符已存在，跳过普通消息处理: ${interactiveId}`);
+                        // 同时检查全局已处理ID集合
+                        if ($(dom).find(`[data-id="${interactiveId}"]`).length > 0 || window.QQ_ProcessedInteractiveIds?.has(interactiveId)) {
+                            console.log(`⚠️ 互动内容占位符已存在或已处理，跳过: ${interactiveId}`);
                             // 继续处理普通消息但跳过互动内容创建
                             const msgDiv = QQ_CreateMessageElement(sender, messageContent, timestamp, originalSender);
                             $(dom).append(msgDiv);
                             return;
                         }
+                        
+                        // 添加到全局已处理集合
+                        if (!window.QQ_ProcessedInteractiveIds) {
+                            window.QQ_ProcessedInteractiveIds = new Set();
+                        }
+                        window.QQ_ProcessedInteractiveIds.add(interactiveId);
                         
                         // *** 修复：标记该聊天已触发互动内容，确保开关显示 ***
                         console.log(`🎭 标记聊天 ${name} 已触发互动内容（从普通消息检测）`);
@@ -35436,7 +35499,11 @@ ${index + 1}. ${space.name}
                 // *** 修复：同时加载内存和持久化的群聊消息 ***
                 let hasMessages = false;
                 // *** 新增：跟踪已处理的互动内容ID，防止重复处理 ***
-                const processedInteractiveIds = new Set();
+                // 使用全局变量确保跨页面加载时保持状态
+                if (!window.QQ_ProcessedInteractiveIds) {
+                    window.QQ_ProcessedInteractiveIds = new Set();
+                }
+                const processedInteractiveIds = window.QQ_ProcessedInteractiveIds;
                 
                 // 1. 先加载持久化的群聊消息（QQ_msgjson.群聊）
                 const groupName = groupId; // 假设 groupId 就是群聊名称
