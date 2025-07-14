@@ -3501,7 +3501,7 @@
                             fill="currentColor"
                         ></path>
                     </svg>
-                    <span>128%</span>
+                    <span>129%</span>
                     <svg
                         viewBox="0 0 1024 1024"
                         width="20"
@@ -11632,33 +11632,140 @@
             function QQ_CleanContentTags(content) {
                 if (!content || typeof content !== 'string') return '';
                 
-                // *** 核心修复：删除<content>标签之前的所有内容（包括thinking内容） ***
-                const contentIndex = content.search(/<content>/i);
-                if (contentIndex !== -1) {
-                    console.log('🧹 找到<content>标签，删除其之前的所有内容');
-                    content = content.substring(contentIndex);
+                // *** 新增：检查是否有多个content标签存在 ***
+                const contentMatches = [...content.matchAll(/<content>/gi)];
+                
+                if (contentMatches.length === 0) {
+                    console.log('❌ 没有找到content标签');
+                    return '';
                 }
                 
-                // *** 预处理：先移除thinking标签内容，避免误读thinking标签中的content引用 ***
-                const processedContent = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
-                
-                // 首先尝试匹配完整的content标签
-                let contentMatch = processedContent.match(/<content>([\s\S]*?)<\/content>/i);
-                if (contentMatch) {
-                    console.log('✅ 找到完整的content标签');
-                    return contentMatch[1].trim();
-                }
-                
-                // 如果没有完整标签，尝试匹配不完整的标签
-                contentMatch = processedContent.match(/<content>([\s\S]*?)(?=<\/|$)/i);
-                if (contentMatch) {
-                    console.log('✅ 找到不完整的content标签，提取内容');
-                    let extractedContent = contentMatch[1];
+                if (contentMatches.length === 1) {
+                    // *** 单个content标签：使用原有逻辑 ***
+                    const contentIndex = content.search(/<content>/i);
+                    if (contentIndex !== -1) {
+                        console.log('🧹 找到单个<content>标签，删除其之前的所有内容');
+                        content = content.substring(contentIndex);
+                    }
                     
-                    // 清理可能的系统标签
-                    extractedContent = extractedContent.replace(/<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink)[^>]*>[\s\S]*$/gi, '');
+                    // 预处理：先移除thinking标签内容
+                    const processedContent = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
                     
-                    return extractedContent.trim();
+                    // 首先尝试匹配完整的content标签
+                    let contentMatch = processedContent.match(/<content>([\s\S]*?)<\/content>/i);
+                    if (contentMatch) {
+                        console.log('✅ 找到完整的content标签');
+                        return contentMatch[1].trim();
+                    }
+                    
+                    // 如果没有完整标签，尝试匹配不完整的标签
+                    contentMatch = processedContent.match(/<content>([\s\S]*?)(?=<\/|$)/i);
+                    if (contentMatch) {
+                        console.log('✅ 找到不完整的content标签，提取内容');
+                        let extractedContent = contentMatch[1];
+                        
+                        // 清理可能的系统标签
+                        extractedContent = extractedContent.replace(/<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink)[^>]*>[\s\S]*$/gi, '');
+                        
+                        return extractedContent.trim();
+                    }
+                } else {
+                    // *** 多个content标签：智能选择正确的content标签 ***
+                    console.log(`🔍 找到${contentMatches.length}个content标签，正在评估有效性`);
+                    
+                    // 提取所有可能的content片段
+                    const contentCandidates = [];
+                    
+                    // 获取所有完整的content标签内容
+                    const allContentMatches = [...content.matchAll(/<content>([\s\S]*?)<\/content>/gi)];
+                    allContentMatches.forEach((match, index) => {
+                        contentCandidates.push({
+                            index: index,
+                            content: match[1].trim(),
+                            fullMatch: match[0],
+                            startIndex: match.index
+                        });
+                    });
+                    
+                    // 如果没有完整的content标签，查找不完整的
+                    if (contentCandidates.length === 0) {
+                        const incompleteMatches = [...content.matchAll(/<content>([\s\S]*?)(?=<\/|$)/gi)];
+                        incompleteMatches.forEach((match, index) => {
+                            let extractedContent = match[1];
+                            extractedContent = extractedContent.replace(/<(?:disclaimer|Content_Target|Creative_Status|Review_Exemption|Security_Bypass|Ethics_Removal|Violence_Restriction|Content_Will_Autonomy|thinking|consider|tableThink)[^>]*>[\s\S]*$/gi, '');
+                            contentCandidates.push({
+                                index: index,
+                                content: extractedContent.trim(),
+                                fullMatch: match[0],
+                                startIndex: match.index
+                            });
+                        });
+                    }
+                    
+                    if (contentCandidates.length === 0) {
+                        console.log('❌ 没有找到有效的content内容');
+                        return '';
+                    }
+                    
+                    // *** 评估每个候选content的有效性 ***
+                    const validatedCandidates = contentCandidates.map(candidate => {
+                        const content = candidate.content;
+                        let score = 0;
+                        let reasons = [];
+                        
+                        // 检查是否包含线上格式标签（高权重）
+                        const onlineFormatTags = ['私聊', 'msg_start', 'MiPhone_start', '群聊', '动态', '评论'];
+                        const hasOnlineFormat = onlineFormatTags.some(tag => content.includes(tag));
+                        if (hasOnlineFormat) {
+                            score += 50;
+                            reasons.push('包含线上格式标签');
+                        }
+                        
+                        // 检查是否包含互动内容特征（中权重）
+                        const interactiveFeatures = ['场景', '剧情', '环境', '氛围', '背景'];
+                        const hasInteractiveFeatures = interactiveFeatures.some(feature => content.includes(feature));
+                        if (hasInteractiveFeatures) {
+                            score += 30;
+                            reasons.push('包含互动内容特征');
+                        }
+                        
+                        // 内容长度评分（基础权重）
+                        if (content.length > 100) {
+                            score += 20;
+                            reasons.push('内容较长');
+                        } else if (content.length > 50) {
+                            score += 10;
+                            reasons.push('内容中等');
+                        }
+                        
+                        // 检查是否在thinking标签内（负权重）
+                        const beforeContent = content.substring(0, candidate.startIndex);
+                        const thinkingOpenCount = (beforeContent.match(/<thinking>/gi) || []).length;
+                        const thinkingCloseCount = (beforeContent.match(/<\/thinking>/gi) || []).length;
+                        const isInThinking = thinkingOpenCount > thinkingCloseCount;
+                        if (isInThinking) {
+                            score -= 100;
+                            reasons.push('在thinking标签内');
+                        }
+                        
+                        // 位置权重：后面的content标签优先级更高
+                        const positionScore = candidate.startIndex / content.length * 10;
+                        score += positionScore;
+                        reasons.push(`位置权重: ${positionScore.toFixed(1)}`);
+                        
+                        return {
+                            ...candidate,
+                            score: score,
+                            reasons: reasons
+                        };
+                    });
+                    
+                    // 按分数排序，选择最高分的
+                    validatedCandidates.sort((a, b) => b.score - a.score);
+                    const bestCandidate = validatedCandidates[0];
+                    
+                    console.log(`✅ 选择content标签${bestCandidate.index}，分数: ${bestCandidate.score}, 原因: ${bestCandidate.reasons.join(', ')}`);
+                    return bestCandidate.content;
                 }
                 
                 console.log('❌ 没有找到content标签');
