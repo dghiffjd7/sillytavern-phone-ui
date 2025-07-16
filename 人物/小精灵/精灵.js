@@ -2997,7 +2997,13 @@ async function showPokemonCreationInterface() {
     // 显示初次相遇对话
     await showFirstMeetingDialog(newPokemon);
 
-    setTimeout(() => showPokemonInterface(), 500);
+    setTimeout(async () => {
+      await showPokemonInterface();
+      // 第一次召唤后自动显示全局小精灵
+      setTimeout(() => {
+        initializeGlobalPoring(true);
+      }, 500);
+    }, 500);
   });
 
   setTimeout(() => {
@@ -4898,6 +4904,14 @@ async function showPokemonInterface() {
               </button>
             </div>
 
+            <!-- 全局显示控制按钮 -->
+            <div style="margin-top: 10px; text-align: center;">
+              <button class="pokemon-action-btn" id="pokemon-toggle-global" style="width: auto; padding: 8px 16px;">
+                <i class="fas fa-${pokemonData.全局显示状态 ? 'eye-slash' : 'eye'}"></i> 
+                ${pokemonData.全局显示状态 ? '隐藏小精灵' : '显示小精灵'}
+              </button>
+            </div>
+
             <!-- 图鉴按钮区域 -->
             <div class="pokemon-info-grid">
               <div class="pokemon-info-item clickable" id="collection-menu">
@@ -4981,6 +4995,23 @@ async function showPokemonInterface() {
       if (!pokemonData.冒险状态) {
         performPokemonAction('冒险');
       }
+    });
+
+    // 绑定全局显示切换按钮
+    $('#pokemon-toggle-global').on('click', async function () {
+      if (pokemonData.全局显示状态) {
+        // 隐藏全局小精灵
+        await hideGlobalPokemon();
+        $(this).html('<i class="fas fa-eye"></i> 显示小精灵');
+        toastr.success('小精灵已隐藏');
+      } else {
+        // 显示全局小精灵
+        await initializeGlobalPoring(true);
+        $(this).html('<i class="fas fa-eye-slash"></i> 隐藏小精灵');
+        toastr.success('小精灵已显示');
+      }
+      // 更新本地状态
+      pokemonData.全局显示状态 = !pokemonData.全局显示状态;
     });
 
     // 绑定历史记录点击事件
@@ -7101,10 +7132,10 @@ async function onPokemonRoamingClick(pokemonName) {
 }
 
 // 初始化全局小精灵
-async function initializeGlobalPoring() {
+async function initializeGlobalPoring(forceShow = false) {
   try {
     // 检查是否已经有全局小精灵
-    if (window.globalPokemonElement) {
+    if (window.globalPokemonElement && !forceShow) {
       return;
     }
 
@@ -7115,11 +7146,32 @@ async function initializeGlobalPoring() {
     }
 
     let pokemonData = variables.波利;
+    
+    // 检查是否应该显示全局小精灵
+    // 默认情况下不显示，除非：
+    // 1. forceShow 为 true（用户主动召唤）
+    // 2. 之前已经设置为显示状态
+    if (!forceShow && !pokemonData.全局显示状态) {
+      return;
+    }
+
     pokemonData = calculateTimeEffect(pokemonData);
 
     // 检查冒险状态，如果在冒险中则不显示
     if (pokemonData.冒险状态) {
       return;
+    }
+
+    // 如果是主动召唤，设置显示状态
+    if (forceShow) {
+      pokemonData.全局显示状态 = true;
+      await savePokemonData(pokemonData);
+    }
+
+    // 清除之前的全局小精灵
+    if (window.globalPokemonElement) {
+      stopPokemonRoaming();
+      window.globalPokemonElement = null;
     }
 
     // 获取宠物的动画GIF
@@ -7148,11 +7200,30 @@ async function initializeGlobalPoring() {
   }
 }
 
+// 隐藏全局小精灵
+async function hideGlobalPokemon() {
+  try {
+    if (window.globalPokemonElement) {
+      stopPokemonRoaming();
+      window.globalPokemonElement = null;
+    }
+
+    // 更新状态
+    const pokemonData = await getPokemonData();
+    if (pokemonData) {
+      pokemonData.全局显示状态 = false;
+      await savePokemonData(pokemonData);
+    }
+  } catch (error) {
+    console.error('隐藏全局小精灵时出错:', error);
+  }
+}
+
 console.log('Janusの百宝箱已加载');
 
-// 在脚本加载后自动初始化全局小精灵
+// 在脚本加载后自动初始化全局小精灵（如果之前已经显示过）
 $(document).ready(function() {
   setTimeout(() => {
-    initializeGlobalPoring();
+    initializeGlobalPoring(); // 不传递 forceShow，会检查之前的显示状态
   }, 1000); // 延迟1秒，确保所有资源都已加载
 });
