@@ -10167,12 +10167,12 @@
                 // *** 最优先级：完整content标签处理 ***
                 console.log("🎯 最优先级：开始检查完整content标签");
                 const contentTagResult = await QQ_ProcessCompleteContentTag(result);
-                if (contentTagResult.success) {
-                    console.log("✅ 最优先级成功：完整content标签处理完成，立即return");
-                    QQ_ResetRetry();
-                    QQ_UpdateNewTips();
-                    await QQ_Save_Chat_Backup();
-                    return; // 最优先级成功，立即return
+                if (contentTagResult.success && contentTagResult.extractedContent) {
+                    console.log("✅ 最优先级成功：提取到完整content内容，继续正常解析流程");
+                    // 将result替换为提取的content内容，继续后续的正常解析
+                    result = contentTagResult.extractedContent;
+                    console.log(`📤 替换result为content内容，长度: ${result.length}`);
+                    // 不要return，继续执行后续的解析逻辑
                 }
                 
                 // *** 新增：检测是否需要使用顺序任务队列处理 ***
@@ -11119,7 +11119,7 @@
             
             /**
              * *** 最优先级：完整content标签处理 ***
-             * 只要检测到完整的content标签，就移除标签外的所有内容，仅保留content内容
+             * 只要检测到完整的content标签，就移除标签外的所有内容，提取content内容后继续正常的解析流程
              */
             async function QQ_ProcessCompleteContentTag(result) {
                 console.log("🎯 开始最优先级完整content标签检查");
@@ -11129,7 +11129,7 @@
                 
                 if (contentMatches.length === 0) {
                     console.log("❌ 未找到完整的content标签");
-                    return { success: false };
+                    return { success: false, extractedContent: null };
                 }
                 
                 console.log(`✅ 找到 ${contentMatches.length} 个完整的content标签`);
@@ -11153,11 +11153,11 @@
                         // 有效性评分：内容长度 + 是否包含实际内容
                         let score = contentText.length;
                         
-                        // 检查是否包含线上格式标签（降低分数，因为content应该是纯互动内容）
+                        // 检查是否包含线上格式标签（实际上这是好的，应该加分）
                         if (contentText.includes('MiPhone_') || contentText.includes('msg_start') || 
                             contentText.includes('moment_start') || contentText.includes('discord_start')) {
-                            score = score * 0.3; // 大幅降低分数
-                            console.log(`⚠️ content包含线上格式标签，降低分数: ${score}`);
+                            score += 200; // 包含线上格式标签应该加分
+                            console.log(`✅ content包含线上格式标签，加分: ${score}`);
                         }
                         
                         // 检查是否包含实际文本内容
@@ -11178,43 +11178,19 @@
                 // 验证找到的有效content
                 if (!validContent || !validContentText || validContentText.length === 0) {
                     console.log("❌ 未找到有效的content内容");
-                    return { success: false };
+                    return { success: false, extractedContent: null };
                 }
                 
                 console.log(`✅ 选择有效content，长度: ${validContentText.length}`);
                 console.log(`📝 有效content预览: "${validContentText.substring(0, 100)}..."`);
                 
-                // 清理content内容（移除可能的嵌套标签）
+                // 清理content内容（移除可能的嵌套标签，但保留线上格式标签）
                 const cleanContent = QQ_CleanNestedTags(validContentText);
                 
-                // 检查清理后的内容是否包含moment_reply格式
-                if (cleanContent.includes('moment_reply_start')) {
-                    console.log('🎭 检测到moment_reply格式，优先处理');
-                    const momentReplyMatches = [...cleanContent.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g)];
-                    if (momentReplyMatches.length > 0) {
-                        for (const reply of momentReplyMatches) {
-                            await QQ_ProcessMomentReply(reply[1]);
-                        }
-                        return { success: true };
-                    }
-                }
+                console.log(`🎯 content标签处理完成，提取的内容将继续正常的解析流程`);
+                console.log(`📤 提取的内容: "${cleanContent.substring(0, 150)}..."`);
                 
-                // 检查是否包含其他线上格式
-                if (cleanContent.includes('MiPhone_') || cleanContent.includes('msg_start') || 
-                    cleanContent.includes('moment_start') || cleanContent.includes('discord_start')) {
-                    console.log('📱 content内包含线上格式，递归处理');
-                    // 递归处理content内的线上格式
-                    const recursiveResult = await QQ_ExtractAndProcessOnlineFormatFirst(cleanContent);
-                    if (recursiveResult.processed) {
-                        return { success: true };
-                    }
-                }
-                
-                // 作为纯互动内容处理
-                console.log('🎭 作为纯互动内容处理');
-                await QQ_SequentialTaskQueue.displayInteractiveInChat(cleanContent);
-                
-                return { success: true };
+                return { success: true, extractedContent: cleanContent };
             }
             
             /**
