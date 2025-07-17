@@ -7936,20 +7936,66 @@
 
             /**
              * *** 新增：提取并清理content标签包裹的内容 ***
+             * 修改版：找到有效content后只返回content内的内容，忽略标签外的内容
              * @param {string} content - 包含content标签的文本
              * @returns {string} content标签内的清理后内容
              */
             function QQ_CleanContentTags(content) {
                 if (!content || typeof content !== 'string') return '';
                 
-                // 提取content标签内容
-                const contentMatch = content.match(/<content>([\s\S]*?)<\/content>/i);
-                if (!contentMatch) {
+                // 如果有多个content标签，需要找出有效的那个
+                const contentMatches = [...content.matchAll(/<content>([\s\S]*?)<\/content>/gi)];
+                
+                if (contentMatches.length === 0) {
                     console.log('❌ 没有找到content标签');
                     return '';
                 }
                 
-                return contentMatch[1].trim();
+                if (contentMatches.length === 1) {
+                    // 只有一个content标签，直接返回其内容
+                    console.log('✅ 找到单个content标签');
+                    return contentMatches[0][1].trim();
+                }
+                
+                // 多个content标签，需要判断哪个是有效的
+                console.log(`🔍 找到${contentMatches.length}个content标签，开始判断有效性`);
+                
+                let validContent = '';
+                let maxLength = 0;
+                
+                for (let i = 0; i < contentMatches.length; i++) {
+                    const contentText = contentMatches[i][1].trim();
+                    const contentLength = contentText.length;
+                    
+                    // 排除明显无效的content（如系统标签、错误信息等）
+                    if (contentText.includes('<thinking>') || 
+                        contentText.includes('error') ||
+                        contentText.includes('系统') ||
+                        contentLength < 10) {
+                        console.log(`❌ content ${i + 1} 无效：包含系统标签或长度过短`);
+                        continue;
+                    }
+                    
+                    // 检查是否包含互动内容特征
+                    const hasInteractiveFeatures = QQ_ValidateInteractiveContentFeatures(contentText);
+                    
+                    if (hasInteractiveFeatures && contentLength > maxLength) {
+                        validContent = contentText;
+                        maxLength = contentLength;
+                        console.log(`✅ content ${i + 1} 有效且更长，选为有效内容`);
+                    }
+                }
+                
+                if (validContent) {
+                    console.log('✅ 找到有效content标签，忽略标签外的所有内容');
+                    return validContent;
+                }
+                
+                // 如果没有找到符合互动特征的，返回最长的那个
+                console.log('⚠️ 没有找到符合互动特征的content，返回最长的');
+                return contentMatches.reduce((longest, current) => {
+                    return current[1].trim().length > longest.length ? current[1].trim() : longest;
+                }, '');
             }
 
             /**

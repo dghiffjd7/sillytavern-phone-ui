@@ -8582,17 +8582,42 @@
                     if (content.includes('<content>') || QQ_IsInteractiveContent(content, false)) {
                         analysis.hasInteractive = true;
                         
-                        // 判断互动内容属于哪个界面
-                        if (analysis.privateChatCharacters.size === 1) {
-                            // 单一私聊场景，互动内容属于该私聊界面
+                        // *** 修复：根据当前对话上下文精确归属互动内容 ***
+                        const currentCharacter = QQ_LastRequestName || charcardname;
+                        
+                        // 优先检查是否有与当前角色匹配的私聊
+                        let targetInterface = null;
+                        for (const chatKey of analysis.privateChatCharacters) {
+                            if (chatKey.includes(currentCharacter)) {
+                                targetInterface = `private_${chatKey}`;
+                                console.log(`🎯 互动内容归属到当前角色私聊: ${targetInterface}`);
+                                break;
+                            }
+                        }
+                        
+                        // 如果没有匹配的私聊，检查当前是否在群聊中
+                        if (!targetInterface && analysis.groupChats.size > 0) {
+                            // 检查当前是否有特定的群聊上下文
+                            if (analysis.groupChats.size === 1) {
+                                const groupName = Array.from(analysis.groupChats)[0];
+                                targetInterface = `group_${groupName}`;
+                                console.log(`🎯 互动内容归属到群聊: ${targetInterface}`);
+                            }
+                        }
+                        
+                        // 如果仍然没有明确归属，检查单一私聊场景
+                        if (!targetInterface && analysis.privateChatCharacters.size === 1) {
                             const chatKey = Array.from(analysis.privateChatCharacters)[0];
-                            analysis.contentByInterface.get(`private_${chatKey}`).add('interactive');
-                        } else if (analysis.groupChats.size === 1 && analysis.privateChatCharacters.size === 0) {
-                            // 单一群聊场景，互动内容属于该群聊界面
-                            const groupName = Array.from(analysis.groupChats)[0];
-                            analysis.contentByInterface.get(`group_${groupName}`).add('interactive');
+                            targetInterface = `private_${chatKey}`;
+                            console.log(`🎯 互动内容归属到唯一私聊: ${targetInterface}`);
+                        }
+                        
+                        if (targetInterface) {
+                            // 将互动内容归属到特定界面
+                            analysis.contentByInterface.get(targetInterface).add('interactive');
                         } else {
-                            // 多界面或无明确归属，作为独立界面
+                            // 只有在完全无法确定归属时才作为独立界面
+                            console.log(`⚠️ 无法确定互动内容归属，作为独立界面处理`);
                             analysis.interfaces.add('interactive');
                             if (!analysis.contentByInterface.has('interactive')) {
                                 analysis.contentByInterface.set('interactive', new Set());
@@ -9280,7 +9305,7 @@
                  * 在聊天容器中显示互动内容（新功能）
                  * @param {string} content - 互动内容
                  */
-                async displayInteractiveInChat(content) {
+                async displayInteractiveInChat(content, specificCharacter = null) {
                     console.log('🎨 准备在当前聊天容器中显示互动内容');
                     
                     // 验证内容是否有效
@@ -9306,21 +9331,52 @@
                     
                     console.log(`✅ 互动内容验证通过，长度: ${cleanContent.length}`);
                     
-                    // 获取当前对话的角色名称
-                    const currentCharacter = QQ_LastRequestName || charcardname;
+                    // *** 修复：更精确地确定目标角色 ***
+                    const targetCharacter = specificCharacter || QQ_LastRequestName || charcardname;
                     
-                    // *** 修复：在开始显示互动内容时立即标记聊天已触发，确保开关立即显示 ***
-                    const chatName = currentCharacter || '公共聊天';
-                    console.log(`🎭 立即标记聊天 ${chatName} 已触发互动内容（从 displayInteractiveInChat）`);
-                    await QQ_InteractiveMode.markChatTriggered(chatName);
+                    // *** 修复：检查当前可见的聊天界面，确保互动内容显示在正确位置 ***
+                    const currentVisiblePage = $('.QQ_chat_page:visible');
+                    let shouldDisplayHere = false;
                     
-                    // 直接在当前界面显示互动内容，不做复杂的角色检测
-                    if (currentCharacter) {
-                        console.log(`💬 在当前与${currentCharacter}的对话中显示互动内容`);
-                        await QQ_DisplayInteractiveInPrivateChat(cleanContent, currentCharacter);
+                    if (currentVisiblePage.length > 0) {
+                        const pageDataName = currentVisiblePage.attr('data-name');
+                        console.log(`📍 当前可见界面: ${pageDataName}, 目标角色: ${targetCharacter}`);
+                        
+                        // 检查是否应该在当前界面显示互动内容
+                        if (pageDataName === targetCharacter) {
+                            shouldDisplayHere = true;
+                            console.log(`✅ 当前界面与目标角色匹配，在此显示互动内容`);
+                        } else {
+                            console.log(`⚠️ 当前界面 (${pageDataName}) 与目标角色 (${targetCharacter}) 不匹配`);
+                            // 尝试切换到正确的界面
+                            const targetPage = $(`.QQ_chat_page[data-name='${targetCharacter}']`);
+                            if (targetPage.length > 0) {
+                                console.log(`🔄 切换到目标角色界面: ${targetCharacter}`);
+                                $('.QQ_chat_page').hide();
+                                targetPage.show();
+                                shouldDisplayHere = true;
+                            }
+                        }
+                    }
+                    
+                    if (shouldDisplayHere) {
+                        // *** 修复：在开始显示互动内容时立即标记聊天已触发，确保开关立即显示 ***
+                        const chatName = targetCharacter || '公共聊天';
+                        console.log(`🎭 立即标记聊天 ${chatName} 已触发互动内容（从 displayInteractiveInChat）`);
+                        await QQ_InteractiveMode.markChatTriggered(chatName);
+                        
+                        // 在正确的界面显示互动内容
+                        if (targetCharacter) {
+                            console.log(`💬 在${targetCharacter}的对话中显示互动内容`);
+                            await QQ_DisplayInteractiveInPrivateChat(cleanContent, targetCharacter);
+                        } else {
+                            console.log(`👥 在当前界面显示公共互动内容`);
+                            await QQ_DisplayInteractiveInGroupChat(cleanContent);
+                        }
                     } else {
-                        console.log(`👥 在当前界面显示公共互动内容`);
-                        await QQ_DisplayInteractiveInGroupChat(cleanContent);
+                        console.warn(`⚠️ 无法确定互动内容的正确显示位置，使用备选方案`);
+                        // 使用原有的互动空间显示
+                        QQ_HandleInteractiveContent(cleanContent, targetCharacter);
                     }
                 }
             };
@@ -10107,6 +10163,17 @@
                 
                 result = QQ_CleanNestedTags(result);
                 console.log(`清理后的结果:\n${result.substring(0, 200)}...`);
+                
+                // *** 最优先级：完整content标签处理 ***
+                console.log("🎯 最优先级：开始检查完整content标签");
+                const contentTagResult = await QQ_ProcessCompleteContentTag(result);
+                if (contentTagResult.success) {
+                    console.log("✅ 最优先级成功：完整content标签处理完成，立即return");
+                    QQ_ResetRetry();
+                    QQ_UpdateNewTips();
+                    await QQ_Save_Chat_Backup();
+                    return; // 最优先级成功，立即return
+                }
                 
                 // *** 新增：检测是否需要使用顺序任务队列处理 ***
                 // 只有当真正存在混合内容或纯互动内容时才使用智能调度器
@@ -11048,6 +11115,106 @@
                 
                 console.log("❌ 智能提取失败");
                 return { success: false };
+            }
+            
+            /**
+             * *** 最优先级：完整content标签处理 ***
+             * 只要检测到完整的content标签，就移除标签外的所有内容，仅保留content内容
+             */
+            async function QQ_ProcessCompleteContentTag(result) {
+                console.log("🎯 开始最优先级完整content标签检查");
+                
+                // 检查是否有完整的content标签
+                const contentMatches = [...result.matchAll(/<content>([\s\S]*?)<\/content>/gi)];
+                
+                if (contentMatches.length === 0) {
+                    console.log("❌ 未找到完整的content标签");
+                    return { success: false };
+                }
+                
+                console.log(`✅ 找到 ${contentMatches.length} 个完整的content标签`);
+                
+                // 如果有多个content标签，需要比对找出有效的
+                let validContent = null;
+                let validContentText = '';
+                
+                if (contentMatches.length === 1) {
+                    // 单个content标签，直接使用
+                    validContent = contentMatches[0];
+                    validContentText = contentMatches[0][1].trim();
+                    console.log("📝 单个content标签，直接使用");
+                } else {
+                    // 多个content标签，需要比对有效性
+                    console.log(`🔍 检测到 ${contentMatches.length} 个content标签，开始比对有效性`);
+                    
+                    for (const match of contentMatches) {
+                        const contentText = match[1].trim();
+                        
+                        // 有效性评分：内容长度 + 是否包含实际内容
+                        let score = contentText.length;
+                        
+                        // 检查是否包含线上格式标签（降低分数，因为content应该是纯互动内容）
+                        if (contentText.includes('MiPhone_') || contentText.includes('msg_start') || 
+                            contentText.includes('moment_start') || contentText.includes('discord_start')) {
+                            score = score * 0.3; // 大幅降低分数
+                            console.log(`⚠️ content包含线上格式标签，降低分数: ${score}`);
+                        }
+                        
+                        // 检查是否包含实际文本内容
+                        const textContent = contentText.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+                        if (textContent.length > 10) {
+                            score += 100; // 有实际文本内容加分
+                        }
+                        
+                        console.log(`📊 content评分: ${score}, 长度: ${contentText.length}, 文本: "${textContent.substring(0, 50)}..."`);
+                        
+                        if (score > 20 && (!validContent || score > validContent.score)) {
+                            validContent = { ...match, score };
+                            validContentText = contentText;
+                        }
+                    }
+                }
+                
+                // 验证找到的有效content
+                if (!validContent || !validContentText || validContentText.length === 0) {
+                    console.log("❌ 未找到有效的content内容");
+                    return { success: false };
+                }
+                
+                console.log(`✅ 选择有效content，长度: ${validContentText.length}`);
+                console.log(`📝 有效content预览: "${validContentText.substring(0, 100)}..."`);
+                
+                // 清理content内容（移除可能的嵌套标签）
+                const cleanContent = QQ_CleanNestedTags(validContentText);
+                
+                // 检查清理后的内容是否包含moment_reply格式
+                if (cleanContent.includes('moment_reply_start')) {
+                    console.log('🎭 检测到moment_reply格式，优先处理');
+                    const momentReplyMatches = [...cleanContent.matchAll(/moment_reply_start([\s\S]+?)moment_reply_end/g)];
+                    if (momentReplyMatches.length > 0) {
+                        for (const reply of momentReplyMatches) {
+                            await QQ_ProcessMomentReply(reply[1]);
+                        }
+                        return { success: true };
+                    }
+                }
+                
+                // 检查是否包含其他线上格式
+                if (cleanContent.includes('MiPhone_') || cleanContent.includes('msg_start') || 
+                    cleanContent.includes('moment_start') || cleanContent.includes('discord_start')) {
+                    console.log('📱 content内包含线上格式，递归处理');
+                    // 递归处理content内的线上格式
+                    const recursiveResult = await QQ_ExtractAndProcessOnlineFormatFirst(cleanContent);
+                    if (recursiveResult.processed) {
+                        return { success: true };
+                    }
+                }
+                
+                // 作为纯互动内容处理
+                console.log('🎭 作为纯互动内容处理');
+                await QQ_SequentialTaskQueue.displayInteractiveInChat(cleanContent);
+                
+                return { success: true };
             }
             
             /**
